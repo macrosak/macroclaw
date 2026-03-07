@@ -43,7 +43,7 @@ export async function runClaude(
   const sessionFlag = knownSessions.has(sessionId)
     ? "--resume"
     : "--session-id";
-  const args = ["claude", "-p", sessionFlag, sessionId, "--json-schema", jsonSchema];
+  const args = ["claude", "-p", sessionFlag, sessionId, "--output-format", "json", "--json-schema", jsonSchema];
   if (model) args.push("--model", model);
   args.push(message);
 
@@ -71,7 +71,14 @@ export async function runClaude(
       const stdout = await new Response(proc.stdout).text();
       console.log(`[claude] Response (${stdout.length} chars):\n${stdout}`);
       try {
-        return JSON.parse(stdout) as ClaudeResponse;
+        const envelope = JSON.parse(stdout);
+        const duration = envelope.duration_ms ? `${(envelope.duration_ms / 1000).toFixed(1)}s` : "?";
+        const cost = envelope.total_cost_usd ? `$${envelope.total_cost_usd.toFixed(4)}` : "?";
+        console.log(`[claude] duration=${duration} cost=${cost}`);
+        if (envelope.structured_output) {
+          return envelope.structured_output as ClaudeResponse;
+        }
+        return { action: "send", message: envelope.result ?? stdout, reason: "no-structured-output" };
       } catch {
         return { action: "send", message: `[JSON Error] ${stdout}`, reason: "json-parse-failed" };
       }

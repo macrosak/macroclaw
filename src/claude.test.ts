@@ -2,7 +2,14 @@ import { describe, it, expect, mock, afterEach } from "bun:test";
 import { runClaude, newSessionId, type ClaudeResponse } from "./claude";
 
 function jsonResponse(action: "send" | "silent", message: string, reason: string): string {
-  return JSON.stringify({ action, message, reason });
+  return JSON.stringify({
+    type: "result",
+    subtype: "success",
+    duration_ms: 1234,
+    total_cost_usd: 0.05,
+    result: "",
+    structured_output: { action, message, reason },
+  });
 }
 
 const originalSpawn = Bun.spawn;
@@ -45,7 +52,7 @@ describe("runClaude", () => {
     const result = await runClaude("test message", sid, undefined, TEST_WORKSPACE);
     expect(result).toEqual({ action: "send", message: "Hello", reason: "user message" });
     expect(Bun.spawn).toHaveBeenCalledWith(
-      expect.arrayContaining(["claude", "-p", "--session-id", sid, "--json-schema"]),
+      expect.arrayContaining(["claude", "-p", "--session-id", sid, "--output-format", "json", "--json-schema"]),
       expect.objectContaining({ cwd: TEST_WORKSPACE, stdout: "pipe", stderr: "pipe" }),
     );
   });
@@ -60,7 +67,7 @@ describe("runClaude", () => {
     mockSpawn({ stdout: jsonResponse("send", "second", "ok"), exitCode: 0 });
     await runClaude("msg2", sid, undefined, TEST_WORKSPACE);
     expect(Bun.spawn).toHaveBeenCalledWith(
-      expect.arrayContaining(["claude", "-p", "--resume", sid, "--json-schema"]),
+      expect.arrayContaining(["claude", "-p", "--resume", sid, "--output-format", "json", "--json-schema"]),
       expect.objectContaining({ cwd: TEST_WORKSPACE, stdout: "pipe", stderr: "pipe" }),
     );
   });
@@ -96,7 +103,7 @@ describe("runClaude", () => {
     mockSpawn({ stdout: jsonResponse("send", "ok", "ok"), exitCode: 0 });
     await runClaude("msg", sid, "haiku", TEST_WORKSPACE);
     expect(Bun.spawn).toHaveBeenCalledWith(
-      expect.arrayContaining(["claude", "-p", "--session-id", sid, "--json-schema", "--model", "haiku", "msg"]),
+      expect.arrayContaining(["claude", "-p", "--session-id", sid, "--output-format", "json", "--json-schema", "--model", "haiku", "msg"]),
       expect.objectContaining({ cwd: TEST_WORKSPACE, stdout: "pipe", stderr: "pipe" }),
     );
   });
@@ -127,6 +134,14 @@ describe("runClaude", () => {
     mockSpawn({ stdout: jsonResponse("silent", "", "no new results"), exitCode: 0 });
     const result = await runClaude("check cron", sid, undefined, TEST_WORKSPACE);
     expect(result).toEqual({ action: "silent", message: "", reason: "no new results" });
+  });
+
+  it("falls back to result field when structured_output is missing", async () => {
+    const sid = uniqueSession();
+    const envelope = JSON.stringify({ type: "result", result: "plain text", duration_ms: 100, total_cost_usd: 0.01 });
+    mockSpawn({ stdout: envelope, exitCode: 0 });
+    const result = await runClaude("msg", sid, undefined, TEST_WORKSPACE);
+    expect(result).toEqual({ action: "send", message: "plain text", reason: "no-structured-output" });
   });
 
   it("returns JSON error fallback when stdout is not valid JSON", async () => {
