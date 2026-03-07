@@ -17,6 +17,12 @@ Your responses are delivered as messages in a chat interface. Keep them concise 
 const INTRO_FULL = `\
 ${INTRO_MINIMAL}
 
+## Message Formatting
+
+Your responses are sent via Telegram using HTML parse mode. \
+Use <b>, <i>, <code>, and <pre> tags for formatting when useful. \
+Escape literal <, >, and & characters as &lt;, &gt;, and &amp; in your output.
+
 ## System Architecture
 
 Macroclaw is a message bridge that connects you to a chat interface and scheduled tasks. \

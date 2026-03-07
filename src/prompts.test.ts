@@ -39,7 +39,14 @@ describe("prompts", () => {
     expect(prompt).toContain("30-minute timeout");
   });
 
-  it("no prompts contain personal names or specific chat platforms", () => {
+  it("INTRO_FULL prompts contain HTML formatting note, background agent does not", () => {
+    expect(PROMPT_USER_MESSAGE).toContain("HTML parse mode");
+    expect(PROMPT_CRON_EVENT).toContain("HTML parse mode");
+    expect(PROMPT_BACKGROUND_RESULT).toContain("HTML parse mode");
+    expect(promptBackgroundAgent("test")).not.toContain("HTML parse mode");
+  });
+
+  it("no prompts contain personal names", () => {
     const all = [
       PROMPT_USER_MESSAGE,
       PROMPT_CRON_EVENT,
@@ -49,7 +56,6 @@ describe("prompts", () => {
     for (const prompt of all) {
       expect(prompt).not.toContain("Alfread");
       expect(prompt).not.toContain("Michal");
-      expect(prompt).not.toContain("Telegram");
     }
   });
 });
