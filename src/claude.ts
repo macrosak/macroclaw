@@ -4,6 +4,8 @@ import { randomUUID } from "crypto";
 const TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const WORKSPACE = resolve(dirname(import.meta.dir), "..", "macroclaw-workspace");
 
+const knownSessions = new Set<string>();
+
 export async function runClaude(
   message: string,
   sessionId: string,
@@ -13,7 +15,11 @@ export async function runClaude(
   const env = { ...process.env };
   delete env.CLAUDECODE;
 
-  const args = ["claude", "-p", "--session-id", sessionId];
+  // First call for a session uses --session-id, subsequent calls use --resume
+  const sessionFlag = knownSessions.has(sessionId)
+    ? "--resume"
+    : "--session-id";
+  const args = ["claude", "-p", sessionFlag, sessionId];
   if (model) args.push("--model", model);
   args.push(message);
 
@@ -33,10 +39,18 @@ export async function runClaude(
     clearTimeout(timeout);
 
     if (exitCode === 0) {
+      knownSessions.add(sessionId);
       return await new Response(proc.stdout).text();
     }
 
     const stderr = await new Response(proc.stderr).text();
+
+    // If --session-id fails because session exists, retry with --resume
+    if (sessionFlag === "--session-id" && stderr.includes("already in use")) {
+      knownSessions.add(sessionId);
+      return runClaude(message, sessionId, model);
+    }
+
     return `[Error] Claude exited with code ${exitCode}:\n${stderr}`;
   } catch {
     clearTimeout(timeout);

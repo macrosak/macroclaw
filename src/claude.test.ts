@@ -26,28 +26,88 @@ function mockSpawn(opts: {
   return proc;
 }
 
+// Use unique session IDs per test to avoid knownSessions leaking between tests
+let testCounter = 0;
+function uniqueSession() {
+  return `test-session-${++testCounter}`;
+}
+
 describe("runClaude", () => {
-  it("returns stdout on successful execution", async () => {
-    mockSpawn({ stdout: "Hello from Claude", exitCode: 0 });
-    const result = await runClaude("test message", "test-session");
-    expect(result).toBe("Hello from Claude");
+  it("uses --session-id on first call", async () => {
+    const sid = uniqueSession();
+    mockSpawn({ stdout: "Hello", exitCode: 0 });
+    const result = await runClaude("test message", sid);
+    expect(result).toBe("Hello");
     expect(Bun.spawn).toHaveBeenCalledWith(
-      ["claude", "-p", "--session-id", "test-session", "test message"],
+      ["claude", "-p", "--session-id", sid, "test message"],
+      expect.objectContaining({ stdout: "pipe", stderr: "pipe" }),
+    );
+  });
+
+  it("uses --resume on subsequent calls", async () => {
+    const sid = uniqueSession();
+    // First call to mark session as known
+    mockSpawn({ stdout: "first", exitCode: 0 });
+    await runClaude("msg1", sid);
+
+    // Second call should use --resume
+    mockSpawn({ stdout: "second", exitCode: 0 });
+    await runClaude("msg2", sid);
+    expect(Bun.spawn).toHaveBeenCalledWith(
+      ["claude", "-p", "--resume", sid, "msg2"],
+      expect.objectContaining({ stdout: "pipe", stderr: "pipe" }),
+    );
+  });
+
+  it("retries with --resume when session already exists", async () => {
+    const sid = uniqueSession();
+    let callCount = 0;
+    Bun.spawn = mock((() => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          stdout: new Response("").body,
+          stderr: new Response("Session ID is already in use").body,
+          exited: Promise.resolve(1),
+          kill: mock(() => {}),
+        };
+      }
+      return {
+        stdout: new Response("retried ok").body,
+        stderr: new Response("").body,
+        exited: Promise.resolve(0),
+        kill: mock(() => {}),
+      };
+    }) as any);
+
+    const result = await runClaude("msg", sid);
+    expect(result).toBe("retried ok");
+    expect(callCount).toBe(2);
+  });
+
+  it("passes model flag when provided", async () => {
+    const sid = uniqueSession();
+    mockSpawn({ stdout: "ok", exitCode: 0 });
+    await runClaude("msg", sid, "haiku");
+    expect(Bun.spawn).toHaveBeenCalledWith(
+      ["claude", "-p", "--session-id", sid, "--model", "haiku", "msg"],
       expect.objectContaining({ stdout: "pipe", stderr: "pipe" }),
     );
   });
 
   it("returns error message on non-zero exit", async () => {
+    const sid = uniqueSession();
     mockSpawn({ stderr: "something went wrong", exitCode: 1 });
-    const result = await runClaude("bad message", "sess");
+    const result = await runClaude("bad message", sid);
     expect(result).toContain("[Error]");
     expect(result).toContain("something went wrong");
     expect(result).toContain("code 1");
   });
 
   it("returns timeout error when process exits with rejection", async () => {
+    const sid = uniqueSession();
     mockSpawn({ rejectExited: true });
-    const result = await runClaude("slow message", "sess");
+    const result = await runClaude("slow message", sid);
     expect(result).toContain("[Error]");
     expect(result).toContain("timed out");
   });
@@ -61,7 +121,7 @@ describe("runClaude", () => {
   });
 
   it("calls proc.kill() when timeout fires", async () => {
-    // Create a proc whose `exited` is controlled by us
+    const sid = uniqueSession();
     let rejectExited!: (err: Error) => void;
     const proc = {
       stdout: new Response("").body,
@@ -70,12 +130,10 @@ describe("runClaude", () => {
         rejectExited = reject;
       }),
       kill: mock(() => {
-        // When kill is called, reject the exited promise
         rejectExited(new Error("killed"));
       }),
     };
 
-    // Override setTimeout to fire immediately
     const origSetTimeout = globalThis.setTimeout;
     globalThis.setTimeout = ((fn: Function) => {
       fn();
@@ -83,9 +141,7 @@ describe("runClaude", () => {
     }) as any;
 
     Bun.spawn = mock((() => proc) as any);
-
-    const result = await runClaude("timeout test", "sess");
-
+    const result = await runClaude("timeout test", sid);
     globalThis.setTimeout = origSetTimeout;
 
     expect(proc.kill).toHaveBeenCalled();
