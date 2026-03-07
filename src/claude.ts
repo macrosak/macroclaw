@@ -1,4 +1,5 @@
 import { resolve, dirname } from "path";
+import { randomUUID } from "crypto";
 
 const TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const WORKSPACE = resolve(dirname(import.meta.dir), "..", "macroclaw-workspace");
@@ -12,7 +13,7 @@ export async function runClaude(
   delete env.CLAUDECODE;
 
   const proc = Bun.spawn(
-    ["claude", "-p", "--session", sessionId, message],
+    ["claude", "-p", "--session-id", sessionId, message],
     {
       cwd: WORKSPACE,
       env,
@@ -39,4 +40,8 @@ export async function runClaude(
     clearTimeout(timeout);
     return "[Error] Claude process timed out after 5 minutes.";
   }
+}
+
+export function newSessionId(): string {
+  return randomUUID();
 }

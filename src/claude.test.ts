@@ -1,5 +1,5 @@
 import { describe, it, expect, mock, afterEach } from "bun:test";
-import { runClaude } from "./claude";
+import { runClaude, newSessionId } from "./claude";
 
 const originalSpawn = Bun.spawn;
 
@@ -32,7 +32,7 @@ describe("runClaude", () => {
     const result = await runClaude("test message", "test-session");
     expect(result).toBe("Hello from Claude");
     expect(Bun.spawn).toHaveBeenCalledWith(
-      ["claude", "-p", "--session", "test-session", "test message"],
+      ["claude", "-p", "--session-id", "test-session", "test message"],
       expect.objectContaining({ stdout: "pipe", stderr: "pipe" }),
     );
   });
@@ -50,6 +50,14 @@ describe("runClaude", () => {
     const result = await runClaude("slow message", "sess");
     expect(result).toContain("[Error]");
     expect(result).toContain("timed out");
+  });
+
+  it("newSessionId returns a valid UUID", () => {
+    const id = newSessionId();
+    expect(id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    );
+    expect(newSessionId()).not.toBe(id);
   });
 
   it("calls proc.kill() when timeout fires", async () => {
