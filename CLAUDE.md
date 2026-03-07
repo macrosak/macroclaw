@@ -10,6 +10,12 @@ bun run dev        # Start with watch mode
 bun run start      # Start normally
 ```
 
+## Skills
+
+- **System skills** live in `skills/` in this repo — they document macroclaw features (e.g. cron management)
+- Run `bun run sync-skills` after changing system skills to deploy them to the workspace
+- **User skills** are created directly in the workspace's `.claude/skills/` — the sync script never touches them
+
 ## Conventions
 
 - Keep everything lean — this is a personal project
