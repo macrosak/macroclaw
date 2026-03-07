@@ -2,12 +2,18 @@
 
 Telegram-to-Claude-Code bridge. Bun + Grammy.
 
+## Design Principle
+
+**Workspace-first.** Anything achievable within the workspace (new skills, instructions in workspace CLAUDE.md, cron jobs, memory files, etc.) should be done there. This project should only contain features that are not achievable from within the workspace — the bridge runtime, Telegram integration, cron scheduler, and Claude Code orchestration.
+
 ## Commands
 
 ```bash
 bun install        # Install dependencies
 bun run dev        # Start with watch mode
 bun run start      # Start normally
+bun test           # Run tests (100% coverage enforced)
+bun run sync-skills # Deploy system skills to workspace
 ```
 
 ## Skills
