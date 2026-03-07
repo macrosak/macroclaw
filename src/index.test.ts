@@ -1,7 +1,7 @@
-import { describe, it, expect, mock, spyOn } from "bun:test";
-import { createApp, requireEnv, type AppConfig } from "./index";
+import { describe, expect, it, mock, spyOn } from "bun:test";
 import type { ClaudeResponse } from "./claude";
-import { PROMPT_USER_MESSAGE, PROMPT_CRON_EVENT, PROMPT_BACKGROUND_RESULT } from "./prompts";
+import { type AppConfig, createApp, requireEnv } from "./index";
+import { PROMPT_BACKGROUND_RESULT, PROMPT_CRON_EVENT, PROMPT_USER_MESSAGE } from "./prompts";
 
 // Mock Grammy Bot
 mock.module("grammy", () => ({
@@ -299,7 +299,7 @@ describe("createApp", () => {
     it("re-queues user message with [Timeout] prefix on timeout", async () => {
       let callCount = 0;
       const config = makeConfig({
-        runClaude: mock(async (msg: string): Promise<ClaudeResponse> => {
+        runClaude: mock(async (_msg: string): Promise<ClaudeResponse> => {
           callCount++;
           if (callCount === 1) {
             return { action: "send", message: "[Error] timed out", reason: "timeout" };

@@ -1,5 +1,5 @@
-import { describe, it, expect, mock, afterEach } from "bun:test";
-import { runClaude, newSessionId, type ClaudeResponse } from "./claude";
+import { afterEach, describe, expect, it, mock } from "bun:test";
+import { newSessionId, runClaude } from "./claude";
 
 function jsonResponse(action: "send" | "silent", message: string, reason: string): string {
   return JSON.stringify({

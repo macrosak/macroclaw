@@ -35,7 +35,7 @@ export async function sendResponse(
       continue;
     }
 
-    const candidate = chunk ? chunk + "\n" + line : line;
+    const candidate = chunk ? `${chunk}\n${line}` : line;
     if (candidate.length > MAX_LENGTH) {
       await bot.api.sendMessage(chatId, chunk, opts);
       chunk = line;

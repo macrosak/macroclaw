@@ -1,8 +1,8 @@
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
-  PROMPT_USER_MESSAGE,
-  PROMPT_CRON_EVENT,
   PROMPT_BACKGROUND_RESULT,
+  PROMPT_CRON_EVENT,
+  PROMPT_USER_MESSAGE,
   promptBackgroundAgent,
 } from "./prompts";
 

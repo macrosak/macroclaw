@@ -1,6 +1,6 @@
-import { resolve, dirname, join } from "path";
-import { existsSync, readdirSync, cpSync } from "fs";
-import { createApp, requireEnv, type AppConfig } from "./index";
+import { cpSync, existsSync, readdirSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { type AppConfig, createApp, requireEnv } from "./index";
 
 const defaultWorkspace = resolve(process.env.HOME || "~", ".macroclaw-workspace");
 const workspace = process.env.WORKSPACE || defaultWorkspace;

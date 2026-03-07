@@ -1,5 +1,5 @@
-import { resolve, dirname, join } from "path";
-import { cpSync, readdirSync, mkdirSync } from "fs";
+import { cpSync, mkdirSync, readdirSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 
 const repoRoot = resolve(dirname(import.meta.dir));
 const defaultWorkspace = resolve(process.env.HOME || "~", ".macroclaw-workspace");

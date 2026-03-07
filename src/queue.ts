@@ -25,7 +25,7 @@ export function createQueue() {
       processing = true;
 
       while (items.length > 0) {
-        const item = items.shift()!;
+        const item = items.shift() as QueueItem;
         try {
           await handler(item);
         } catch (err) {

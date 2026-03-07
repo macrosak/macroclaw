@@ -1,4 +1,4 @@
-import { randomUUID } from "crypto";
+import { randomUUID } from "node:crypto";
 
 const knownSessions = new Set<string>();
 
@@ -74,7 +74,7 @@ export async function runClaude(
   if (timeout) clearTimeout(timeout);
 
   if (timedOut) {
-    const secs = Math.round(timeoutMs! / 1000);
+    const secs = Math.round((timeoutMs as number) / 1000);
     return { action: "send", message: `[Error] Claude process timed out after ${secs}s.`, reason: "timeout" };
   }
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, mock } from "bun:test";
+import { describe, expect, it, mock } from "bun:test";
 import { createBackgroundManager } from "./background";
 import type { ClaudeResponse } from "./claude";
 

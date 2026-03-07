@@ -1,5 +1,5 @@
-import { runClaude, newSessionId } from "./claude";
-import { promptBackgroundAgent, BG_TIMEOUT } from "./prompts";
+import { newSessionId, runClaude } from "./claude";
+import { BG_TIMEOUT, promptBackgroundAgent } from "./prompts";
 
 interface BackgroundInfo {
   name: string;

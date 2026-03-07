@@ -1,9 +1,9 @@
-import { createBot, sendResponse } from "./telegram";
-import { runClaude, type ClaudeResponse } from "./claude";
-import { createQueue } from "./queue";
-import { startCron } from "./cron";
 import { createBackgroundManager } from "./background";
-import { PROMPT_USER_MESSAGE, PROMPT_CRON_EVENT, PROMPT_BACKGROUND_RESULT, MAIN_TIMEOUT, CRON_TIMEOUT } from "./prompts";
+import { type ClaudeResponse, runClaude } from "./claude";
+import { startCron } from "./cron";
+import { CRON_TIMEOUT, MAIN_TIMEOUT, PROMPT_BACKGROUND_RESULT, PROMPT_CRON_EVENT, PROMPT_USER_MESSAGE } from "./prompts";
+import { createQueue } from "./queue";
+import { createBot, sendResponse } from "./telegram";
 
 export interface AppConfig {
   botToken: string;

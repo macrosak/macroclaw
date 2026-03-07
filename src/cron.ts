@@ -1,5 +1,5 @@
-import { readFileSync, writeFileSync } from "fs";
-import { join } from "path";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { CronExpressionParser } from "cron-parser";
 
 interface CronJob {
@@ -36,9 +36,9 @@ export function startCron(workspace: string, queue: Queue): () => void {
     try {
       const raw = readFileSync(cronPath, "utf-8");
       config = JSON.parse(raw);
-    } catch (err: any) {
-      if (err?.code === "ENOENT") return; // no config yet
-      console.warn("[cron] Failed to read cron.json:", err?.message ?? err);
+    } catch (err) {
+      if (err instanceof Error && "code" in err && err.code === "ENOENT") return;
+      console.warn("[cron] Failed to read cron.json:", err instanceof Error ? err.message : err);
       return;
     }
 
@@ -67,8 +67,8 @@ export function startCron(workspace: string, queue: Queue): () => void {
             firedNonRecurring.push(i);
           }
         }
-      } catch (err: any) {
-        console.warn(`[cron] Invalid cron expression "${job.cron}":`, err?.message ?? err);
+      } catch (err) {
+        console.warn(`[cron] Invalid cron expression "${job.cron}":`, err instanceof Error ? err.message : err);
       }
     }
 
@@ -78,9 +78,9 @@ export function startCron(workspace: string, queue: Queue): () => void {
         config.jobs.splice(firedNonRecurring[i], 1);
       }
       try {
-        writeFileSync(cronPath, JSON.stringify(config, null, 2) + "\n");
-      } catch (err: any) {
-        console.warn("[cron] Failed to write cron.json:", err?.message ?? err);
+        writeFileSync(cronPath, `${JSON.stringify(config, null, 2)}\n`);
+      } catch (err) {
+        console.warn("[cron] Failed to write cron.json:", err instanceof Error ? err.message : err);
       }
     }
   };

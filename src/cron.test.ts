@@ -1,6 +1,6 @@
-import { describe, it, expect, mock, spyOn, beforeEach, afterEach } from "bun:test";
-import { mkdirSync, writeFileSync, readFileSync, rmSync } from "fs";
-import { join } from "path";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { startCron } from "./cron";
 
 const TEST_DIR = join(import.meta.dir, "..", ".test-workspace-cron");
@@ -246,7 +246,7 @@ describe("startCron", () => {
     });
 
     // Make cron.json read-only so writeFileSync fails
-    const { chmodSync } = require("fs");
+    const { chmodSync } = require("node:fs");
     chmodSync(CRON_FILE, 0o444);
 
     const warnSpy = spyOn(console, "warn").mockImplementation(() => {});

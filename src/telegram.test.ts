@@ -1,4 +1,4 @@
-import { describe, it, expect, mock } from "bun:test";
+import { describe, expect, it, mock } from "bun:test";
 import { createBot, sendResponse } from "./telegram";
 
 // Mock bot API
