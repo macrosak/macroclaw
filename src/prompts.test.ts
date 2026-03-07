@@ -11,6 +11,7 @@ describe("prompts", () => {
     expect(PROMPT_USER_MESSAGE).toContain("macroclaw");
     expect(PROMPT_USER_MESSAGE).toContain("Background Agents");
     expect(PROMPT_USER_MESSAGE).toContain("Cron System");
+    expect(PROMPT_USER_MESSAGE).toContain("Timeouts");
     expect(PROMPT_USER_MESSAGE).toContain("direct message from the user");
   });
 
@@ -35,6 +36,7 @@ describe("prompts", () => {
     // Should NOT contain full intro sections
     expect(prompt).not.toContain("Cron System");
     expect(prompt).not.toContain("Background Agents");
+    expect(prompt).toContain("30-minute timeout");
   });
 
   it("no prompts contain personal names or specific chat platforms", () => {

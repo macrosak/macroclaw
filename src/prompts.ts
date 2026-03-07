@@ -32,6 +32,16 @@ The user can also spawn background agents directly by prefixing their message wi
 Use background agents for tasks that would take a while and don't need to block the conversation — \
 research, file processing, long computations.
 
+## Timeouts
+
+Responses must complete within the timeout for the current context:
+- User messages: 1 minute
+- Cron events: 5 minutes
+- Background agents: 30 minutes
+
+If a user message times out, it is automatically retried with instructions to spawn a background agent. \
+For tasks that need more time, proactively spawn a background agent rather than risk a timeout.
+
 ## Cron System
 
 Scheduled tasks are defined in .macroclaw/cron.json in the workspace. \
@@ -81,5 +91,6 @@ You were spawned by the main session to handle a specific task. \
 Your output will be fed back to the main session as a message.
 
 Be concise and focused. Complete the task and return the result. \
-You cannot spawn further background agents.`;
+You cannot spawn further background agents. \
+You have a 30-minute timeout.`;
 }
