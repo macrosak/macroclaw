@@ -13,6 +13,7 @@ mock.module("grammy", () => ({
     api = {
       sendMessage: mock(async () => {}),
       sendChatAction: mock(async () => {}),
+      setMyCommands: mock(async () => {}),
     };
 
     constructor(token: string) {
@@ -365,6 +366,18 @@ describe("createApp", () => {
       expect(consoleSpy).toHaveBeenCalledWith("Authorized chat: 12345");
       expect(consoleSpy).toHaveBeenCalledWith("Session: test-session");
       consoleSpy.mockRestore();
+    });
+
+    it("registers commands with Telegram on start", () => {
+      const app = createApp(makeConfig());
+      const bot = app.bot as any;
+
+      app.start();
+      expect(bot.api.setMyCommands).toHaveBeenCalledWith([
+        { command: "chatid", description: "Show current chat ID" },
+        { command: "session", description: "Show current session ID" },
+        { command: "bg", description: "List background agents" },
+      ]);
     });
   });
 });

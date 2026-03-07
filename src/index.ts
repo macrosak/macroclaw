@@ -102,6 +102,11 @@ export function createApp(config: AppConfig) {
     start() {
       console.log("Starting macroclaw...");
       startCron(config.workspace, queue);
+      bot.api.setMyCommands([
+        { command: "chatid", description: "Show current chat ID" },
+        { command: "session", description: "Show current session ID" },
+        { command: "bg", description: "List background agents" },
+      ]).catch((err) => console.error("Failed to set commands:", err));
       bot.start({
         onStart: (botInfo) => {
           console.log(`Bot connected: @${botInfo.username}`);
