@@ -101,7 +101,8 @@ describe("createApp", () => {
       expect(bot.api.sendMessage).toHaveBeenCalled();
     });
 
-    it("ignores messages from unauthorized chats", async () => {
+    it("ignores messages from unauthorized chats and logs chat id", async () => {
+      const consoleSpy = spyOn(console, "log").mockImplementation(() => {});
       const config = makeConfig();
       const app = createApp(config);
       const bot = app.bot as any;
@@ -111,6 +112,8 @@ describe("createApp", () => {
       await new Promise((r) => setTimeout(r, 50));
 
       expect(config.runClaude).not.toHaveBeenCalled();
+      expect(consoleSpy).toHaveBeenCalledWith("[unauthorized] chat_id=99999");
+      consoleSpy.mockRestore();
     });
 
     it("ignores commands starting with /", async () => {

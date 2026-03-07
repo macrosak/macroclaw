@@ -40,7 +40,10 @@ export function createApp(config: AppConfig) {
   });
 
   bot.on("message:text", (ctx) => {
-    if (ctx.chat.id.toString() !== config.authorizedChatId) return;
+    if (ctx.chat.id.toString() !== config.authorizedChatId) {
+      console.log(`[unauthorized] chat_id=${ctx.chat.id}`);
+      return;
+    }
     if (ctx.message.text.startsWith("/")) return;
 
     queue.push({ message: ctx.message.text });
