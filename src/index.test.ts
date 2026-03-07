@@ -63,11 +63,12 @@ describe("createApp", () => {
     expect(bot.filterHandlers.has("message:text")).toBe(true);
   });
 
-  it("registers chatid and session commands", () => {
+  it("registers chatid, session, and bg commands", () => {
     const app = createApp(makeConfig());
     const bot = app.bot as any;
     expect(bot.commandHandlers.has("chatid")).toBe(true);
     expect(bot.commandHandlers.has("session")).toBe(true);
+    expect(bot.commandHandlers.has("bg")).toBe(true);
   });
 
   it("registers error handler", () => {
@@ -162,6 +163,86 @@ describe("createApp", () => {
       consoleSpy.mockRestore();
     });
 
+    it("spawns background agent when action is background", async () => {
+      const consoleSpy = spyOn(console, "log").mockImplementation(() => {});
+      let callCount = 0;
+      const config = makeConfig({
+        runClaude: mock(async (): Promise<ClaudeResponse> => {
+          callCount++;
+          if (callCount === 1) {
+            return { action: "background", message: "research this", reason: "needs research", name: "research" };
+          }
+          // The background agent's call
+          return { action: "send", message: "research result", reason: "done" };
+        }),
+      });
+      const app = createApp(config);
+      const bot = app.bot as any;
+      const handler = bot.filterHandlers.get("message:text")![0];
+
+      handler({ chat: { id: 12345 }, message: { text: "hello" } });
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Main session got the background response and confirmed to user
+      const sendCalls = (bot.api.sendMessage as any).mock.calls;
+      const texts = sendCalls.map((c: any) => c[1]);
+      expect(texts).toContain('Background agent "research" started.');
+
+      // Background agent result should be fed back into queue
+      await new Promise((r) => setTimeout(r, 100));
+      expect(config.runClaude).toHaveBeenCalledTimes(3); // 1 main + 1 bg agent + 1 bg result fed back
+      consoleSpy.mockRestore();
+    });
+
+    it("spawns background agent with unnamed when name is missing", async () => {
+      const consoleSpy = spyOn(console, "log").mockImplementation(() => {});
+      let callCount = 0;
+      const config = makeConfig({
+        runClaude: mock(async (): Promise<ClaudeResponse> => {
+          callCount++;
+          if (callCount === 1) {
+            return { action: "background", message: "do something", reason: "bg" };
+          }
+          return { action: "send", message: "done", reason: "ok" };
+        }),
+      });
+      const app = createApp(config);
+      const bot = app.bot as any;
+      const handler = bot.filterHandlers.get("message:text")![0];
+
+      handler({ chat: { id: 12345 }, message: { text: "hello" } });
+      await new Promise((r) => setTimeout(r, 50));
+
+      const sendCalls = (bot.api.sendMessage as any).mock.calls;
+      const texts = sendCalls.map((c: any) => c[1]);
+      expect(texts).toContain('Background agent "unnamed" started.');
+      consoleSpy.mockRestore();
+    });
+
+    it("handles bg: prefix from Telegram", async () => {
+      const consoleSpy = spyOn(console, "log").mockImplementation(() => {});
+      // Never-resolving mock so bg agent stays "running" and doesn't feed back
+      const config = makeConfig({
+        runClaude: mock(() => new Promise<ClaudeResponse>(() => {})),
+      });
+      const app = createApp(config);
+      const bot = app.bot as any;
+      const handler = bot.filterHandlers.get("message:text")![0];
+      const ctx = {
+        chat: { id: 12345 },
+        message: { text: "bg: research pricing" },
+        reply: mock(() => {}),
+      };
+
+      handler(ctx);
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Should NOT go through main queue — only the bg agent's runClaude call
+      expect(config.runClaude).toHaveBeenCalledTimes(1);
+      expect(ctx.reply).toHaveBeenCalledWith('Background agent "research-pricing" started.');
+      consoleSpy.mockRestore();
+    });
+
     it("sends error wrapped in ClaudeResponse", async () => {
       const config = makeConfig({
         runClaude: mock(async (): Promise<ClaudeResponse> => ({ action: "send", message: "[Error] Claude exited with code 1:\nspawn failed", reason: "process-error" })),
@@ -199,6 +280,45 @@ describe("createApp", () => {
 
       handler(ctx);
       expect(ctx.reply).toHaveBeenCalledWith("Session: `test-session`", { parse_mode: "Markdown" });
+    });
+
+    it("/bg shows no agents when none are running", () => {
+      const app = createApp(makeConfig());
+      const bot = app.bot as any;
+      const handler = bot.commandHandlers.get("bg")!;
+      const ctx = { reply: mock(() => {}) };
+
+      handler(ctx);
+      expect(ctx.reply).toHaveBeenCalledWith("No background agents running.");
+    });
+
+    it("/bg lists active background agents", async () => {
+      const consoleSpy = spyOn(console, "log").mockImplementation(() => {});
+      // runClaude that never resolves (agent stays active)
+      const config = makeConfig({
+        runClaude: mock(() => new Promise<ClaudeResponse>(() => {})),
+      });
+      const app = createApp(config);
+      const bot = app.bot as any;
+      const msgHandler = bot.filterHandlers.get("message:text")![0];
+
+      // Spawn a bg agent via bg: prefix
+      const ctx = {
+        chat: { id: 12345 },
+        message: { text: "bg: long task" },
+        reply: mock(() => {}),
+      };
+      msgHandler(ctx);
+      await new Promise((r) => setTimeout(r, 10));
+
+      const bgHandler = bot.commandHandlers.get("bg")!;
+      const bgCtx = { reply: mock(() => {}) };
+      bgHandler(bgCtx);
+
+      const reply = (bgCtx.reply as any).mock.calls[0][0];
+      expect(reply).toContain("long-task");
+      expect(reply).toMatch(/\d+s/);
+      consoleSpy.mockRestore();
     });
   });
 

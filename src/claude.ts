@@ -5,9 +5,10 @@ const TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const knownSessions = new Set<string>();
 
 export interface ClaudeResponse {
-  action: "send" | "silent";
+  action: "send" | "silent" | "background";
   message: string;
   reason: string;
+  name?: string;
 }
 
 const jsonSchema = JSON.stringify({
@@ -15,11 +16,15 @@ const jsonSchema = JSON.stringify({
   properties: {
     action: {
       type: "string",
-      enum: ["send", "silent"],
+      enum: ["send", "silent", "background"],
     },
     message: {
       type: "string",
-      description: "The message to send to Telegram",
+      description: "The message to send to Telegram, or the prompt for background agents",
+    },
+    name: {
+      type: "string",
+      description: "Label for background agent (only used when action is background)",
     },
     reason: {
       type: "string",

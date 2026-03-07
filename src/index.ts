@@ -2,6 +2,7 @@ import { createBot, sendResponse } from "./telegram";
 import { runClaude, type ClaudeResponse } from "./claude";
 import { createQueue } from "./queue";
 import { startCron } from "./cron";
+import { createBackgroundManager } from "./background";
 
 export interface AppConfig {
   botToken: string;
@@ -25,6 +26,7 @@ export function createApp(config: AppConfig) {
   const bot = createBot(config.botToken);
   const queue = createQueue();
   const claude = config.runClaude ?? runClaude;
+  const background = createBackgroundManager(claude);
 
   queue.setHandler(async (item) => {
     console.log(`[incoming] ${item.message}`);
@@ -32,7 +34,11 @@ export function createApp(config: AppConfig) {
     const model = item.model ?? config.model;
     const response = await claude(item.message, config.sessionId, model, config.workspace);
     console.log(`[response] action=${response.action} reason=${response.reason} message=${response.message}`);
-    if (response.action === "send") {
+    if (response.action === "background") {
+      const name = response.name || "unnamed";
+      background.spawn(name, response.message, model, config.workspace, queue);
+      await sendResponse(bot, config.authorizedChatId, `Background agent "${name}" started.`);
+    } else if (response.action === "send") {
       await sendResponse(bot, config.authorizedChatId, response.message || "[No output]");
     } else {
       console.log(`[silent] ${response.message || "(no message)"}`);
@@ -46,6 +52,15 @@ export function createApp(config: AppConfig) {
     }
     if (ctx.message.text.startsWith("/")) return;
 
+    const bgMatch = ctx.message.text.match(/^bg:\s*(.+)/s);
+    if (bgMatch) {
+      const prompt = bgMatch[1].trim();
+      const name = prompt.slice(0, 30).replace(/\s+/g, "-");
+      background.spawn(name, prompt, config.model, config.workspace, queue);
+      ctx.reply(`Background agent "${name}" started.`);
+      return;
+    }
+
     queue.push({ message: ctx.message.text });
   });
 
@@ -55,6 +70,19 @@ export function createApp(config: AppConfig) {
 
   bot.command("session", (ctx) => {
     ctx.reply(`Session: \`${config.sessionId}\``, { parse_mode: "Markdown" });
+  });
+
+  bot.command("bg", (ctx) => {
+    const agents = background.list();
+    if (agents.length === 0) {
+      ctx.reply("No background agents running.");
+      return;
+    }
+    const lines = agents.map((a) => {
+      const elapsed = Math.round((Date.now() - a.startTime.getTime()) / 1000);
+      return `- ${a.name} (${elapsed}s)`;
+    });
+    ctx.reply(lines.join("\n"));
   });
 
   bot.catch((err) => {
