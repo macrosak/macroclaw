@@ -3,11 +3,11 @@ import { createBot, sendResponse } from "./telegram";
 
 // Mock bot API
 function mockBot() {
-  const calls: { chatId: string; text: string }[] = [];
+  const calls: { chatId: string; text: string; opts?: any }[] = [];
   return {
     api: {
-      sendMessage: mock(async (chatId: string, text: string) => {
-        calls.push({ chatId, text });
+      sendMessage: mock(async (chatId: string, text: string, opts?: any) => {
+        calls.push({ chatId, text, opts });
       }),
     },
     calls,
@@ -28,7 +28,7 @@ describe("sendResponse", () => {
     const bot = mockBot();
     await sendResponse(bot, "123", "Hello");
     expect(bot.api.sendMessage).toHaveBeenCalledTimes(1);
-    expect(bot.calls[0]).toEqual({ chatId: "123", text: "Hello" });
+    expect(bot.calls[0]).toEqual({ chatId: "123", text: "Hello", opts: { parse_mode: "HTML" } });
   });
 
   it("sends messages at exactly 4096 chars in a single call", async () => {

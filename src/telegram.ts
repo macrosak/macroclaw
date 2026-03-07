@@ -11,8 +11,10 @@ export async function sendResponse(
   chatId: string,
   text: string,
 ): Promise<void> {
+  const opts = { parse_mode: "HTML" as const };
+
   if (text.length <= MAX_LENGTH) {
-    await bot.api.sendMessage(chatId, text);
+    await bot.api.sendMessage(chatId, text, opts);
     return;
   }
 
@@ -24,18 +26,18 @@ export async function sendResponse(
     // If a single line exceeds MAX_LENGTH, hard-split it
     if (line.length > MAX_LENGTH) {
       if (chunk) {
-        await bot.api.sendMessage(chatId, chunk);
+        await bot.api.sendMessage(chatId, chunk, opts);
         chunk = "";
       }
       for (let i = 0; i < line.length; i += MAX_LENGTH) {
-        await bot.api.sendMessage(chatId, line.slice(i, i + MAX_LENGTH));
+        await bot.api.sendMessage(chatId, line.slice(i, i + MAX_LENGTH), opts);
       }
       continue;
     }
 
     const candidate = chunk ? chunk + "\n" + line : line;
     if (candidate.length > MAX_LENGTH) {
-      await bot.api.sendMessage(chatId, chunk);
+      await bot.api.sendMessage(chatId, chunk, opts);
       chunk = line;
     } else {
       chunk = candidate;
@@ -43,6 +45,6 @@ export async function sendResponse(
   }
 
   if (chunk) {
-    await bot.api.sendMessage(chatId, chunk);
+    await bot.api.sendMessage(chatId, chunk, opts);
   }
 }
