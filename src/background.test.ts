@@ -122,6 +122,23 @@ describe("createBackgroundManager", () => {
     expect(queue.items[0].message).toBe("[Background: task-b] b done");
   });
 
+  it("passes 30-minute timeout to runClaude", async () => {
+    const runClaude = mock(() =>
+      Promise.resolve<ClaudeResponse>({
+        action: "send",
+        message: "done",
+        reason: "ok",
+      }),
+    );
+    const queue = mockQueue();
+    const mgr = createBackgroundManager(runClaude);
+
+    mgr.spawn("bg-task", "do work", undefined, "/workspace", queue);
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(runClaude.mock.calls[0][5]).toBe(1_800_000);
+  });
+
   it("list returns empty array when no agents are running", () => {
     const mgr = createBackgroundManager(mock());
     expect(mgr.list()).toEqual([]);
