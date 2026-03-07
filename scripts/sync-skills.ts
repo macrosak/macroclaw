@@ -2,7 +2,7 @@ import { resolve, dirname, join } from "path";
 import { cpSync, readdirSync, mkdirSync } from "fs";
 
 const repoRoot = resolve(dirname(import.meta.dir));
-const defaultWorkspace = resolve(repoRoot, "..", "macroclaw-workspace");
+const defaultWorkspace = resolve(process.env.HOME || "~", ".macroclaw-workspace");
 const workspace = process.env.WORKSPACE
   ? resolve(process.env.WORKSPACE)
   : defaultWorkspace;

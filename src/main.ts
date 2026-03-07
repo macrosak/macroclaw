@@ -1,7 +1,7 @@
 import { resolve, dirname } from "path";
 import { createApp, requireEnv, type AppConfig } from "./index";
 
-const defaultWorkspace = resolve(dirname(import.meta.dir), "..", "macroclaw-workspace");
+const defaultWorkspace = resolve(process.env.HOME || "~", ".macroclaw-workspace");
 
 const config: AppConfig = {
   botToken: requireEnv("TELEGRAM_BOT_TOKEN"),
