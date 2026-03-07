@@ -1,5 +1,5 @@
 import { createBot, sendResponse } from "./telegram";
-import { runClaude } from "./claude";
+import { runClaude, type ClaudeResponse } from "./claude";
 import { createQueue } from "./queue";
 import { startCron } from "./cron";
 
@@ -9,7 +9,7 @@ export interface AppConfig {
   sessionId: string;
   workspace: string;
   model?: string;
-  runClaude?: (message: string, sessionId: string, model: string | undefined, workspace: string) => Promise<string>;
+  runClaude?: (message: string, sessionId: string, model: string | undefined, workspace: string) => Promise<ClaudeResponse>;
 }
 
 export function requireEnv(name: string): string {
@@ -27,14 +27,13 @@ export function createApp(config: AppConfig) {
   const claude = config.runClaude ?? runClaude;
 
   queue.setHandler(async (item) => {
-    try {
-      await bot.api.sendChatAction(config.authorizedChatId, "typing");
-      const model = item.model ?? config.model;
-      const response = await claude(item.message, config.sessionId, model, config.workspace);
-      await sendResponse(bot, config.authorizedChatId, response || "[No output]");
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : "Unknown error";
-      await sendResponse(bot, config.authorizedChatId, `[Error] ${errMsg}`);
+    await bot.api.sendChatAction(config.authorizedChatId, "typing");
+    const model = item.model ?? config.model;
+    const response = await claude(item.message, config.sessionId, model, config.workspace);
+    if (response.action === "send") {
+      await sendResponse(bot, config.authorizedChatId, response.message || "[No output]");
+    } else {
+      console.log(`[silent] ${response.reason}`);
     }
   });
 
