@@ -117,18 +117,6 @@ describe("createApp", () => {
       consoleSpy.mockRestore();
     });
 
-    it("ignores commands starting with /", async () => {
-      const config = makeConfig();
-      const app = createApp(config);
-      const bot = app.bot as any;
-      const handler = bot.filterHandlers.get("message:text")![0];
-
-      handler({ chat: { id: 12345 }, message: { text: "/start" } });
-      await new Promise((r) => setTimeout(r, 50));
-
-      expect(config.runClaude).not.toHaveBeenCalled();
-    });
-
     it("sends [No output] for empty claude response", async () => {
       const config = makeConfig({
         runClaude: mock(async (): Promise<ClaudeResponse> => ({ action: "send", message: "", reason: "empty" })),

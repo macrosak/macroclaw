@@ -50,12 +50,35 @@ export function createApp(config: AppConfig) {
     }
   });
 
+  bot.command("chatid", (ctx) => {
+    console.log("[command] /chatid");
+    ctx.reply(`Chat ID: \`${ctx.chat.id}\``, { parse_mode: "Markdown" });
+  });
+
+  bot.command("session", (ctx) => {
+    console.log("[command] /session");
+    ctx.reply(`Session: \`${config.sessionId}\``, { parse_mode: "Markdown" });
+  });
+
+  bot.command("bg", (ctx) => {
+    console.log("[command] /bg");
+    const agents = background.list();
+    if (agents.length === 0) {
+      ctx.reply("No background agents running.");
+      return;
+    }
+    const lines = agents.map((a) => {
+      const elapsed = Math.round((Date.now() - a.startTime.getTime()) / 1000);
+      return `- ${a.name} (${elapsed}s)`;
+    });
+    ctx.reply(lines.join("\n"));
+  });
+
   bot.on("message:text", (ctx) => {
     if (ctx.chat.id.toString() !== config.authorizedChatId) {
       console.log(`[unauthorized] chat_id=${ctx.chat.id}`);
       return;
     }
-    if (ctx.message.text.startsWith("/")) return;
 
     const bgMatch = ctx.message.text.match(/^bg:\s*(.+)/s);
     if (bgMatch) {
@@ -67,27 +90,6 @@ export function createApp(config: AppConfig) {
     }
 
     queue.push({ message: ctx.message.text });
-  });
-
-  bot.command("chatid", (ctx) => {
-    ctx.reply(`Chat ID: \`${ctx.chat.id}\``, { parse_mode: "Markdown" });
-  });
-
-  bot.command("session", (ctx) => {
-    ctx.reply(`Session: \`${config.sessionId}\``, { parse_mode: "Markdown" });
-  });
-
-  bot.command("bg", (ctx) => {
-    const agents = background.list();
-    if (agents.length === 0) {
-      ctx.reply("No background agents running.");
-      return;
-    }
-    const lines = agents.map((a) => {
-      const elapsed = Math.round((Date.now() - a.startTime.getTime()) / 1000);
-      return `- ${a.name} (${elapsed}s)`;
-    });
-    ctx.reply(lines.join("\n"));
   });
 
   bot.catch((err) => {
