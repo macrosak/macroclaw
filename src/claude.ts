@@ -23,6 +23,10 @@ export async function runClaude(
   if (model) args.push("--model", model);
   args.push(message);
 
+  // Log the full command so it can be copy-pasted
+  const shellCmd = args.map(a => a.includes(" ") ? `'${a}'` : a).join(" ");
+  console.log(`[claude] $ ${shellCmd}`);
+
   const proc = Bun.spawn(args, {
     cwd: WORKSPACE,
     env,
@@ -40,10 +44,13 @@ export async function runClaude(
 
     if (exitCode === 0) {
       knownSessions.add(sessionId);
-      return await new Response(proc.stdout).text();
+      const stdout = await new Response(proc.stdout).text();
+      console.log(`[claude] Response (${stdout.length} chars):\n${stdout}`);
+      return stdout;
     }
 
     const stderr = await new Response(proc.stderr).text();
+    console.log(`[claude] Error (exit ${exitCode}):\n${stderr}`);
 
     // If --session-id fails because session exists, retry with --resume
     if (sessionFlag === "--session-id" && stderr.includes("already in use")) {
