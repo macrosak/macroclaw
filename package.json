@@ -7,6 +7,7 @@
     "start": "bun run src/main.ts",
     "dev": "bun run --watch src/main.ts",
     "lint": "biome check",
+    "lint:fix": "biome check --fix --unsafe",
     "test": "bun test --coverage",
     "test:coverage": "bun test --coverage",
     "sync-skills": "bun run scripts/sync-skills.ts",
