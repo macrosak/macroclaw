@@ -89,7 +89,7 @@ describe("createApp", () => {
       handler({ chat: { id: 12345 }, message: { text: "hello" } });
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(config.runClaude).toHaveBeenCalledWith("hello", "test-session", undefined, "/tmp/macroclaw-test-workspace", PROMPT_USER_MESSAGE);
+      expect(config.runClaude).toHaveBeenCalledWith("hello", "test-session", undefined, "/tmp/macroclaw-test-workspace", PROMPT_USER_MESSAGE, 60_000);
     });
 
     it("passes model override from queue item", async () => {
@@ -99,7 +99,7 @@ describe("createApp", () => {
       app.queue.push({ message: "cron msg", model: "haiku" });
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(config.runClaude).toHaveBeenCalledWith("cron msg", "test-session", "haiku", "/tmp/macroclaw-test-workspace", PROMPT_USER_MESSAGE);
+      expect(config.runClaude).toHaveBeenCalledWith("cron msg", "test-session", "haiku", "/tmp/macroclaw-test-workspace", PROMPT_USER_MESSAGE, 60_000);
       const bot = app.bot as any;
       expect(bot.api.sendMessage).toHaveBeenCalled();
     });
@@ -246,6 +246,7 @@ describe("createApp", () => {
         undefined,
         "/tmp/macroclaw-test-workspace",
         PROMPT_CRON_EVENT,
+        300_000,
       );
     });
 
@@ -262,7 +263,126 @@ describe("createApp", () => {
         undefined,
         "/tmp/macroclaw-test-workspace",
         PROMPT_BACKGROUND_RESULT,
+        60_000,
       );
+    });
+
+    it("passes MAIN_TIMEOUT for user messages", async () => {
+      const config = makeConfig();
+      const app = createApp(config);
+      const bot = app.bot as any;
+      const handler = bot.filterHandlers.get("message:text")![0];
+
+      handler({ chat: { id: 12345 }, message: { text: "hello" } });
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(config.runClaude).toHaveBeenCalledWith("hello", "test-session", undefined, "/tmp/macroclaw-test-workspace", PROMPT_USER_MESSAGE, 60_000);
+    });
+
+    it("passes CRON_TIMEOUT for cron messages", async () => {
+      const config = makeConfig();
+      const app = createApp(config);
+
+      app.queue.push({ message: "[Tool: cron/daily-check] Check for updates" });
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(config.runClaude).toHaveBeenCalledWith(
+        "[Tool: cron/daily-check] Check for updates",
+        "test-session",
+        undefined,
+        "/tmp/macroclaw-test-workspace",
+        PROMPT_CRON_EVENT,
+        300_000,
+      );
+    });
+
+    it("re-queues user message with [Timeout] prefix on timeout", async () => {
+      let callCount = 0;
+      const config = makeConfig({
+        runClaude: mock(async (msg: string): Promise<ClaudeResponse> => {
+          callCount++;
+          if (callCount === 1) {
+            return { action: "send", message: "[Error] timed out", reason: "timeout" };
+          }
+          // The re-queued [Timeout] message
+          return { action: "send", message: "handled via retry", reason: "ok" };
+        }),
+      });
+      const app = createApp(config);
+      const bot = app.bot as any;
+      const handler = bot.filterHandlers.get("message:text")![0];
+
+      handler({ chat: { id: 12345 }, message: { text: "do something slow" } });
+      await new Promise((r) => setTimeout(r, 100));
+
+      // First call: user message times out
+      // Second call: re-queued [Timeout] message
+      expect(callCount).toBe(2);
+      const secondCall = (config.runClaude as any).mock.calls[1][0];
+      expect(secondCall).toStartWith("[Timeout]");
+      expect(secondCall).toContain("do something slow");
+
+      const sendCalls = (bot.api.sendMessage as any).mock.calls;
+      const texts = sendCalls.map((c: any) => c[1]);
+      expect(texts).toContain("Request timed out. Retrying as a background task...");
+    });
+
+    it("does not re-queue [Timeout] messages that also time out", async () => {
+      const config = makeConfig({
+        runClaude: mock(async (): Promise<ClaudeResponse> => {
+          return { action: "send", message: "[Error] timed out again", reason: "timeout" };
+        }),
+      });
+      const app = createApp(config);
+
+      app.queue.push({ message: "[Timeout] previously timed out" });
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Should NOT re-queue — only one call
+      expect(config.runClaude).toHaveBeenCalledTimes(1);
+      const bot = app.bot as any;
+      const sendCalls = (bot.api.sendMessage as any).mock.calls;
+      const texts = sendCalls.map((c: any) => c[1]);
+      expect(texts).toContain("[Error] timed out again");
+    });
+
+    it("sends cron timeout notification on cron timeout", async () => {
+      const config = makeConfig({
+        runClaude: mock(async (): Promise<ClaudeResponse> => {
+          return { action: "send", message: "[Error] timed out", reason: "timeout" };
+        }),
+      });
+      const app = createApp(config);
+
+      app.queue.push({ message: "[Tool: cron/daily-check] Check for updates" });
+      await new Promise((r) => setTimeout(r, 50));
+
+      const bot = app.bot as any;
+      const sendCalls = (bot.api.sendMessage as any).mock.calls;
+      const texts = sendCalls.map((c: any) => c[1]);
+      expect(texts).toContain('Cron job "daily-check" timed out after 300 seconds.');
+    });
+
+    it("handles background result timeout like user message timeout", async () => {
+      let callCount = 0;
+      const config = makeConfig({
+        runClaude: mock(async (): Promise<ClaudeResponse> => {
+          callCount++;
+          if (callCount === 1) {
+            return { action: "send", message: "[Error] timed out", reason: "timeout" };
+          }
+          return { action: "send", message: "ok", reason: "ok" };
+        }),
+      });
+      const app = createApp(config);
+
+      app.queue.push({ message: "[Background: research] long result" });
+      await new Promise((r) => setTimeout(r, 100));
+
+      expect(callCount).toBe(2);
+      const secondCall = (config.runClaude as any).mock.calls[1][0];
+      expect(secondCall).toStartWith("[Timeout]");
+      expect(secondCall).toContain("[Background: research] long result");
     });
 
     it("sends error wrapped in ClaudeResponse", async () => {

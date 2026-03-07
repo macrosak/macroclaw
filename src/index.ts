@@ -5,6 +5,9 @@ import { startCron } from "./cron";
 import { createBackgroundManager } from "./background";
 import { PROMPT_USER_MESSAGE, PROMPT_CRON_EVENT, PROMPT_BACKGROUND_RESULT } from "./prompts";
 
+const MAIN_TIMEOUT = 60_000;
+const CRON_TIMEOUT = 300_000;
+
 export interface AppConfig {
   botToken: string;
   authorizedChatId: string;
@@ -33,13 +36,29 @@ export function createApp(config: AppConfig) {
     console.log(`[incoming] ${item.message}`);
     await bot.api.sendChatAction(config.authorizedChatId, "typing");
     const model = item.model ?? config.model;
-    const systemPrompt = item.message.startsWith("[Tool: cron/")
+    const isCron = item.message.startsWith("[Tool: cron/");
+    const systemPrompt = isCron
       ? PROMPT_CRON_EVENT
       : item.message.startsWith("[Background:")
         ? PROMPT_BACKGROUND_RESULT
         : PROMPT_USER_MESSAGE;
-    const response = await claude(item.message, config.sessionId, model, config.workspace, systemPrompt);
+    const timeout = isCron ? CRON_TIMEOUT : MAIN_TIMEOUT;
+    const response = await claude(item.message, config.sessionId, model, config.workspace, systemPrompt, timeout);
     console.log(`[response] action=${response.action} reason=${response.reason} message=${response.message}`);
+
+    if (response.reason === "timeout") {
+      if (isCron) {
+        const cronName = item.message.match(/\[Tool: cron\/([^\]]+)\]/)?.[1] ?? "unknown";
+        await sendResponse(bot, config.authorizedChatId, `Cron job "${cronName}" timed out after ${CRON_TIMEOUT / 1000} seconds.`);
+      } else if (!item.message.startsWith("[Timeout]")) {
+        await sendResponse(bot, config.authorizedChatId, "Request timed out. Retrying as a background task...");
+        queue.push({ message: `[Timeout] The previous request timed out after ${MAIN_TIMEOUT / 1000} seconds. The user asked: "${item.message}". This task needs more time — spawn a background agent to handle it.` });
+      } else {
+        await sendResponse(bot, config.authorizedChatId, response.message || "[Error] Retry also timed out.");
+      }
+      return;
+    }
+
     if (response.action === "background") {
       const name = response.name || "unnamed";
       background.spawn(name, response.message, model, config.workspace, queue);
