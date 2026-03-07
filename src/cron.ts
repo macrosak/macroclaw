@@ -15,7 +15,7 @@ interface CronConfig {
 }
 
 interface Queue {
-  push(item: { message: string; model?: string }): void;
+  push(item: { message: string; model?: string; source?: string; name?: string }): void;
 }
 
 const TICK_INTERVAL = 10_000; // 10 seconds
@@ -60,6 +60,8 @@ export function startCron(workspace: string, queue: Queue): () => void {
           queue.push({
             message: `[Tool: cron/${job.name}] ${job.prompt}`,
             model: job.model,
+            source: "cron",
+            name: job.name,
           });
           if (job.recurring === false) {
             firedNonRecurring.push(i);

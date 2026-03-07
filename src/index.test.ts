@@ -237,7 +237,7 @@ describe("createApp", () => {
       const config = makeConfig();
       const app = createApp(config);
 
-      app.queue.push({ message: "[Tool: cron/daily-check] Check for updates" });
+      app.queue.push({ message: "[Tool: cron/daily-check] Check for updates", source: "cron", name: "daily-check" });
       await new Promise((r) => setTimeout(r, 50));
 
       expect(config.runClaude).toHaveBeenCalledWith(
@@ -254,7 +254,7 @@ describe("createApp", () => {
       const config = makeConfig();
       const app = createApp(config);
 
-      app.queue.push({ message: "[Background: research] Here are the results" });
+      app.queue.push({ message: "[Background: research] Here are the results", source: "background" });
       await new Promise((r) => setTimeout(r, 50));
 
       expect(config.runClaude).toHaveBeenCalledWith(
@@ -283,7 +283,7 @@ describe("createApp", () => {
       const config = makeConfig();
       const app = createApp(config);
 
-      app.queue.push({ message: "[Tool: cron/daily-check] Check for updates" });
+      app.queue.push({ message: "[Tool: cron/daily-check] Check for updates", source: "cron", name: "daily-check" });
       await new Promise((r) => setTimeout(r, 50));
 
       expect(config.runClaude).toHaveBeenCalledWith(
@@ -327,7 +327,7 @@ describe("createApp", () => {
       expect(texts).toContain("Request timed out. Retrying as a background task...");
     });
 
-    it("does not re-queue [Timeout] messages that also time out", async () => {
+    it("does not re-queue timeout messages that also time out", async () => {
       const config = makeConfig({
         runClaude: mock(async (): Promise<ClaudeResponse> => {
           return { action: "send", message: "[Error] timed out again", reason: "timeout" };
@@ -335,7 +335,7 @@ describe("createApp", () => {
       });
       const app = createApp(config);
 
-      app.queue.push({ message: "[Timeout] previously timed out" });
+      app.queue.push({ message: "[Timeout] previously timed out", source: "timeout" });
       await new Promise((r) => setTimeout(r, 50));
 
       // Should NOT re-queue — only one call
@@ -354,7 +354,7 @@ describe("createApp", () => {
       });
       const app = createApp(config);
 
-      app.queue.push({ message: "[Tool: cron/daily-check] Check for updates" });
+      app.queue.push({ message: "[Tool: cron/daily-check] Check for updates", source: "cron", name: "daily-check" });
       await new Promise((r) => setTimeout(r, 50));
 
       const bot = app.bot as any;
@@ -376,7 +376,7 @@ describe("createApp", () => {
       });
       const app = createApp(config);
 
-      app.queue.push({ message: "[Background: research] long result" });
+      app.queue.push({ message: "[Background: research] long result", source: "background" });
       await new Promise((r) => setTimeout(r, 100));
 
       expect(callCount).toBe(2);

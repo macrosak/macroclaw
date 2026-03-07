@@ -33,10 +33,10 @@ export function createApp(config: AppConfig) {
     console.log(`[incoming] ${item.message}`);
     await bot.api.sendChatAction(config.authorizedChatId, "typing");
     const model = item.model ?? config.model;
-    const isCron = item.message.startsWith("[Tool: cron/");
+    const isCron = item.source === "cron";
     const systemPrompt = isCron
       ? PROMPT_CRON_EVENT
-      : item.message.startsWith("[Background:")
+      : item.source === "background"
         ? PROMPT_BACKGROUND_RESULT
         : PROMPT_USER_MESSAGE;
     const timeout = isCron ? CRON_TIMEOUT : MAIN_TIMEOUT;
@@ -45,11 +45,11 @@ export function createApp(config: AppConfig) {
 
     if (response.reason === "timeout") {
       if (isCron) {
-        const cronName = item.message.match(/\[Tool: cron\/([^\]]+)\]/)?.[1] ?? "unknown";
+        const cronName = item.name ?? "unknown";
         await sendResponse(bot, config.authorizedChatId, `Cron job "${cronName}" timed out after ${CRON_TIMEOUT / 1000} seconds.`);
-      } else if (!item.message.startsWith("[Timeout]")) {
+      } else if (item.source !== "timeout") {
         await sendResponse(bot, config.authorizedChatId, "Request timed out. Retrying as a background task...");
-        queue.push({ message: `[Timeout] The previous request timed out after ${MAIN_TIMEOUT / 1000} seconds. The user asked: "${item.message}". This task needs more time — spawn a background agent to handle it.` });
+        queue.push({ message: `[Timeout] The previous request timed out after ${MAIN_TIMEOUT / 1000} seconds. The user asked: "${item.message}". This task needs more time — spawn a background agent to handle it.`, source: "timeout" });
       } else {
         await sendResponse(bot, config.authorizedChatId, response.message || "[Error] Retry also timed out.");
       }

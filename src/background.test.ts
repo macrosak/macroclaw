@@ -3,9 +3,9 @@ import { createBackgroundManager } from "./background";
 import type { ClaudeResponse } from "./claude";
 
 function mockQueue() {
-  const items: { message: string }[] = [];
+  const items: { message: string; source?: string }[] = [];
   return {
-    push(item: { message: string }) {
+    push(item: { message: string; source?: string }) {
       items.push(item);
     },
     items,
@@ -44,6 +44,7 @@ describe("createBackgroundManager", () => {
     expect(mgr.size).toBe(0);
     expect(queue.items).toHaveLength(1);
     expect(queue.items[0].message).toBe("[Background: test-task] done!");
+    expect(queue.items[0].source).toBe("background");
   });
 
   it("feeds error back to queue on failure", async () => {

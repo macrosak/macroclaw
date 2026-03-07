@@ -8,7 +8,7 @@ interface BackgroundInfo {
 }
 
 interface Queue {
-  push(item: { message: string }): void;
+  push(item: { message: string; source?: string }): void;
 }
 
 export function createBackgroundManager(
@@ -35,13 +35,14 @@ export function createBackgroundManager(
           active.delete(sessionId);
           const result = response.message || "[No output]";
           console.log(`[background] "${name}" finished: ${result}`);
-          queue.push({ message: `[Background: ${name}] ${result}` });
+          queue.push({ message: `[Background: ${name}] ${result}`, source: "background" });
         },
         (err) => {
           active.delete(sessionId);
           console.log(`[background] "${name}" failed: ${err}`);
           queue.push({
             message: `[Background: ${name}] [Error] ${err}`,
+            source: "background",
           });
         },
       );
