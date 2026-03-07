@@ -7,7 +7,7 @@ const workspace = process.env.WORKSPACE
   ? resolve(process.env.WORKSPACE)
   : defaultWorkspace;
 
-const skillsSource = join(repoRoot, "skills");
+const skillsSource = join(repoRoot, "workspace-template", ".claude", "skills");
 const skillsTarget = join(workspace, ".claude", "skills");
 
 mkdirSync(skillsTarget, { recursive: true });

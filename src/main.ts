@@ -1,13 +1,29 @@
-import { resolve, dirname } from "path";
+import { resolve, dirname, join } from "path";
+import { existsSync, readdirSync, cpSync } from "fs";
 import { createApp, requireEnv, type AppConfig } from "./index";
 
 const defaultWorkspace = resolve(process.env.HOME || "~", ".macroclaw-workspace");
+const workspace = process.env.WORKSPACE || defaultWorkspace;
+
+function initWorkspace(workspace: string) {
+  const templateDir = join(dirname(import.meta.dir), "workspace-template");
+  const exists = existsSync(workspace);
+  const empty = exists && readdirSync(workspace).length === 0;
+
+  if (!exists || empty) {
+    console.log(`[init] Initializing workspace at ${workspace}`);
+    cpSync(templateDir, workspace, { recursive: true });
+    console.log(`[init] Workspace initialized from template`);
+  }
+}
+
+initWorkspace(workspace);
 
 const config: AppConfig = {
   botToken: requireEnv("TELEGRAM_BOT_TOKEN"),
   authorizedChatId: requireEnv("AUTHORIZED_CHAT_ID"),
   sessionId: process.env.SESSION_ID || "main",
-  workspace: process.env.WORKSPACE || defaultWorkspace,
+  workspace,
   model: process.env.MODEL,
 };
 
