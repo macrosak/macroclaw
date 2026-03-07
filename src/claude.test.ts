@@ -22,14 +22,11 @@ function mockSpawn(opts: {
   stdout?: string;
   stderr?: string;
   exitCode?: number;
-  rejectExited?: boolean;
 }) {
   const proc = {
     stdout: new Response(opts.stdout ?? "").body,
     stderr: new Response(opts.stderr ?? "").body,
-    exited: opts.rejectExited
-      ? Promise.reject(new Error("killed"))
-      : Promise.resolve(opts.exitCode ?? 0),
+    exited: Promise.resolve(opts.exitCode ?? 0),
     kill: mock(() => {}),
   };
 
@@ -137,10 +134,31 @@ describe("runClaude", () => {
     expect(result.reason).toBe("process-error");
   });
 
-  it("returns timeout error when process exits with rejection", async () => {
+  it("returns timeout error when process is killed by timeout", async () => {
     const sid = uniqueSession();
-    mockSpawn({ rejectExited: true });
+    let resolveExited!: (code: number) => void;
+    const proc = {
+      stdout: new Response("").body,
+      stderr: new Response("").body,
+      exited: new Promise<number>((resolve) => {
+        resolveExited = resolve;
+      }),
+      kill: mock(() => {
+        resolveExited(137);
+      }),
+    };
+
+    const origSetTimeout = globalThis.setTimeout;
+    globalThis.setTimeout = ((fn: Function) => {
+      fn();
+      return 0 as any;
+    }) as any;
+
+    Bun.spawn = mock((() => proc) as any);
     const result = await runClaude("slow message", sid, undefined, TEST_WORKSPACE, undefined, 60_000);
+    globalThis.setTimeout = origSetTimeout;
+
+    expect(proc.kill).toHaveBeenCalled();
     expect(result.action).toBe("send");
     expect(result.message).toContain("[Error]");
     expect(result.message).toContain("timed out after 60s");
@@ -182,15 +200,15 @@ describe("runClaude", () => {
 
   it("calls proc.kill() when timeout fires", async () => {
     const sid = uniqueSession();
-    let rejectExited!: (err: Error) => void;
+    let resolveExited!: (code: number) => void;
     const proc = {
       stdout: new Response("").body,
       stderr: new Response("").body,
-      exited: new Promise<number>((_, reject) => {
-        rejectExited = reject;
+      exited: new Promise<number>((resolve) => {
+        resolveExited = resolve;
       }),
       kill: mock(() => {
-        rejectExited(new Error("killed"));
+        resolveExited(137);
       }),
     };
 

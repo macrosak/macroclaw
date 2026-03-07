@@ -62,49 +62,50 @@ export async function runClaude(
     stderr: "pipe",
   });
 
+  let timedOut = false;
   const timeout = timeoutMs
     ? setTimeout(() => {
+        timedOut = true;
         proc.kill();
       }, timeoutMs)
     : undefined;
 
-  try {
-    const exitCode = await proc.exited;
-    if (timeout) clearTimeout(timeout);
+  const exitCode = await proc.exited;
+  if (timeout) clearTimeout(timeout);
 
-    if (exitCode === 0) {
-      knownSessions.add(sessionId);
-      const stdout = await new Response(proc.stdout).text();
-      try {
-        const envelope = JSON.parse(stdout);
-        const duration = envelope.duration_ms ? `${(envelope.duration_ms / 1000).toFixed(1)}s` : "?";
-        const cost = envelope.total_cost_usd ? `$${envelope.total_cost_usd.toFixed(4)}` : "?";
-        console.log(`[claude] → ${duration} ${cost}`);
-        if (envelope.structured_output) {
-          return envelope.structured_output as ClaudeResponse;
-        }
-        console.log(`[claude] no structured_output, envelope: ${JSON.stringify(envelope)}`);
-        return { action: "send", message: envelope.result ?? stdout, reason: "no-structured-output" };
-      } catch {
-        return { action: "send", message: `[JSON Error] ${stdout}`, reason: "json-parse-failed" };
-      }
-    }
-
-    const stderr = await new Response(proc.stderr).text();
-    console.log(`[claude] error (exit ${exitCode}): ${stderr.slice(0, 200)}`);
-
-    // If --session-id fails because session exists, retry with --resume
-    if (sessionFlag === "--session-id" && stderr.includes("already in use")) {
-      knownSessions.add(sessionId);
-      return runClaude(message, sessionId, model, workspace, systemPrompt, timeoutMs);
-    }
-
-    return { action: "send", message: `[Error] Claude exited with code ${exitCode}:\n${stderr}`, reason: "process-error" };
-  } catch {
-    if (timeout) clearTimeout(timeout);
-    const secs = timeoutMs ? Math.round(timeoutMs / 1000) : "?";
+  if (timedOut) {
+    const secs = Math.round(timeoutMs! / 1000);
     return { action: "send", message: `[Error] Claude process timed out after ${secs}s.`, reason: "timeout" };
   }
+
+  if (exitCode === 0) {
+    knownSessions.add(sessionId);
+    const stdout = await new Response(proc.stdout).text();
+    try {
+      const envelope = JSON.parse(stdout);
+      const duration = envelope.duration_ms ? `${(envelope.duration_ms / 1000).toFixed(1)}s` : "?";
+      const cost = envelope.total_cost_usd ? `$${envelope.total_cost_usd.toFixed(4)}` : "?";
+      console.log(`[claude] → ${duration} ${cost}`);
+      if (envelope.structured_output) {
+        return envelope.structured_output as ClaudeResponse;
+      }
+      console.log(`[claude] no structured_output, envelope: ${JSON.stringify(envelope)}`);
+      return { action: "send", message: envelope.result ?? stdout, reason: "no-structured-output" };
+    } catch {
+      return { action: "send", message: `[JSON Error] ${stdout}`, reason: "json-parse-failed" };
+    }
+  }
+
+  const stderr = await new Response(proc.stderr).text();
+  console.log(`[claude] error (exit ${exitCode}): ${stderr.slice(0, 200)}`);
+
+  // If --session-id fails because session exists, retry with --resume
+  if (sessionFlag === "--session-id" && stderr.includes("already in use")) {
+    knownSessions.add(sessionId);
+    return runClaude(message, sessionId, model, workspace, systemPrompt, timeoutMs);
+  }
+
+  return { action: "send", message: `[Error] Claude exited with code ${exitCode}:\n${stderr}`, reason: "process-error" };
 }
 
 export function newSessionId(): string {
