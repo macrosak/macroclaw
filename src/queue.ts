@@ -1,6 +1,8 @@
 export interface QueueItem {
   message: string;
   model?: string;
+  source?: "user" | "cron" | "background" | "timeout";
+  name?: string;
 }
 
 export function createQueue() {
@@ -24,7 +26,11 @@ export function createQueue() {
 
       while (items.length > 0) {
         const item = items.shift()!;
-        await handler(item);
+        try {
+          await handler(item);
+        } catch (err) {
+          console.error("[queue] Handler error:", err);
+        }
       }
 
       processing = false;
