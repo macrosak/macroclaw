@@ -7,10 +7,15 @@ export async function runClaude(
   message: string,
   sessionId: string,
 ): Promise<string> {
+  // Strip CLAUDECODE env var so nested claude sessions are allowed
+  const env = { ...process.env };
+  delete env.CLAUDECODE;
+
   const proc = Bun.spawn(
     ["claude", "-p", "--session", sessionId, message],
     {
       cwd: WORKSPACE,
+      env,
       stdout: "pipe",
       stderr: "pipe",
     },
