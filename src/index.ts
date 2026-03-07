@@ -31,7 +31,7 @@ export function createApp(config: AppConfig) {
     await bot.api.sendChatAction(config.authorizedChatId, "typing");
     const model = item.model ?? config.model;
     const response = await claude(item.message, config.sessionId, model, config.workspace);
-    console.log(`[response] action=${response.action} reason=${response.reason}`);
+    console.log(`[response] action=${response.action} reason=${response.reason} message=${response.message}`);
     if (response.action === "send") {
       await sendResponse(bot, config.authorizedChatId, response.message || "[No output]");
     } else {

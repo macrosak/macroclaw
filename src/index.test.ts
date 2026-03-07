@@ -154,7 +154,7 @@ describe("createApp", () => {
       await new Promise((r) => setTimeout(r, 50));
 
       expect(bot.api.sendMessage).not.toHaveBeenCalled();
-      expect(consoleSpy).toHaveBeenCalledWith("[response] action=silent reason=no new results");
+      expect(consoleSpy).toHaveBeenCalledWith("[response] action=silent reason=no new results message=");
       expect(consoleSpy).toHaveBeenCalledWith("[silent] (no message)");
       consoleSpy.mockRestore();
     });
