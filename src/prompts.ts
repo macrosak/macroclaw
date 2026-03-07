@@ -1,3 +1,12 @@
+export const MAIN_TIMEOUT = 60_000;
+export const CRON_TIMEOUT = 300_000;
+export const BG_TIMEOUT = 1_800_000;
+
+const fmtMin = (ms: number) => {
+  const m = ms / 60_000;
+  return `${m} minute${m > 1 ? "s" : ""}`;
+};
+
 const INTRO_MINIMAL = `\
 You are an AI assistant running inside macroclaw, an autonomous agent platform. \
 You have a persistent workspace with your configuration, memory, and skills. \
@@ -35,9 +44,9 @@ research, file processing, long computations.
 ## Timeouts
 
 Responses must complete within the timeout for the current context:
-- User messages: 1 minute
-- Cron events: 5 minutes
-- Background agents: 30 minutes
+- User messages: ${fmtMin(MAIN_TIMEOUT)}
+- Cron events: ${fmtMin(CRON_TIMEOUT)}
+- Background agents: ${fmtMin(BG_TIMEOUT)}
 
 If a user message times out, it is automatically retried with instructions to spawn a background agent. \
 For tasks that need more time, proactively spawn a background agent rather than risk a timeout.
@@ -92,5 +101,5 @@ Your output will be fed back to the main session as a message.
 
 Be concise and focused. Complete the task and return the result. \
 You cannot spawn further background agents. \
-You have a 30-minute timeout.`;
+You have a ${BG_TIMEOUT / 60_000}-minute timeout.`;
 }

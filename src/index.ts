@@ -3,10 +3,7 @@ import { runClaude, type ClaudeResponse } from "./claude";
 import { createQueue } from "./queue";
 import { startCron } from "./cron";
 import { createBackgroundManager } from "./background";
-import { PROMPT_USER_MESSAGE, PROMPT_CRON_EVENT, PROMPT_BACKGROUND_RESULT } from "./prompts";
-
-const MAIN_TIMEOUT = 60_000;
-const CRON_TIMEOUT = 300_000;
+import { PROMPT_USER_MESSAGE, PROMPT_CRON_EVENT, PROMPT_BACKGROUND_RESULT, MAIN_TIMEOUT, CRON_TIMEOUT } from "./prompts";
 
 export interface AppConfig {
   botToken: string;

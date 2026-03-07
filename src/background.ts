@@ -1,7 +1,5 @@
 import { runClaude, newSessionId } from "./claude";
-import { promptBackgroundAgent } from "./prompts";
-
-const BG_TIMEOUT = 1_800_000;
+import { promptBackgroundAgent, BG_TIMEOUT } from "./prompts";
 
 interface BackgroundInfo {
   name: string;
