@@ -1,5 +1,6 @@
 import { describe, it, expect, mock, spyOn } from "bun:test";
 import { createApp, requireEnv, type AppConfig } from "./index";
+import type { ClaudeResponse } from "./claude";
 
 // Mock Grammy Bot
 mock.module("grammy", () => ({
@@ -44,7 +45,7 @@ function makeConfig(overrides?: Partial<AppConfig>): AppConfig {
     authorizedChatId: "12345",
     sessionId: "test-session",
     workspace: "/tmp/macroclaw-test-workspace",
-    runClaude: mock(async (msg: string) => `Response to: ${msg}`),
+    runClaude: mock(async (msg: string): Promise<ClaudeResponse> => ({ action: "send", message: `Response to: ${msg}`, reason: "user message" })),
     ...overrides,
   };
 }
@@ -126,7 +127,7 @@ describe("createApp", () => {
 
     it("sends [No output] for empty claude response", async () => {
       const config = makeConfig({
-        runClaude: mock(async () => ""),
+        runClaude: mock(async (): Promise<ClaudeResponse> => ({ action: "send", message: "", reason: "empty" })),
       });
       const app = createApp(config);
       const bot = app.bot as any;
@@ -140,9 +141,26 @@ describe("createApp", () => {
       expect(lastText).toBe("[No output]");
     });
 
-    it("sends error message when claude throws", async () => {
+    it("skips sending when action is silent", async () => {
+      const consoleSpy = spyOn(console, "log").mockImplementation(() => {});
       const config = makeConfig({
-        runClaude: mock(async () => { throw new Error("spawn failed"); }),
+        runClaude: mock(async (): Promise<ClaudeResponse> => ({ action: "silent", message: "", reason: "no new results" })),
+      });
+      const app = createApp(config);
+      const bot = app.bot as any;
+      const handler = bot.filterHandlers.get("message:text")![0];
+
+      handler({ chat: { id: 12345 }, message: { text: "hello" } });
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(bot.api.sendMessage).not.toHaveBeenCalled();
+      expect(consoleSpy).toHaveBeenCalledWith("[silent] no new results");
+      consoleSpy.mockRestore();
+    });
+
+    it("sends error wrapped in ClaudeResponse", async () => {
+      const config = makeConfig({
+        runClaude: mock(async (): Promise<ClaudeResponse> => ({ action: "send", message: "[Error] Claude exited with code 1:\nspawn failed", reason: "process-error" })),
       });
       const app = createApp(config);
       const bot = app.bot as any;
@@ -155,22 +173,6 @@ describe("createApp", () => {
       const lastText = calls[calls.length - 1][1];
       expect(lastText).toContain("[Error]");
       expect(lastText).toContain("spawn failed");
-    });
-
-    it("sends error message for non-Error throws", async () => {
-      const config = makeConfig({
-        runClaude: mock(async () => { throw "string error"; }),
-      });
-      const app = createApp(config);
-      const bot = app.bot as any;
-      const handler = bot.filterHandlers.get("message:text")![0];
-
-      handler({ chat: { id: 12345 }, message: { text: "hello" } });
-      await new Promise((r) => setTimeout(r, 50));
-
-      const calls = (bot.api.sendMessage as any).mock.calls;
-      const lastText = calls[calls.length - 1][1];
-      expect(lastText).toContain("[Error] Unknown error");
     });
   });
 
