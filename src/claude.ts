@@ -53,8 +53,7 @@ export async function runClaude(
   if (systemPrompt) args.push("--append-system-prompt", systemPrompt);
   args.push(message);
 
-  const resumeFlag = sessionFlag === "--resume" ? " (resume)" : "";
-  console.log(`[claude] ${sessionId.slice(0, 8)}${resumeFlag} ← ${message.slice(0, 120)}`);
+  console.log(`[claude] ← ${message.slice(0, 120)}`);
 
   const proc = Bun.spawn(args, {
     cwd: workspace,
@@ -80,7 +79,7 @@ export async function runClaude(
         const envelope = JSON.parse(stdout);
         const duration = envelope.duration_ms ? `${(envelope.duration_ms / 1000).toFixed(1)}s` : "?";
         const cost = envelope.total_cost_usd ? `$${envelope.total_cost_usd.toFixed(4)}` : "?";
-        console.log(`[claude] ${sessionId.slice(0, 8)} → ${duration} ${cost}`);
+        console.log(`[claude] → ${duration} ${cost}`);
         if (envelope.structured_output) {
           return envelope.structured_output as ClaudeResponse;
         }
@@ -91,7 +90,7 @@ export async function runClaude(
     }
 
     const stderr = await new Response(proc.stderr).text();
-    console.log(`[claude] ${sessionId.slice(0, 8)} error (exit ${exitCode}): ${stderr.slice(0, 200)}`);
+    console.log(`[claude] error (exit ${exitCode}): ${stderr.slice(0, 200)}`);
 
     // If --session-id fails because session exists, retry with --resume
     if (sessionFlag === "--session-id" && stderr.includes("already in use")) {
