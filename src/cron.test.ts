@@ -1,5 +1,5 @@
 import { describe, it, expect, mock, spyOn, beforeEach, afterEach } from "bun:test";
-import { mkdirSync, writeFileSync, rmSync } from "fs";
+import { mkdirSync, writeFileSync, readFileSync, rmSync } from "fs";
 import { join } from "path";
 import { startCron } from "./cron";
 
@@ -10,6 +10,10 @@ const CRON_FILE = join(CRON_DIR, "cron.json");
 function writeCronConfig(config: any) {
   mkdirSync(CRON_DIR, { recursive: true });
   writeFileSync(CRON_FILE, JSON.stringify(config));
+}
+
+function readCronConfig() {
+  return JSON.parse(readFileSync(CRON_FILE, "utf-8"));
 }
 
 function makeQueue() {
@@ -38,21 +42,24 @@ afterEach(() => {
 });
 
 describe("startCron", () => {
-  it("pushes matching cron job prompts to queue", () => {
+  it("pushes matching cron job with name in prefix", () => {
     writeCronConfig({
-      jobs: [{ cron: currentMinuteCron(), prompt: "do something" }],
+      jobs: [{ name: "test-job", cron: currentMinuteCron(), prompt: "do something" }],
     });
 
     const queue = makeQueue();
     const stop = startCron(TEST_DIR, queue);
     stop();
 
-    expect(queue.push).toHaveBeenCalledWith("[Tool: cron] do something");
+    expect(queue.push).toHaveBeenCalledWith({
+      message: "[Tool: cron/test-job] do something",
+      model: undefined,
+    });
   });
 
   it("does not push non-matching jobs", () => {
     writeCronConfig({
-      jobs: [{ cron: nonMatchingCron(), prompt: "not now" }],
+      jobs: [{ name: "later", cron: nonMatchingCron(), prompt: "not now" }],
     });
 
     const queue = makeQueue();
@@ -101,8 +108,8 @@ describe("startCron", () => {
   it("warns on invalid cron expression and skips that job", () => {
     writeCronConfig({
       jobs: [
-        { cron: "invalid cron", prompt: "bad" },
-        { cron: currentMinuteCron(), prompt: "good" },
+        { name: "bad", cron: "invalid cron", prompt: "bad" },
+        { name: "good", cron: currentMinuteCron(), prompt: "good" },
       ],
     });
 
@@ -112,7 +119,10 @@ describe("startCron", () => {
     stop();
 
     expect(warnSpy).toHaveBeenCalled();
-    expect(queue.push).toHaveBeenCalledWith("[Tool: cron] good");
+    expect(queue.push).toHaveBeenCalledWith({
+      message: "[Tool: cron/good] good",
+      model: undefined,
+    });
     warnSpy.mockRestore();
   });
 
@@ -128,19 +138,16 @@ describe("startCron", () => {
 
   it("only evaluates once per minute", () => {
     writeCronConfig({
-      jobs: [{ cron: currentMinuteCron(), prompt: "once" }],
+      jobs: [{ name: "once", cron: currentMinuteCron(), prompt: "once" }],
     });
 
     const queue = makeQueue();
-    // Manually call the tick logic by starting and re-triggering
-    // startCron runs tick() immediately on first call
     const stop = startCron(TEST_DIR, queue);
     stop();
 
     expect(queue.push).toHaveBeenCalledTimes(1);
 
     // Start again with a new instance — the lastMinute tracker is per-instance
-    // so a second start should also fire once
     const queue2 = makeQueue();
     const stop2 = startCron(TEST_DIR, queue2);
     stop2();
@@ -151,8 +158,8 @@ describe("startCron", () => {
   it("handles multiple matching jobs", () => {
     writeCronConfig({
       jobs: [
-        { cron: currentMinuteCron(), prompt: "first" },
-        { cron: currentMinuteCron(), prompt: "second" },
+        { name: "first", cron: currentMinuteCron(), prompt: "first" },
+        { name: "second", cron: currentMinuteCron(), prompt: "second" },
       ],
     });
 
@@ -161,7 +168,105 @@ describe("startCron", () => {
     stop();
 
     expect(queue.push).toHaveBeenCalledTimes(2);
-    expect(queue.push).toHaveBeenCalledWith("[Tool: cron] first");
-    expect(queue.push).toHaveBeenCalledWith("[Tool: cron] second");
+    expect(queue.push).toHaveBeenCalledWith({ message: "[Tool: cron/first] first", model: undefined });
+    expect(queue.push).toHaveBeenCalledWith({ message: "[Tool: cron/second] second", model: undefined });
+  });
+
+  it("passes model override through queue item", () => {
+    writeCronConfig({
+      jobs: [{ name: "smart", cron: currentMinuteCron(), prompt: "think hard", model: "opus" }],
+    });
+
+    const queue = makeQueue();
+    const stop = startCron(TEST_DIR, queue);
+    stop();
+
+    expect(queue.push).toHaveBeenCalledWith({
+      message: "[Tool: cron/smart] think hard",
+      model: "opus",
+    });
+  });
+
+  it("removes non-recurring job after it fires", () => {
+    writeCronConfig({
+      jobs: [
+        { name: "once", cron: currentMinuteCron(), prompt: "one-time", recurring: false },
+        { name: "always", cron: currentMinuteCron(), prompt: "forever" },
+      ],
+    });
+
+    const queue = makeQueue();
+    const stop = startCron(TEST_DIR, queue);
+    stop();
+
+    expect(queue.push).toHaveBeenCalledTimes(2);
+
+    const updated = readCronConfig();
+    expect(updated.jobs).toHaveLength(1);
+    expect(updated.jobs[0].name).toBe("always");
+  });
+
+  it("keeps recurring jobs (default behavior)", () => {
+    writeCronConfig({
+      jobs: [{ name: "keeper", cron: currentMinuteCron(), prompt: "stay" }],
+    });
+
+    const queue = makeQueue();
+    const stop = startCron(TEST_DIR, queue);
+    stop();
+
+    const updated = readCronConfig();
+    expect(updated.jobs).toHaveLength(1);
+    expect(updated.jobs[0].name).toBe("keeper");
+  });
+
+  it("keeps jobs with recurring: true", () => {
+    writeCronConfig({
+      jobs: [{ name: "explicit", cron: currentMinuteCron(), prompt: "stay", recurring: true }],
+    });
+
+    const queue = makeQueue();
+    const stop = startCron(TEST_DIR, queue);
+    stop();
+
+    const updated = readCronConfig();
+    expect(updated.jobs).toHaveLength(1);
+  });
+
+  it("warns when write-back of cron.json fails", () => {
+    // Write config to a path that will be read successfully
+    writeCronConfig({
+      jobs: [{ name: "once", cron: currentMinuteCron(), prompt: "fire", recurring: false }],
+    });
+
+    // Make cron.json read-only so writeFileSync fails
+    const { chmodSync } = require("fs");
+    chmodSync(CRON_FILE, 0o444);
+
+    const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
+    const queue = makeQueue();
+    const stop = startCron(TEST_DIR, queue);
+    stop();
+
+    chmodSync(CRON_FILE, 0o644);
+
+    expect(queue.push).toHaveBeenCalledTimes(1);
+    const warnMsg = warnSpy.mock.calls.find((c: any) => (c[0] as string).includes("Failed to write"));
+    expect(warnMsg).toBeDefined();
+    warnSpy.mockRestore();
+  });
+
+  it("does not write file when no non-recurring jobs fired", () => {
+    writeCronConfig({
+      jobs: [{ name: "recurring", cron: nonMatchingCron(), prompt: "nope", recurring: false }],
+    });
+
+    const queue = makeQueue();
+    const stop = startCron(TEST_DIR, queue);
+    stop();
+
+    // File should remain unchanged (job still present since it didn't fire)
+    const updated = readCronConfig();
+    expect(updated.jobs).toHaveLength(1);
   });
 });

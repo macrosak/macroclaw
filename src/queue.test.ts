@@ -2,39 +2,38 @@ import { describe, it, expect, mock } from "bun:test";
 import { createQueue } from "./queue";
 
 describe("createQueue", () => {
-  it("processes messages in FIFO order", async () => {
+  it("processes items in FIFO order", async () => {
     const queue = createQueue();
     const results: string[] = [];
-    queue.setHandler(async (msg) => {
-      results.push(msg);
+    queue.setHandler(async (item) => {
+      results.push(item.message);
     });
 
-    queue.push("first");
-    // Wait for async processing
+    queue.push({ message: "first" });
     await new Promise((r) => setTimeout(r, 10));
 
-    queue.push("second");
+    queue.push({ message: "second" });
     await new Promise((r) => setTimeout(r, 10));
 
     expect(results).toEqual(["first", "second"]);
   });
 
-  it("processes queued messages serially", async () => {
+  it("processes queued items serially", async () => {
     const queue = createQueue();
     const order: string[] = [];
     let resolveSecond: (() => void) | null = null;
 
-    queue.setHandler(async (msg) => {
-      if (msg === "slow") {
+    queue.setHandler(async (item) => {
+      if (item.message === "slow") {
         await new Promise<void>((r) => {
           resolveSecond = r;
         });
       }
-      order.push(msg);
+      order.push(item.message);
     });
 
-    queue.push("slow");
-    queue.push("fast");
+    queue.push({ message: "slow" });
+    queue.push({ message: "fast" });
 
     // "fast" should be queued, not processed yet
     await new Promise((r) => setTimeout(r, 10));
@@ -51,7 +50,7 @@ describe("createQueue", () => {
 
   it("does nothing without a handler", async () => {
     const queue = createQueue();
-    queue.push("orphan");
+    queue.push({ message: "orphan" });
     await new Promise((r) => setTimeout(r, 10));
     expect(queue.length).toBe(1);
   });
@@ -60,8 +59,8 @@ describe("createQueue", () => {
     const queue = createQueue();
     expect(queue.length).toBe(0);
     // No handler set, so items accumulate
-    queue.push("a");
-    queue.push("b");
+    queue.push({ message: "a" });
+    queue.push({ message: "b" });
     expect(queue.length).toBe(2);
   });
 
@@ -76,7 +75,7 @@ describe("createQueue", () => {
       });
     });
 
-    queue.push("msg");
+    queue.push({ message: "msg" });
     await new Promise((r) => setTimeout(r, 10));
     expect(queue.isProcessing).toBe(true);
 
@@ -99,16 +98,29 @@ describe("createQueue", () => {
       }
     });
 
-    queue.push("a");
+    queue.push({ message: "a" });
     await new Promise((r) => setTimeout(r, 10));
 
     // Push while processing - process() will be called but should no-op
-    queue.push("b");
+    queue.push({ message: "b" });
     expect(queue.isProcessing).toBe(true);
 
     resolve!();
     await new Promise((r) => setTimeout(r, 10));
-    // Both messages should have been processed
+    // Both items should have been processed
     expect(callCount).toBe(2);
+  });
+
+  it("passes model through in queue item", async () => {
+    const queue = createQueue();
+    let receivedModel: string | undefined;
+    queue.setHandler(async (item) => {
+      receivedModel = item.model;
+    });
+
+    queue.push({ message: "test", model: "haiku" });
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(receivedModel).toBe("haiku");
   });
 });

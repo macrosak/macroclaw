@@ -1,15 +1,20 @@
+export interface QueueItem {
+  message: string;
+  model?: string;
+}
+
 export function createQueue() {
-  const items: string[] = [];
+  const items: QueueItem[] = [];
   let processing = false;
-  let handler: ((message: string) => Promise<void>) | null = null;
+  let handler: ((item: QueueItem) => Promise<void>) | null = null;
 
   return {
-    setHandler(fn: (message: string) => Promise<void>) {
+    setHandler(fn: (item: QueueItem) => Promise<void>) {
       handler = fn;
     },
 
-    push(message: string) {
-      items.push(message);
+    push(item: QueueItem) {
+      items.push(item);
       this.process();
     },
 
@@ -18,8 +23,8 @@ export function createQueue() {
       processing = true;
 
       while (items.length > 0) {
-        const message = items.shift()!;
-        await handler(message);
+        const item = items.shift()!;
+        await handler(item);
       }
 
       processing = false;

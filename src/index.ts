@@ -26,10 +26,11 @@ export function createApp(config: AppConfig) {
   const queue = createQueue();
   const claude = config.runClaude ?? runClaude;
 
-  queue.setHandler(async (message: string) => {
+  queue.setHandler(async (item) => {
     try {
       await bot.api.sendChatAction(config.authorizedChatId, "typing");
-      const response = await claude(message, config.sessionId, config.model, config.workspace);
+      const model = item.model ?? config.model;
+      const response = await claude(item.message, config.sessionId, model, config.workspace);
       await sendResponse(bot, config.authorizedChatId, response || "[No output]");
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : "Unknown error";
@@ -41,7 +42,7 @@ export function createApp(config: AppConfig) {
     if (ctx.chat.id.toString() !== config.authorizedChatId) return;
     if (ctx.message.text.startsWith("/")) return;
 
-    queue.push(ctx.message.text);
+    queue.push({ message: ctx.message.text });
   });
 
   bot.command("chatid", (ctx) => {

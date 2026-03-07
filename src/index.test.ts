@@ -86,6 +86,17 @@ describe("createApp", () => {
       await new Promise((r) => setTimeout(r, 50));
 
       expect(config.runClaude).toHaveBeenCalledWith("hello", "test-session", undefined, "/tmp/macroclaw-test-workspace");
+    });
+
+    it("passes model override from queue item", async () => {
+      const config = makeConfig();
+      const app = createApp(config);
+
+      app.queue.push({ message: "cron msg", model: "haiku" });
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(config.runClaude).toHaveBeenCalledWith("cron msg", "test-session", "haiku", "/tmp/macroclaw-test-workspace");
+      const bot = app.bot as any;
       expect(bot.api.sendMessage).toHaveBeenCalled();
     });
 
