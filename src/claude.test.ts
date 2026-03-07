@@ -26,6 +26,8 @@ function mockSpawn(opts: {
   return proc;
 }
 
+const TEST_WORKSPACE = "/tmp/macroclaw-test-workspace";
+
 // Use unique session IDs per test to avoid knownSessions leaking between tests
 let testCounter = 0;
 function uniqueSession() {
@@ -36,11 +38,11 @@ describe("runClaude", () => {
   it("uses --session-id on first call", async () => {
     const sid = uniqueSession();
     mockSpawn({ stdout: "Hello", exitCode: 0 });
-    const result = await runClaude("test message", sid);
+    const result = await runClaude("test message", sid, undefined, TEST_WORKSPACE);
     expect(result).toBe("Hello");
     expect(Bun.spawn).toHaveBeenCalledWith(
       ["claude", "-p", "--session-id", sid, "test message"],
-      expect.objectContaining({ stdout: "pipe", stderr: "pipe" }),
+      expect.objectContaining({ cwd: TEST_WORKSPACE, stdout: "pipe", stderr: "pipe" }),
     );
   });
 
@@ -48,14 +50,14 @@ describe("runClaude", () => {
     const sid = uniqueSession();
     // First call to mark session as known
     mockSpawn({ stdout: "first", exitCode: 0 });
-    await runClaude("msg1", sid);
+    await runClaude("msg1", sid, undefined, TEST_WORKSPACE);
 
     // Second call should use --resume
     mockSpawn({ stdout: "second", exitCode: 0 });
-    await runClaude("msg2", sid);
+    await runClaude("msg2", sid, undefined, TEST_WORKSPACE);
     expect(Bun.spawn).toHaveBeenCalledWith(
       ["claude", "-p", "--resume", sid, "msg2"],
-      expect.objectContaining({ stdout: "pipe", stderr: "pipe" }),
+      expect.objectContaining({ cwd: TEST_WORKSPACE, stdout: "pipe", stderr: "pipe" }),
     );
   });
 
@@ -80,7 +82,7 @@ describe("runClaude", () => {
       };
     }) as any);
 
-    const result = await runClaude("msg", sid);
+    const result = await runClaude("msg", sid, undefined, TEST_WORKSPACE);
     expect(result).toBe("retried ok");
     expect(callCount).toBe(2);
   });
@@ -88,17 +90,17 @@ describe("runClaude", () => {
   it("passes model flag when provided", async () => {
     const sid = uniqueSession();
     mockSpawn({ stdout: "ok", exitCode: 0 });
-    await runClaude("msg", sid, "haiku");
+    await runClaude("msg", sid, "haiku", TEST_WORKSPACE);
     expect(Bun.spawn).toHaveBeenCalledWith(
       ["claude", "-p", "--session-id", sid, "--model", "haiku", "msg"],
-      expect.objectContaining({ stdout: "pipe", stderr: "pipe" }),
+      expect.objectContaining({ cwd: TEST_WORKSPACE, stdout: "pipe", stderr: "pipe" }),
     );
   });
 
   it("returns error message on non-zero exit", async () => {
     const sid = uniqueSession();
     mockSpawn({ stderr: "something went wrong", exitCode: 1 });
-    const result = await runClaude("bad message", sid);
+    const result = await runClaude("bad message", sid, undefined, TEST_WORKSPACE);
     expect(result).toContain("[Error]");
     expect(result).toContain("something went wrong");
     expect(result).toContain("code 1");
@@ -107,7 +109,7 @@ describe("runClaude", () => {
   it("returns timeout error when process exits with rejection", async () => {
     const sid = uniqueSession();
     mockSpawn({ rejectExited: true });
-    const result = await runClaude("slow message", sid);
+    const result = await runClaude("slow message", sid, undefined, TEST_WORKSPACE);
     expect(result).toContain("[Error]");
     expect(result).toContain("timed out");
   });
@@ -141,7 +143,7 @@ describe("runClaude", () => {
     }) as any;
 
     Bun.spawn = mock((() => proc) as any);
-    const result = await runClaude("timeout test", sid);
+    const result = await runClaude("timeout test", sid, undefined, TEST_WORKSPACE);
     globalThis.setTimeout = origSetTimeout;
 
     expect(proc.kill).toHaveBeenCalled();

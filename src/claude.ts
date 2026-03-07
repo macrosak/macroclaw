@@ -1,15 +1,14 @@
-import { resolve, dirname } from "path";
 import { randomUUID } from "crypto";
 
 const TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
-const WORKSPACE = resolve(dirname(import.meta.dir), "..", "macroclaw-workspace");
 
 const knownSessions = new Set<string>();
 
 export async function runClaude(
   message: string,
   sessionId: string,
-  model?: string,
+  model: string | undefined,
+  workspace: string,
 ): Promise<string> {
   // Strip CLAUDECODE env var so nested claude sessions are allowed
   const env = { ...process.env };
@@ -28,7 +27,7 @@ export async function runClaude(
   console.log(`[claude] $ ${shellCmd}`);
 
   const proc = Bun.spawn(args, {
-    cwd: WORKSPACE,
+    cwd: workspace,
     env,
     stdout: "pipe",
     stderr: "pipe",
@@ -55,7 +54,7 @@ export async function runClaude(
     // If --session-id fails because session exists, retry with --resume
     if (sessionFlag === "--session-id" && stderr.includes("already in use")) {
       knownSessions.add(sessionId);
-      return runClaude(message, sessionId, model);
+      return runClaude(message, sessionId, model, workspace);
     }
 
     return `[Error] Claude exited with code ${exitCode}:\n${stderr}`;

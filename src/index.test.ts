@@ -43,6 +43,7 @@ function makeConfig(overrides?: Partial<AppConfig>): AppConfig {
     botToken: "test-token",
     authorizedChatId: "12345",
     sessionId: "test-session",
+    workspace: "/tmp/macroclaw-test-workspace",
     runClaude: mock(async (msg: string) => `Response to: ${msg}`),
     ...overrides,
   };
@@ -84,7 +85,7 @@ describe("createApp", () => {
       handler({ chat: { id: 12345 }, message: { text: "hello" } });
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(config.runClaude).toHaveBeenCalledWith("hello", "test-session", undefined);
+      expect(config.runClaude).toHaveBeenCalledWith("hello", "test-session", undefined, "/tmp/macroclaw-test-workspace");
       expect(bot.api.sendMessage).toHaveBeenCalled();
     });
 
