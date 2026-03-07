@@ -2,6 +2,8 @@ import { describe, expect, it, mock } from "bun:test";
 import { createBackgroundManager } from "./background";
 import type { ClaudeResponse } from "./claude";
 
+type MockRunClaude = ReturnType<typeof mock<(...args: any[]) => Promise<ClaudeResponse>>>;
+
 function mockQueue() {
   const items: { message: string; source?: string }[] = [];
   return {
@@ -18,7 +20,7 @@ describe("createBackgroundManager", () => {
     const claudePromise = new Promise<ClaudeResponse>((r) => {
       resolvePromise = r;
     });
-    const runClaude = mock(() => claudePromise);
+    const runClaude = mock(() => claudePromise) as MockRunClaude;
     const queue = mockQueue();
     const mgr = createBackgroundManager(runClaude);
 
@@ -52,7 +54,7 @@ describe("createBackgroundManager", () => {
     const claudePromise = new Promise<ClaudeResponse>((_, r) => {
       rejectPromise = r;
     });
-    const runClaude = mock(() => claudePromise);
+    const runClaude = mock(() => claudePromise) as MockRunClaude;
     const queue = mockQueue();
     const mgr = createBackgroundManager(runClaude);
 
@@ -130,7 +132,7 @@ describe("createBackgroundManager", () => {
         message: "done",
         reason: "ok",
       }),
-    );
+    ) as MockRunClaude;
     const queue = mockQueue();
     const mgr = createBackgroundManager(runClaude);
 
