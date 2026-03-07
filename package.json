@@ -7,7 +7,8 @@
     "start": "bun run src/main.ts",
     "dev": "bun run --watch src/main.ts",
     "test": "bun test --coverage",
-    "test:coverage": "bun test --coverage"
+    "test:coverage": "bun test --coverage",
+    "sync-skills": "bun run scripts/sync-skills.ts"
   },
   "dependencies": {
     "cron-parser": "^5.5.0",
