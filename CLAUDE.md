@@ -16,6 +16,10 @@ bun run start      # Start normally
 - Run `bun run sync-skills` after changing system skills to deploy them to the workspace
 - **User skills** are created directly in the workspace's `.claude/skills/` — the sync script never touches them
 
+## Debugging
+
+- To run `claude` CLI from Bash tool: `CLAUDECODE="" claude -p ...` (must explicitly set to empty to allow nested sessions)
+
 ## Conventions
 
 - Keep everything lean — this is a personal project
