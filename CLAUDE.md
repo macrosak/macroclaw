@@ -12,7 +12,10 @@ Telegram-to-Claude-Code bridge. Bun + Grammy.
 bun install        # Install dependencies
 bun run dev        # Start with watch mode
 bun run start      # Start normally
+bun run check      # Typecheck + lint + tests (run before committing)
 bun test           # Run tests (100% coverage enforced)
+bun run lint       # Run biome linter
+bun run lint:fix   # Auto-fix lint issues
 bun run sync-skills # Deploy system skills to workspace
 ```
 
@@ -38,4 +41,4 @@ bun run sync-skills # Deploy system skills to workspace
 - Work autonomously — never ask "shall I commit?" — just commit and push
 - Finish tasks completely before asking follow-up questions
 - Follow-up fixes can happen after the main implementation
-- Always run tests before committing (`bun test` enforces 100% coverage)
+- Always run `bun run check` before committing (typecheck + lint + tests)
