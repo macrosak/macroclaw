@@ -1,0 +1,16 @@
+{
+  "name": "macroclaw",
+  "version": "0.1.0",
+  "description": "Telegram-to-Claude-Code bridge",
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun run --watch src/index.ts"
+  },
+  "dependencies": {
+    "grammy": "^1.39.3"
+  },
+  "devDependencies": {
+    "bun-types": "^1.3.10"
+  }
+}
