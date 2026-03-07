@@ -1,6 +1,7 @@
 import { createBot, sendResponse } from "./telegram";
 import { runClaude } from "./claude";
 import { createQueue } from "./queue";
+import { startCron } from "./cron";
 
 export interface AppConfig {
   botToken: string;
@@ -60,6 +61,7 @@ export function createApp(config: AppConfig) {
     queue,
     start() {
       console.log("Starting macroclaw...");
+      startCron(config.workspace, queue);
       bot.start({
         onStart: (botInfo) => {
           console.log(`Bot connected: @${botInfo.username}`);

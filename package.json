@@ -10,6 +10,7 @@
     "test:coverage": "bun test --coverage"
   },
   "dependencies": {
+    "cron-parser": "^5.5.0",
     "grammy": "^1.39.3"
   },
   "devDependencies": {
