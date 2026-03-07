@@ -83,6 +83,7 @@ export async function runClaude(
         if (envelope.structured_output) {
           return envelope.structured_output as ClaudeResponse;
         }
+        console.log(`[claude] no structured_output, envelope: ${JSON.stringify(envelope).slice(0, 500)}`);
         return { action: "send", message: envelope.result ?? stdout, reason: "no-structured-output" };
       } catch {
         return { action: "send", message: `[JSON Error] ${stdout}`, reason: "json-parse-failed" };
