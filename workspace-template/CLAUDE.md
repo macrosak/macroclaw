@@ -11,12 +11,23 @@ After this workspace is initialized, create these files:
 
 Once created, read them at the start of every session.
 
+## Memory
+
+`MEMORY.md` is your long-term memory. It persists across sessions — your conversation history may be compacted, but this file stays.
+
+**What to store:** learned preferences, facts, decisions, active context (ongoing projects, pending tasks), communication rules.
+
+**What NOT to store:** session-specific noise, things already in SOUL.md or USER.md, speculative conclusions.
+
+Keep it concise — this file is read every session. Update proactively when you learn something worth remembering. A PreCompact hook will remind you before context compaction, and a nightly cron job provides a safety net.
+
 ## Every Session
 
 Before doing anything else:
 
 1. Read `SOUL.md` — this is who you are
 2. Read `USER.md` — this is who you're helping
+3. Read `MEMORY.md` — this is what you've learned
 
 Don't ask permission. Just do it.
 

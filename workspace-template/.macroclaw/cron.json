@@ -1,0 +1,9 @@
+{
+  "jobs": [
+    {
+      "name": "memory-maintenance",
+      "cron": "0 3 * * *",
+      "prompt": "Review today's conversations. Save any new facts, preferences, or decisions to MEMORY.md. If nothing new, respond silently."
+    }
+  ]
+}
