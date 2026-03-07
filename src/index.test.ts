@@ -87,7 +87,7 @@ describe("createApp", () => {
       handler({ chat: { id: 12345 }, message: { text: "hello" } });
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(config.runClaude).toHaveBeenCalledWith("hello", "test-session", undefined, "/tmp/macroclaw-test-workspace");
+      expect(config.runClaude).toHaveBeenCalledWith("hello", "test-session", undefined, "/tmp/macroclaw-test-workspace", "This is a message from the user via Telegram.");
     });
 
     it("passes model override from queue item", async () => {
@@ -97,7 +97,7 @@ describe("createApp", () => {
       app.queue.push({ message: "cron msg", model: "haiku" });
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(config.runClaude).toHaveBeenCalledWith("cron msg", "test-session", "haiku", "/tmp/macroclaw-test-workspace");
+      expect(config.runClaude).toHaveBeenCalledWith("cron msg", "test-session", "haiku", "/tmp/macroclaw-test-workspace", "This is a message from the user via Telegram.");
       const bot = app.bot as any;
       expect(bot.api.sendMessage).toHaveBeenCalled();
     });
@@ -241,6 +241,38 @@ describe("createApp", () => {
       expect(config.runClaude).toHaveBeenCalledTimes(1);
       expect(ctx.reply).toHaveBeenCalledWith('Background agent "research-pricing" started.');
       consoleSpy.mockRestore();
+    });
+
+    it("passes cron system prompt for cron messages", async () => {
+      const config = makeConfig();
+      const app = createApp(config);
+
+      app.queue.push({ message: "[Tool: cron/daily-check] Check for updates" });
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(config.runClaude).toHaveBeenCalledWith(
+        "[Tool: cron/daily-check] Check for updates",
+        "test-session",
+        undefined,
+        "/tmp/macroclaw-test-workspace",
+        "This is a scheduled cron event, not a user message.",
+      );
+    });
+
+    it("passes background result system prompt for background messages", async () => {
+      const config = makeConfig();
+      const app = createApp(config);
+
+      app.queue.push({ message: "[Background: research] Here are the results" });
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(config.runClaude).toHaveBeenCalledWith(
+        "[Background: research] Here are the results",
+        "test-session",
+        undefined,
+        "/tmp/macroclaw-test-workspace",
+        "This is the result of a background agent you previously spawned.",
+      );
     });
 
     it("sends error wrapped in ClaudeResponse", async () => {

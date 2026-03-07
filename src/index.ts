@@ -10,7 +10,7 @@ export interface AppConfig {
   sessionId: string;
   workspace: string;
   model?: string;
-  runClaude?: (message: string, sessionId: string, model: string | undefined, workspace: string) => Promise<ClaudeResponse>;
+  runClaude?: (message: string, sessionId: string, model: string | undefined, workspace: string, systemPrompt?: string) => Promise<ClaudeResponse>;
 }
 
 export function requireEnv(name: string): string {
@@ -32,7 +32,12 @@ export function createApp(config: AppConfig) {
     console.log(`[incoming] ${item.message}`);
     await bot.api.sendChatAction(config.authorizedChatId, "typing");
     const model = item.model ?? config.model;
-    const response = await claude(item.message, config.sessionId, model, config.workspace);
+    const systemPrompt = item.message.startsWith("[Tool: cron/")
+      ? "This is a scheduled cron event, not a user message."
+      : item.message.startsWith("[Background:")
+        ? "This is the result of a background agent you previously spawned."
+        : "This is a message from the user via Telegram.";
+    const response = await claude(item.message, config.sessionId, model, config.workspace, systemPrompt);
     console.log(`[response] action=${response.action} reason=${response.reason} message=${response.message}`);
     if (response.action === "background") {
       const name = response.name || "unnamed";

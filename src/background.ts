@@ -29,7 +29,8 @@ export function createBackgroundManager(
 
       console.log(`[background] Starting "${name}" (session ${sessionId})`);
 
-      runClaudeFn(prompt, sessionId, model, workspace).then(
+      const systemPrompt = `You are a background agent named "${name}". Your output will be fed back to the main session. Be concise and focused.`;
+      runClaudeFn(prompt, sessionId, model, workspace, systemPrompt).then(
         (response) => {
           active.delete(sessionId);
           const result = response.message || "[No output]";

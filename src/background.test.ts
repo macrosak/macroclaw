@@ -30,6 +30,7 @@ describe("createBackgroundManager", () => {
     expect(runClaude.mock.calls[0][0]).toBe("do something");
     expect(runClaude.mock.calls[0][2]).toBe("haiku");
     expect(runClaude.mock.calls[0][3]).toBe("/workspace");
+    expect(runClaude.mock.calls[0][4]).toContain("background agent named \"test-task\"");
 
     resolvePromise!({
       action: "send",

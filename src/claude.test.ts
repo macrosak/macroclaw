@@ -108,6 +108,24 @@ describe("runClaude", () => {
     );
   });
 
+  it("passes --append-system-prompt when systemPrompt is provided", async () => {
+    const sid = uniqueSession();
+    mockSpawn({ stdout: jsonResponse("send", "ok", "ok"), exitCode: 0 });
+    await runClaude("msg", sid, undefined, TEST_WORKSPACE, "You are a background agent.");
+    expect(Bun.spawn).toHaveBeenCalledWith(
+      expect.arrayContaining(["--append-system-prompt", "You are a background agent.", "msg"]),
+      expect.objectContaining({ cwd: TEST_WORKSPACE }),
+    );
+  });
+
+  it("omits --append-system-prompt when systemPrompt is undefined", async () => {
+    const sid = uniqueSession();
+    mockSpawn({ stdout: jsonResponse("send", "ok", "ok"), exitCode: 0 });
+    await runClaude("msg", sid, undefined, TEST_WORKSPACE);
+    const args = (Bun.spawn as any).mock.calls[0][0] as string[];
+    expect(args).not.toContain("--append-system-prompt");
+  });
+
   it("returns error response on non-zero exit", async () => {
     const sid = uniqueSession();
     mockSpawn({ stderr: "something went wrong", exitCode: 1 });

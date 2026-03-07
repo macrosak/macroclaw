@@ -39,6 +39,7 @@ export async function runClaude(
   sessionId: string,
   model: string | undefined,
   workspace: string,
+  systemPrompt?: string,
 ): Promise<ClaudeResponse> {
   // Strip CLAUDECODE env var so nested claude sessions are allowed
   const env = { ...process.env };
@@ -50,6 +51,7 @@ export async function runClaude(
     : "--session-id";
   const args = ["claude", "-p", sessionFlag, sessionId, "--output-format", "json", "--json-schema", jsonSchema];
   if (model) args.push("--model", model);
+  if (systemPrompt) args.push("--append-system-prompt", systemPrompt);
   args.push(message);
 
   // Log the full command so it can be copy-pasted
@@ -95,7 +97,7 @@ export async function runClaude(
     // If --session-id fails because session exists, retry with --resume
     if (sessionFlag === "--session-id" && stderr.includes("already in use")) {
       knownSessions.add(sessionId);
-      return runClaude(message, sessionId, model, workspace);
+      return runClaude(message, sessionId, model, workspace, systemPrompt);
     }
 
     return { action: "send", message: `[Error] Claude exited with code ${exitCode}:\n${stderr}`, reason: "process-error" };
