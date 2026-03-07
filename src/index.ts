@@ -1,8 +1,15 @@
 import { createBot, sendResponse } from "./telegram";
 import { runClaude } from "./claude";
+import { createQueue } from "./queue";
 
-// --- Env validation ---
-function requireEnv(name: string): string {
+export interface AppConfig {
+  botToken: string;
+  authorizedChatId: string;
+  sessionId: string;
+  runClaude?: (message: string, sessionId: string) => Promise<string>;
+}
+
+export function requireEnv(name: string): string {
   const value = process.env[name];
   if (!value) {
     console.error(`Missing ${name} in environment`);
@@ -11,66 +18,54 @@ function requireEnv(name: string): string {
   return value;
 }
 
-const TELEGRAM_BOT_TOKEN = requireEnv("TELEGRAM_BOT_TOKEN");
-const AUTHORIZED_CHAT_ID = requireEnv("AUTHORIZED_CHAT_ID");
-const SESSION_ID = process.env.SESSION_ID || "main";
+export function createApp(config: AppConfig) {
+  const bot = createBot(config.botToken);
+  const queue = createQueue();
+  const claude = config.runClaude ?? runClaude;
 
-// --- Message queue ---
-const queue: string[] = [];
-let processing = false;
-
-async function processQueue() {
-  if (processing) return;
-  processing = true;
-
-  while (queue.length > 0) {
-    const message = queue.shift()!;
+  queue.setHandler(async (message: string) => {
     try {
-      await bot.api.sendChatAction(AUTHORIZED_CHAT_ID, "typing");
-      const response = await runClaude(message, SESSION_ID);
-      await sendResponse(bot, AUTHORIZED_CHAT_ID, response || "[No output]");
+      await bot.api.sendChatAction(config.authorizedChatId, "typing");
+      const response = await claude(message, config.sessionId);
+      await sendResponse(bot, config.authorizedChatId, response || "[No output]");
     } catch (err) {
-      const errMsg =
-        err instanceof Error ? err.message : "Unknown error";
-      await sendResponse(
-        bot,
-        AUTHORIZED_CHAT_ID,
-        `[Error] ${errMsg}`,
-      );
+      const errMsg = err instanceof Error ? err.message : "Unknown error";
+      await sendResponse(bot, config.authorizedChatId, `[Error] ${errMsg}`);
     }
-  }
+  });
 
-  processing = false;
+  bot.on("message:text", (ctx) => {
+    if (ctx.chat.id.toString() !== config.authorizedChatId) return;
+    if (ctx.message.text.startsWith("/")) return;
+
+    queue.push(ctx.message.text);
+  });
+
+  bot.command("chatid", (ctx) => {
+    ctx.reply(`Chat ID: \`${ctx.chat.id}\``, { parse_mode: "Markdown" });
+  });
+
+  bot.command("session", (ctx) => {
+    ctx.reply(`Session: \`${config.sessionId}\``, { parse_mode: "Markdown" });
+  });
+
+  bot.catch((err) => {
+    console.error("Bot error:", err.message);
+  });
+
+  return {
+    bot,
+    queue,
+    start() {
+      console.log("Starting macroclaw...");
+      bot.start({
+        onStart: (botInfo) => {
+          console.log(`Bot connected: @${botInfo.username}`);
+          console.log(`Authorized chat: ${config.authorizedChatId}`);
+          console.log(`Session: ${config.sessionId}`);
+        },
+      });
+    },
+  };
 }
 
-// --- Bot setup ---
-const bot = createBot(TELEGRAM_BOT_TOKEN);
-
-bot.on("message:text", (ctx) => {
-  if (ctx.chat.id.toString() !== AUTHORIZED_CHAT_ID) return;
-  if (ctx.message.text.startsWith("/")) return;
-
-  queue.push(ctx.message.text);
-  processQueue();
-});
-
-bot.command("chatid", (ctx) => {
-  ctx.reply(`Chat ID: \`${ctx.chat.id}\``, { parse_mode: "Markdown" });
-});
-
-bot.command("session", (ctx) => {
-  ctx.reply(`Session: \`${SESSION_ID}\``, { parse_mode: "Markdown" });
-});
-
-bot.catch((err) => {
-  console.error("Bot error:", err.message);
-});
-
-console.log("Starting macroclaw...");
-bot.start({
-  onStart: (botInfo) => {
-    console.log(`Bot connected: @${botInfo.username}`);
-    console.log(`Authorized chat: ${AUTHORIZED_CHAT_ID}`);
-    console.log(`Session: ${SESSION_ID}`);
-  },
-});
