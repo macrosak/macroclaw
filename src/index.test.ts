@@ -84,7 +84,7 @@ describe("createApp", () => {
       handler({ chat: { id: 12345 }, message: { text: "hello" } });
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(config.runClaude).toHaveBeenCalledWith("hello", "test-session");
+      expect(config.runClaude).toHaveBeenCalledWith("hello", "test-session", undefined);
       expect(bot.api.sendMessage).toHaveBeenCalled();
     });
 

@@ -6,7 +6,8 @@ export interface AppConfig {
   botToken: string;
   authorizedChatId: string;
   sessionId: string;
-  runClaude?: (message: string, sessionId: string) => Promise<string>;
+  model?: string;
+  runClaude?: (message: string, sessionId: string, model?: string) => Promise<string>;
 }
 
 export function requireEnv(name: string): string {
@@ -26,7 +27,7 @@ export function createApp(config: AppConfig) {
   queue.setHandler(async (message: string) => {
     try {
       await bot.api.sendChatAction(config.authorizedChatId, "typing");
-      const response = await claude(message, config.sessionId);
+      const response = await claude(message, config.sessionId, config.model);
       await sendResponse(bot, config.authorizedChatId, response || "[No output]");
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : "Unknown error";

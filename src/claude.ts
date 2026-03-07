@@ -7,20 +7,22 @@ const WORKSPACE = resolve(dirname(import.meta.dir), "..", "macroclaw-workspace")
 export async function runClaude(
   message: string,
   sessionId: string,
+  model?: string,
 ): Promise<string> {
   // Strip CLAUDECODE env var so nested claude sessions are allowed
   const env = { ...process.env };
   delete env.CLAUDECODE;
 
-  const proc = Bun.spawn(
-    ["claude", "-p", "--session-id", sessionId, message],
-    {
-      cwd: WORKSPACE,
-      env,
-      stdout: "pipe",
-      stderr: "pipe",
-    },
-  );
+  const args = ["claude", "-p", "--session-id", sessionId];
+  if (model) args.push("--model", model);
+  args.push(message);
+
+  const proc = Bun.spawn(args, {
+    cwd: WORKSPACE,
+    env,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
 
   const timeout = setTimeout(() => {
     proc.kill();
