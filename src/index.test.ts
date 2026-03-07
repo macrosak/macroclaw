@@ -1,6 +1,7 @@
 import { describe, it, expect, mock, spyOn } from "bun:test";
 import { createApp, requireEnv, type AppConfig } from "./index";
 import type { ClaudeResponse } from "./claude";
+import { PROMPT_USER_MESSAGE, PROMPT_CRON_EVENT, PROMPT_BACKGROUND_RESULT } from "./prompts";
 
 // Mock Grammy Bot
 mock.module("grammy", () => ({
@@ -88,7 +89,7 @@ describe("createApp", () => {
       handler({ chat: { id: 12345 }, message: { text: "hello" } });
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(config.runClaude).toHaveBeenCalledWith("hello", "test-session", undefined, "/tmp/macroclaw-test-workspace", "This is a message from the user via Telegram.");
+      expect(config.runClaude).toHaveBeenCalledWith("hello", "test-session", undefined, "/tmp/macroclaw-test-workspace", PROMPT_USER_MESSAGE);
     });
 
     it("passes model override from queue item", async () => {
@@ -98,7 +99,7 @@ describe("createApp", () => {
       app.queue.push({ message: "cron msg", model: "haiku" });
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(config.runClaude).toHaveBeenCalledWith("cron msg", "test-session", "haiku", "/tmp/macroclaw-test-workspace", "This is a message from the user via Telegram.");
+      expect(config.runClaude).toHaveBeenCalledWith("cron msg", "test-session", "haiku", "/tmp/macroclaw-test-workspace", PROMPT_USER_MESSAGE);
       const bot = app.bot as any;
       expect(bot.api.sendMessage).toHaveBeenCalled();
     });
@@ -244,7 +245,7 @@ describe("createApp", () => {
         "test-session",
         undefined,
         "/tmp/macroclaw-test-workspace",
-        "This is a scheduled cron event, not a user message.",
+        PROMPT_CRON_EVENT,
       );
     });
 
@@ -260,7 +261,7 @@ describe("createApp", () => {
         "test-session",
         undefined,
         "/tmp/macroclaw-test-workspace",
-        "This is the result of a background agent you previously spawned.",
+        PROMPT_BACKGROUND_RESULT,
       );
     });
 

@@ -3,6 +3,7 @@ import { runClaude, type ClaudeResponse } from "./claude";
 import { createQueue } from "./queue";
 import { startCron } from "./cron";
 import { createBackgroundManager } from "./background";
+import { PROMPT_USER_MESSAGE, PROMPT_CRON_EVENT, PROMPT_BACKGROUND_RESULT } from "./prompts";
 
 export interface AppConfig {
   botToken: string;
@@ -33,10 +34,10 @@ export function createApp(config: AppConfig) {
     await bot.api.sendChatAction(config.authorizedChatId, "typing");
     const model = item.model ?? config.model;
     const systemPrompt = item.message.startsWith("[Tool: cron/")
-      ? "This is a scheduled cron event, not a user message."
+      ? PROMPT_CRON_EVENT
       : item.message.startsWith("[Background:")
-        ? "This is the result of a background agent you previously spawned."
-        : "This is a message from the user via Telegram.";
+        ? PROMPT_BACKGROUND_RESULT
+        : PROMPT_USER_MESSAGE;
     const response = await claude(item.message, config.sessionId, model, config.workspace, systemPrompt);
     console.log(`[response] action=${response.action} reason=${response.reason} message=${response.message}`);
     if (response.action === "background") {
