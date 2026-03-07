@@ -4,12 +4,37 @@ const TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
 const knownSessions = new Set<string>();
 
+export interface ClaudeResponse {
+  action: "send" | "silent";
+  message: string;
+  reason: string;
+}
+
+const jsonSchema = JSON.stringify({
+  type: "object",
+  properties: {
+    action: {
+      type: "string",
+      enum: ["send", "silent"],
+    },
+    message: {
+      type: "string",
+      description: "The message to send to Telegram",
+    },
+    reason: {
+      type: "string",
+      description: "Why the agent chose this action (logged, not sent)",
+    },
+  },
+  required: ["action", "message", "reason"],
+});
+
 export async function runClaude(
   message: string,
   sessionId: string,
   model: string | undefined,
   workspace: string,
-): Promise<string> {
+): Promise<ClaudeResponse> {
   // Strip CLAUDECODE env var so nested claude sessions are allowed
   const env = { ...process.env };
   delete env.CLAUDECODE;
@@ -18,7 +43,7 @@ export async function runClaude(
   const sessionFlag = knownSessions.has(sessionId)
     ? "--resume"
     : "--session-id";
-  const args = ["claude", "-p", sessionFlag, sessionId];
+  const args = ["claude", "-p", sessionFlag, sessionId, "--json-schema", jsonSchema];
   if (model) args.push("--model", model);
   args.push(message);
 
@@ -45,7 +70,11 @@ export async function runClaude(
       knownSessions.add(sessionId);
       const stdout = await new Response(proc.stdout).text();
       console.log(`[claude] Response (${stdout.length} chars):\n${stdout}`);
-      return stdout;
+      try {
+        return JSON.parse(stdout) as ClaudeResponse;
+      } catch {
+        return { action: "send", message: `[JSON Error] ${stdout}`, reason: "json-parse-failed" };
+      }
     }
 
     const stderr = await new Response(proc.stderr).text();
@@ -57,10 +86,10 @@ export async function runClaude(
       return runClaude(message, sessionId, model, workspace);
     }
 
-    return `[Error] Claude exited with code ${exitCode}:\n${stderr}`;
+    return { action: "send", message: `[Error] Claude exited with code ${exitCode}:\n${stderr}`, reason: "process-error" };
   } catch {
     clearTimeout(timeout);
-    return "[Error] Claude process timed out after 5 minutes.";
+    return { action: "send", message: "[Error] Claude process timed out after 5 minutes.", reason: "process-error" };
   }
 }
 
