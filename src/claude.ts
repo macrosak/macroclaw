@@ -1,7 +1,5 @@
 import { randomUUID } from "crypto";
 
-const TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
-
 const knownSessions = new Set<string>();
 
 export interface ClaudeResponse {
@@ -40,6 +38,7 @@ export async function runClaude(
   model: string | undefined,
   workspace: string,
   systemPrompt?: string,
+  timeoutMs?: number,
 ): Promise<ClaudeResponse> {
   // Strip CLAUDECODE env var so nested claude sessions are allowed
   const env = { ...process.env };
@@ -65,13 +64,15 @@ export async function runClaude(
     stderr: "pipe",
   });
 
-  const timeout = setTimeout(() => {
-    proc.kill();
-  }, TIMEOUT_MS);
+  const timeout = timeoutMs
+    ? setTimeout(() => {
+        proc.kill();
+      }, timeoutMs)
+    : undefined;
 
   try {
     const exitCode = await proc.exited;
-    clearTimeout(timeout);
+    if (timeout) clearTimeout(timeout);
 
     if (exitCode === 0) {
       knownSessions.add(sessionId);
@@ -97,13 +98,14 @@ export async function runClaude(
     // If --session-id fails because session exists, retry with --resume
     if (sessionFlag === "--session-id" && stderr.includes("already in use")) {
       knownSessions.add(sessionId);
-      return runClaude(message, sessionId, model, workspace, systemPrompt);
+      return runClaude(message, sessionId, model, workspace, systemPrompt, timeoutMs);
     }
 
     return { action: "send", message: `[Error] Claude exited with code ${exitCode}:\n${stderr}`, reason: "process-error" };
   } catch {
-    clearTimeout(timeout);
-    return { action: "send", message: "[Error] Claude process timed out after 5 minutes.", reason: "process-error" };
+    if (timeout) clearTimeout(timeout);
+    const secs = timeoutMs ? Math.round(timeoutMs / 1000) : "?";
+    return { action: "send", message: `[Error] Claude process timed out after ${secs}s.`, reason: "timeout" };
   }
 }
 

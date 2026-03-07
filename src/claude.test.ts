@@ -140,11 +140,11 @@ describe("runClaude", () => {
   it("returns timeout error when process exits with rejection", async () => {
     const sid = uniqueSession();
     mockSpawn({ rejectExited: true });
-    const result = await runClaude("slow message", sid, undefined, TEST_WORKSPACE);
+    const result = await runClaude("slow message", sid, undefined, TEST_WORKSPACE, undefined, 60_000);
     expect(result.action).toBe("send");
     expect(result.message).toContain("[Error]");
-    expect(result.message).toContain("timed out");
-    expect(result.reason).toBe("process-error");
+    expect(result.message).toContain("timed out after 60s");
+    expect(result.reason).toBe("timeout");
   });
 
   it("returns silent response when agent chooses silent", async () => {
@@ -201,12 +201,20 @@ describe("runClaude", () => {
     }) as any;
 
     Bun.spawn = mock((() => proc) as any);
-    const result = await runClaude("timeout test", sid, undefined, TEST_WORKSPACE);
+    const result = await runClaude("timeout test", sid, undefined, TEST_WORKSPACE, undefined, 60_000);
     globalThis.setTimeout = origSetTimeout;
 
     expect(proc.kill).toHaveBeenCalled();
     expect(result.action).toBe("send");
     expect(result.message).toContain("[Error]");
-    expect(result.message).toContain("timed out");
+    expect(result.message).toContain("timed out after 60s");
+    expect(result.reason).toBe("timeout");
+  });
+
+  it("does not set timeout when timeoutMs is not provided", async () => {
+    const sid = uniqueSession();
+    mockSpawn({ stdout: jsonResponse("send", "ok", "ok"), exitCode: 0 });
+    const result = await runClaude("msg", sid, undefined, TEST_WORKSPACE);
+    expect(result).toEqual({ action: "send", message: "ok", reason: "ok" });
   });
 });

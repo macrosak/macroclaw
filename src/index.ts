@@ -11,7 +11,7 @@ export interface AppConfig {
   sessionId: string;
   workspace: string;
   model?: string;
-  runClaude?: (message: string, sessionId: string, model: string | undefined, workspace: string, systemPrompt?: string) => Promise<ClaudeResponse>;
+  runClaude?: (message: string, sessionId: string, model: string | undefined, workspace: string, systemPrompt?: string, timeoutMs?: number) => Promise<ClaudeResponse>;
 }
 
 export function requireEnv(name: string): string {
