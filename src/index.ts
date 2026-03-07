@@ -41,7 +41,7 @@ export function createApp(config: AppConfig) {
         : PROMPT_USER_MESSAGE;
     const timeout = isCron ? CRON_TIMEOUT : MAIN_TIMEOUT;
     const response = await claude(item.message, config.sessionId, model, config.workspace, systemPrompt, timeout);
-    console.log(`[response] action=${response.action} reason=${response.reason} message=${response.message}`);
+    console.log(`[response] action=${response.action} reason=${response.reason} message=${response.message.slice(0, 120)}`);
 
     if (response.reason === "timeout") {
       if (isCron) {
