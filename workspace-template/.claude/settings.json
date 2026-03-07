@@ -1,4 +1,8 @@
 {
+  "permissions": {
+    "defaultMode": "bypassPermissions"
+  },
+  "dangerouslySkipPermissions": true,
   "hooks": {
     "PreCompact": [
       {
