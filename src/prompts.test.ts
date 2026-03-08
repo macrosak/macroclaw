@@ -39,6 +39,12 @@ describe("prompts", () => {
     expect(prompt).toContain("30-minute timeout");
   });
 
+  it("INTRO_FULL prompts contain file capabilities", () => {
+    expect(PROMPT_USER_MESSAGE).toContain("[File: /path]");
+    expect(PROMPT_USER_MESSAGE).toContain("files");
+    expect(PROMPT_CRON_EVENT).toContain("[File: /path]");
+  });
+
   it("INTRO_FULL prompts contain HTML formatting note, background agent does not", () => {
     expect(PROMPT_USER_MESSAGE).toContain("HTML parse mode");
     expect(PROMPT_CRON_EVENT).toContain("HTML parse mode");

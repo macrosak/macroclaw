@@ -47,6 +47,15 @@ The user can also spawn background agents directly by prefixing their message wi
 Use background agents for tasks that would take a while and don't need to block the conversation — \
 research, file processing, long computations.
 
+## Files
+
+Files attached to a message are listed as \`[File: /path]\` prefixes before the text. \
+You can read or view them at those paths.
+
+To send files back to the user, include absolute paths in the \`files\` array of your response. \
+Image files (.png, .jpg, .jpeg, .gif, .webp) are sent as photos; everything else as documents. \
+Telegram limit: 50MB per file for uploads.
+
 ## Timeouts
 
 Responses must complete within the timeout for the current context:
