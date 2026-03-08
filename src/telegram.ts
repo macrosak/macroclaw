@@ -1,6 +1,12 @@
-import { Bot } from "grammy";
+import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { Bot, InputFile } from "grammy";
 
 const MAX_LENGTH = 4096;
+const INBOUND_DIR = "/tmp/macroclaw/inbound";
+const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
 
 export function createBot(token: string) {
   return new Bot(token);
@@ -46,5 +52,50 @@ export async function sendResponse(
 
   if (chunk) {
     await bot.api.sendMessage(chatId, chunk, opts);
+  }
+}
+
+export async function downloadFile(
+  bot: Bot,
+  fileId: string,
+  token: string,
+  originalName?: string,
+): Promise<string> {
+  const file = await bot.api.getFile(fileId);
+  const filePath = file.file_path;
+  if (!filePath) throw new Error("Telegram returned no file_path");
+
+  const url = `https://api.telegram.org/file/bot${token}/${filePath}`;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Download failed: ${response.status}`);
+
+  const dir = join(INBOUND_DIR, randomUUID());
+  await mkdir(dir, { recursive: true });
+  const name = originalName ?? filePath.split("/").pop() ?? "file";
+  const dest = join(dir, name);
+  await writeFile(dest, new Uint8Array(await response.arrayBuffer()));
+  return dest;
+}
+
+function extName(path: string): string {
+  const dot = path.lastIndexOf(".");
+  return dot === -1 ? "" : path.slice(dot).toLowerCase();
+}
+
+export async function sendFile(
+  bot: Bot,
+  chatId: string,
+  filePath: string,
+): Promise<void> {
+  if (!existsSync(filePath)) {
+    console.warn(`[telegram] File not found, skipping: ${filePath}`);
+    return;
+  }
+
+  const ext = extName(filePath);
+  if (IMAGE_EXTENSIONS.has(ext)) {
+    await bot.api.sendPhoto(chatId, new InputFile(filePath));
+  } else {
+    await bot.api.sendDocument(chatId, new InputFile(filePath));
   }
 }

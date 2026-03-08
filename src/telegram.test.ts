@@ -1,5 +1,7 @@
 import { describe, expect, it, mock } from "bun:test";
-import { createBot, sendResponse } from "./telegram";
+import { existsSync } from "node:fs";
+import { readFile, rm } from "node:fs/promises";
+import { createBot, downloadFile, sendFile, sendResponse } from "./telegram";
 
 // Mock bot API
 function mockBot() {
@@ -91,4 +93,157 @@ describe("sendResponse", () => {
     expect(bot.api.sendMessage).toHaveBeenCalledTimes(1);
     expect(bot.calls[0].text).toBe("hello\nworld");
   });
+});
+
+describe("downloadFile", () => {
+  it("downloads file to /tmp/macroclaw/inbound/<uuid>/<name>", async () => {
+    const fileContent = new Uint8Array([1, 2, 3]);
+    const mockFetch = mock(() =>
+      Promise.resolve(new Response(fileContent, { status: 200 })),
+    );
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = mockFetch as any;
+
+    const bot = {
+      api: {
+        getFile: mock(async () => ({ file_path: "photos/file_42.jpg" })),
+      },
+    } as any;
+
+    const path = await downloadFile(bot, "file-id-123", "123:ABC", "photo.jpg");
+
+    expect(path).toContain("/tmp/macroclaw/inbound/");
+    expect(path).toEndWith("/photo.jpg");
+    expect(existsSync(path)).toBe(true);
+
+    const contents = await readFile(path);
+    expect(new Uint8Array(contents)).toEqual(fileContent);
+
+    const fetchUrl = (mockFetch as any).mock.calls[0][0];
+    expect(fetchUrl).toBe("https://api.telegram.org/file/bot123:ABC/photos/file_42.jpg");
+
+    // Cleanup
+    await rm(path, { force: true });
+    globalThis.fetch = origFetch;
+  });
+
+  it("uses file_path basename when no originalName given", async () => {
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = mock(() =>
+      Promise.resolve(new Response("data", { status: 200 })),
+    ) as any;
+
+    const bot = {
+      api: {
+        getFile: mock(async () => ({ file_path: "documents/report.pdf" })),
+      },
+    } as any;
+
+    const path = await downloadFile(bot, "file-id", "token");
+    expect(path).toEndWith("/report.pdf");
+
+    await rm(path, { force: true });
+    globalThis.fetch = origFetch;
+  });
+
+  it("throws when Telegram returns no file_path", async () => {
+    const bot = {
+      api: { getFile: mock(async () => ({})) },
+    } as any;
+
+    expect(downloadFile(bot, "file-id", "token")).rejects.toThrow("no file_path");
+  });
+
+  it("throws when download fails", async () => {
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = mock(() =>
+      Promise.resolve(new Response("", { status: 404 })),
+    ) as any;
+
+    const bot = {
+      api: { getFile: mock(async () => ({ file_path: "photos/x.jpg" })) },
+    } as any;
+
+    expect(downloadFile(bot, "file-id", "token")).rejects.toThrow("Download failed: 404");
+    globalThis.fetch = origFetch;
+  });
+});
+
+describe("sendFile", () => {
+  it("sends image extensions as photos", async () => {
+    const tmpFile = `/tmp/macroclaw-test-${Date.now()}.png`;
+    await Bun.write(tmpFile, "fake png");
+
+    const bot = {
+      api: {
+        sendPhoto: mock(async () => {}),
+        sendDocument: mock(async () => {}),
+      },
+    } as any;
+
+    await sendFile(bot, "123", tmpFile);
+    expect(bot.api.sendPhoto).toHaveBeenCalledTimes(1);
+    expect(bot.api.sendDocument).not.toHaveBeenCalled();
+
+    await rm(tmpFile, { force: true });
+  });
+
+  it("sends non-image extensions as documents", async () => {
+    const tmpFile = `/tmp/macroclaw-test-${Date.now()}.pdf`;
+    await Bun.write(tmpFile, "fake pdf");
+
+    const bot = {
+      api: {
+        sendPhoto: mock(async () => {}),
+        sendDocument: mock(async () => {}),
+      },
+    } as any;
+
+    await sendFile(bot, "123", tmpFile);
+    expect(bot.api.sendDocument).toHaveBeenCalledTimes(1);
+    expect(bot.api.sendPhoto).not.toHaveBeenCalled();
+
+    await rm(tmpFile, { force: true });
+  });
+
+  it("skips missing files with a warning", async () => {
+    const warnSpy = mock(() => {});
+    const origWarn = console.warn;
+    console.warn = warnSpy;
+
+    const bot = {
+      api: {
+        sendPhoto: mock(async () => {}),
+        sendDocument: mock(async () => {}),
+      },
+    } as any;
+
+    await sendFile(bot, "123", "/tmp/nonexistent-file-xyz.txt");
+    expect(bot.api.sendPhoto).not.toHaveBeenCalled();
+    expect(bot.api.sendDocument).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("File not found"),
+    );
+
+    console.warn = origWarn;
+  });
+
+  for (const ext of [".jpg", ".jpeg", ".gif", ".webp"]) {
+    it(`treats ${ext} as image`, async () => {
+      const tmpFile = `/tmp/macroclaw-test-${Date.now()}${ext}`;
+      await Bun.write(tmpFile, "fake");
+
+      const bot = {
+        api: {
+          sendPhoto: mock(async () => {}),
+          sendDocument: mock(async () => {}),
+        },
+      } as any;
+
+      await sendFile(bot, "123", tmpFile);
+      expect(bot.api.sendPhoto).toHaveBeenCalledTimes(1);
+
+      await rm(tmpFile, { force: true });
+    });
+  }
 });
