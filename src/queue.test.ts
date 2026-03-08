@@ -158,4 +158,17 @@ describe("createQueue", () => {
 
     expect(receivedModel).toBe("haiku");
   });
+
+  it("passes files through in queue item", async () => {
+    const queue = createQueue();
+    let receivedFiles: string[] | undefined;
+    queue.setHandler(async (item) => {
+      receivedFiles = item.files;
+    });
+
+    queue.push({ message: "test", files: ["/tmp/photo.jpg"] });
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(receivedFiles).toEqual(["/tmp/photo.jpg"]);
+  });
 });

@@ -3,6 +3,7 @@ export interface QueueItem {
   model?: string;
   source?: "user" | "cron" | "background" | "timeout";
   name?: string;
+  files?: string[];
 }
 
 export function createQueue() {

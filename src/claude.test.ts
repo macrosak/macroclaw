@@ -235,4 +235,44 @@ describe("runClaude", () => {
     const result = await runClaude("msg", sid, undefined, TEST_WORKSPACE);
     expect(result).toEqual({ action: "send", message: "ok", reason: "ok" });
   });
+
+  it("prepends file references to prompt", async () => {
+    const sid = uniqueSession();
+    mockSpawn({ stdout: jsonResponse("send", "ok", "ok"), exitCode: 0 });
+    await runClaude("describe this", sid, undefined, TEST_WORKSPACE, undefined, undefined, ["/tmp/photo.jpg", "/tmp/doc.pdf"]);
+    const args = (Bun.spawn as any).mock.calls[0][0] as string[];
+    const prompt = args[args.length - 1];
+    expect(prompt).toBe("[File: /tmp/photo.jpg]\n[File: /tmp/doc.pdf]\ndescribe this");
+  });
+
+  it("sends only file references when message is empty", async () => {
+    const sid = uniqueSession();
+    mockSpawn({ stdout: jsonResponse("send", "ok", "ok"), exitCode: 0 });
+    await runClaude("", sid, undefined, TEST_WORKSPACE, undefined, undefined, ["/tmp/photo.jpg"]);
+    const args = (Bun.spawn as any).mock.calls[0][0] as string[];
+    const prompt = args[args.length - 1];
+    expect(prompt).toBe("[File: /tmp/photo.jpg]");
+  });
+
+  it("does not modify prompt when files is empty", async () => {
+    const sid = uniqueSession();
+    mockSpawn({ stdout: jsonResponse("send", "ok", "ok"), exitCode: 0 });
+    await runClaude("hello", sid, undefined, TEST_WORKSPACE, undefined, undefined, []);
+    const args = (Bun.spawn as any).mock.calls[0][0] as string[];
+    const prompt = args[args.length - 1];
+    expect(prompt).toBe("hello");
+  });
+
+  it("parses files array from structured output", async () => {
+    const sid = uniqueSession();
+    const stdout = JSON.stringify({
+      type: "result",
+      duration_ms: 1000,
+      total_cost_usd: 0.05,
+      structured_output: { action: "send", message: "Here's the chart", reason: "ok", files: ["/tmp/chart.png"] },
+    });
+    mockSpawn({ stdout, exitCode: 0 });
+    const result = await runClaude("msg", sid, undefined, TEST_WORKSPACE);
+    expect(result.files).toEqual(["/tmp/chart.png"]);
+  });
 });

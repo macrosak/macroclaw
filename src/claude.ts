@@ -7,6 +7,7 @@ export interface ClaudeResponse {
   message: string;
   reason: string;
   name?: string;
+  files?: string[];
 }
 
 const jsonSchema = JSON.stringify({
@@ -28,6 +29,11 @@ const jsonSchema = JSON.stringify({
       type: "string",
       description: "Why the agent chose this action (logged, not sent)",
     },
+    files: {
+      type: "array",
+      items: { type: "string" },
+      description: "Absolute paths to files to send to Telegram (optional)",
+    },
   },
   required: ["action", "message", "reason"],
 });
@@ -39,10 +45,18 @@ export async function runClaude(
   workspace: string,
   systemPrompt?: string,
   timeoutMs?: number,
+  files?: string[],
 ): Promise<ClaudeResponse> {
   // Strip CLAUDECODE env var so nested claude sessions are allowed
   const env = { ...process.env };
   delete env.CLAUDECODE;
+
+  // Prepend file references to the prompt
+  let prompt = message;
+  if (files?.length) {
+    const prefix = files.map((f) => `[File: ${f}]`).join("\n");
+    prompt = prompt ? `${prefix}\n${prompt}` : prefix;
+  }
 
   // First call for a session uses --session-id, subsequent calls use --resume
   const sessionFlag = knownSessions.has(sessionId)
@@ -51,9 +65,9 @@ export async function runClaude(
   const args = ["claude", "-p", sessionFlag, sessionId, "--output-format", "json", "--json-schema", jsonSchema];
   if (model) args.push("--model", model);
   if (systemPrompt) args.push("--append-system-prompt", systemPrompt);
-  args.push(message);
+  args.push(prompt);
 
-  console.log(`[claude] ← ${message.slice(0, 120)}`);
+  console.log(`[claude] ← ${prompt.slice(0, 120)}`);
 
   const proc = Bun.spawn(args, {
     cwd: workspace,
@@ -102,7 +116,7 @@ export async function runClaude(
   // If --session-id fails because session exists, retry with --resume
   if (sessionFlag === "--session-id" && stderr.includes("already in use")) {
     knownSessions.add(sessionId);
-    return runClaude(message, sessionId, model, workspace, systemPrompt, timeoutMs);
+    return runClaude(message, sessionId, model, workspace, systemPrompt, timeoutMs, files);
   }
 
   return { action: "send", message: `[Error] Claude exited with code ${exitCode}:\n${stderr}`, reason: "process-error" };
