@@ -15,6 +15,9 @@ mock.module("grammy", () => ({
       sendMessage: mock(async () => {}),
       sendChatAction: mock(async () => {}),
       setMyCommands: mock(async () => {}),
+      getFile: mock(async () => ({ file_path: "photos/test.jpg" })),
+      sendPhoto: mock(async () => {}),
+      sendDocument: mock(async () => {}),
     };
 
     constructor(token: string) {
@@ -59,10 +62,12 @@ describe("createApp", () => {
     expect(app.queue).toBeDefined();
   });
 
-  it("registers message:text handler", () => {
+  it("registers message:text, message:photo, and message:document handlers", () => {
     const app = createApp(makeConfig());
     const bot = app.bot as any;
     expect(bot.filterHandlers.has("message:text")).toBe(true);
+    expect(bot.filterHandlers.has("message:photo")).toBe(true);
+    expect(bot.filterHandlers.has("message:document")).toBe(true);
   });
 
   it("registers chatid, session, and bg commands", () => {
@@ -89,7 +94,7 @@ describe("createApp", () => {
       handler({ chat: { id: 12345 }, message: { text: "hello" } });
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(config.runClaude).toHaveBeenCalledWith("hello", "test-session", undefined, "/tmp/macroclaw-test-workspace", PROMPT_USER_MESSAGE, 60_000);
+      expect(config.runClaude).toHaveBeenCalledWith("hello", "test-session", undefined, "/tmp/macroclaw-test-workspace", PROMPT_USER_MESSAGE, 60_000, undefined);
     });
 
     it("passes model override from queue item", async () => {
@@ -99,7 +104,7 @@ describe("createApp", () => {
       app.queue.push({ message: "cron msg", model: "haiku" });
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(config.runClaude).toHaveBeenCalledWith("cron msg", "test-session", "haiku", "/tmp/macroclaw-test-workspace", PROMPT_USER_MESSAGE, 60_000);
+      expect(config.runClaude).toHaveBeenCalledWith("cron msg", "test-session", "haiku", "/tmp/macroclaw-test-workspace", PROMPT_USER_MESSAGE, 60_000, undefined);
       const bot = app.bot as any;
       expect(bot.api.sendMessage).toHaveBeenCalled();
     });
@@ -247,6 +252,7 @@ describe("createApp", () => {
         "/tmp/macroclaw-test-workspace",
         PROMPT_CRON_EVENT,
         300_000,
+        undefined,
       );
     });
 
@@ -264,6 +270,7 @@ describe("createApp", () => {
         "/tmp/macroclaw-test-workspace",
         PROMPT_BACKGROUND_RESULT,
         60_000,
+        undefined,
       );
     });
 
@@ -276,7 +283,7 @@ describe("createApp", () => {
       handler({ chat: { id: 12345 }, message: { text: "hello" } });
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(config.runClaude).toHaveBeenCalledWith("hello", "test-session", undefined, "/tmp/macroclaw-test-workspace", PROMPT_USER_MESSAGE, 60_000);
+      expect(config.runClaude).toHaveBeenCalledWith("hello", "test-session", undefined, "/tmp/macroclaw-test-workspace", PROMPT_USER_MESSAGE, 60_000, undefined);
     });
 
     it("passes CRON_TIMEOUT for cron messages", async () => {
@@ -293,6 +300,7 @@ describe("createApp", () => {
         "/tmp/macroclaw-test-workspace",
         PROMPT_CRON_EVENT,
         300_000,
+        undefined,
       );
     });
 
@@ -400,6 +408,171 @@ describe("createApp", () => {
       const lastText = calls[calls.length - 1][1];
       expect(lastText).toContain("[Error]");
       expect(lastText).toContain("spawn failed");
+    });
+
+    it("handles photo messages by downloading and queuing with files", async () => {
+      const origFetch = globalThis.fetch;
+      globalThis.fetch = mock(() =>
+        Promise.resolve(new Response("fake-image", { status: 200 })),
+      ) as any;
+
+      const config = makeConfig();
+      const app = createApp(config);
+      const bot = app.bot as any;
+      const handler = bot.filterHandlers.get("message:photo")![0];
+
+      await handler({
+        chat: { id: 12345 },
+        message: {
+          caption: "check this",
+          photo: [
+            { file_id: "small", width: 90, height: 90 },
+            { file_id: "large", width: 800, height: 600 },
+          ],
+        },
+      });
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(bot.api.getFile).toHaveBeenCalledWith("large");
+      expect(config.runClaude).toHaveBeenCalled();
+      const call = (config.runClaude as any).mock.calls[0];
+      expect(call[0]).toBe("check this");
+      expect(call[6]).toBeDefined();
+      expect(call[6][0]).toContain("/tmp/macroclaw/inbound/");
+
+      globalThis.fetch = origFetch;
+    });
+
+    it("handles document messages by downloading and queuing with files", async () => {
+      const origFetch = globalThis.fetch;
+      globalThis.fetch = mock(() =>
+        Promise.resolve(new Response("fake-doc", { status: 200 })),
+      ) as any;
+
+      const config = makeConfig();
+      const app = createApp(config);
+      const bot = app.bot as any;
+      const handler = bot.filterHandlers.get("message:document")![0];
+
+      await handler({
+        chat: { id: 12345 },
+        message: {
+          caption: "review this",
+          document: { file_id: "doc-id", file_name: "report.pdf" },
+        },
+      });
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(bot.api.getFile).toHaveBeenCalledWith("doc-id");
+      expect(config.runClaude).toHaveBeenCalled();
+      const call = (config.runClaude as any).mock.calls[0];
+      expect(call[0]).toBe("review this");
+      expect(call[6][0]).toContain("report.pdf");
+
+      globalThis.fetch = origFetch;
+    });
+
+    it("queues error message when photo download fails", async () => {
+      const consoleSpy = spyOn(console, "error").mockImplementation(() => {});
+      const config = makeConfig();
+      const app = createApp(config);
+      const bot = app.bot as any;
+      bot.api.getFile = mock(async () => { throw new Error("too large"); });
+      const handler = bot.filterHandlers.get("message:photo")![0];
+
+      await handler({
+        chat: { id: 12345 },
+        message: { caption: "big photo", photo: [{ file_id: "big" }] },
+      });
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(config.runClaude).toHaveBeenCalled();
+      const msg = (config.runClaude as any).mock.calls[0][0];
+      expect(msg).toContain("[File download failed: photo.jpg]");
+      consoleSpy.mockRestore();
+    });
+
+    it("queues error message when document download fails", async () => {
+      const consoleSpy = spyOn(console, "error").mockImplementation(() => {});
+      const config = makeConfig();
+      const app = createApp(config);
+      const bot = app.bot as any;
+      bot.api.getFile = mock(async () => { throw new Error("too large"); });
+      const handler = bot.filterHandlers.get("message:document")![0];
+
+      await handler({
+        chat: { id: 12345 },
+        message: { caption: "big doc", document: { file_id: "big", file_name: "huge.pdf" } },
+      });
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(config.runClaude).toHaveBeenCalled();
+      const msg = (config.runClaude as any).mock.calls[0][0];
+      expect(msg).toContain("[File download failed: huge.pdf]");
+      consoleSpy.mockRestore();
+    });
+
+    it("ignores photo messages from unauthorized chats", async () => {
+      const config = makeConfig();
+      const app = createApp(config);
+      const bot = app.bot as any;
+      const handler = bot.filterHandlers.get("message:photo")![0];
+
+      await handler({
+        chat: { id: 99999 },
+        message: { photo: [{ file_id: "x" }] },
+      });
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(config.runClaude).not.toHaveBeenCalled();
+    });
+
+    it("sends outbound files before text message", async () => {
+      const tmpFile = `/tmp/macroclaw-test-outbound-${Date.now()}.png`;
+      await Bun.write(tmpFile, "fake png");
+
+      const config = makeConfig({
+        runClaude: mock(async (): Promise<ClaudeResponse> => ({
+          action: "send",
+          message: "Here's your chart",
+          reason: "ok",
+          files: [tmpFile],
+        })),
+      });
+      const app = createApp(config);
+      const bot = app.bot as any;
+      const handler = bot.filterHandlers.get("message:text")![0];
+
+      handler({ chat: { id: 12345 }, message: { text: "make a chart" } });
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(bot.api.sendPhoto).toHaveBeenCalledTimes(1);
+      expect(bot.api.sendMessage).toHaveBeenCalled();
+
+      const { rm } = await import("node:fs/promises");
+      await rm(tmpFile, { force: true });
+    });
+
+    it("skips outbound files that don't exist", async () => {
+      const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
+      const config = makeConfig({
+        runClaude: mock(async (): Promise<ClaudeResponse> => ({
+          action: "send",
+          message: "Done",
+          reason: "ok",
+          files: ["/tmp/nonexistent-xyz.png"],
+        })),
+      });
+      const app = createApp(config);
+      const bot = app.bot as any;
+      const handler = bot.filterHandlers.get("message:text")![0];
+
+      handler({ chat: { id: 12345 }, message: { text: "hello" } });
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(bot.api.sendPhoto).not.toHaveBeenCalled();
+      expect(bot.api.sendMessage).toHaveBeenCalled();
+      warnSpy.mockRestore();
     });
   });
 

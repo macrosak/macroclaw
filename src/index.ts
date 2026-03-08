@@ -3,7 +3,7 @@ import { type ClaudeResponse, runClaude } from "./claude";
 import { startCron } from "./cron";
 import { CRON_TIMEOUT, MAIN_TIMEOUT, PROMPT_BACKGROUND_RESULT, PROMPT_CRON_EVENT, PROMPT_USER_MESSAGE } from "./prompts";
 import { createQueue } from "./queue";
-import { createBot, sendResponse } from "./telegram";
+import { createBot, downloadFile, sendFile, sendResponse } from "./telegram";
 
 export interface AppConfig {
   botToken: string;
@@ -11,7 +11,7 @@ export interface AppConfig {
   sessionId: string;
   workspace: string;
   model?: string;
-  runClaude?: (message: string, sessionId: string, model: string | undefined, workspace: string, systemPrompt?: string, timeoutMs?: number) => Promise<ClaudeResponse>;
+  runClaude?: (message: string, sessionId: string, model: string | undefined, workspace: string, systemPrompt?: string, timeoutMs?: number, files?: string[]) => Promise<ClaudeResponse>;
 }
 
 export function requireEnv(name: string): string {
@@ -40,7 +40,7 @@ export function createApp(config: AppConfig) {
         ? PROMPT_BACKGROUND_RESULT
         : PROMPT_USER_MESSAGE;
     const timeout = isCron ? CRON_TIMEOUT : MAIN_TIMEOUT;
-    const response = await claude(item.message, config.sessionId, model, config.workspace, systemPrompt, timeout);
+    const response = await claude(item.message, config.sessionId, model, config.workspace, systemPrompt, timeout, item.files);
     console.log(`[response] action=${response.action} reason=${response.reason} message=${response.message.slice(0, 120)}`);
 
     if (response.reason === "timeout") {
@@ -61,6 +61,11 @@ export function createApp(config: AppConfig) {
       background.spawn(name, response.message, model, config.workspace, queue);
       await sendResponse(bot, config.authorizedChatId, `Background agent "${name}" started.`);
     } else if (response.action === "send") {
+      if (response.files?.length) {
+        for (const filePath of response.files) {
+          await sendFile(bot, config.authorizedChatId, filePath);
+        }
+      }
       await sendResponse(bot, config.authorizedChatId, response.message || "[No output]");
     } else {
       console.log(`[silent] ${response.message || "(no message)"}`);
@@ -89,6 +94,32 @@ export function createApp(config: AppConfig) {
       return `- ${a.name} (${elapsed}s)`;
     });
     ctx.reply(lines.join("\n"));
+  });
+
+  bot.on("message:photo", async (ctx) => {
+    if (ctx.chat.id.toString() !== config.authorizedChatId) return;
+    const photos = ctx.message.photo;
+    const largest = photos[photos.length - 1];
+    try {
+      const path = await downloadFile(bot, largest.file_id, config.botToken, "photo.jpg");
+      queue.push({ message: ctx.message.caption ?? "", files: [path] });
+    } catch (err) {
+      console.error("[download] Photo download failed:", err);
+      queue.push({ message: `[File download failed: photo.jpg]\n${ctx.message.caption ?? ""}` });
+    }
+  });
+
+  bot.on("message:document", async (ctx) => {
+    if (ctx.chat.id.toString() !== config.authorizedChatId) return;
+    const doc = ctx.message.document;
+    const name = doc.file_name ?? "file";
+    try {
+      const path = await downloadFile(bot, doc.file_id, config.botToken, name);
+      queue.push({ message: ctx.message.caption ?? "", files: [path] });
+    } catch (err) {
+      console.error("[download] Document download failed:", err);
+      queue.push({ message: `[File download failed: ${name}]\n${ctx.message.caption ?? ""}` });
+    }
   });
 
   bot.on("message:text", (ctx) => {
