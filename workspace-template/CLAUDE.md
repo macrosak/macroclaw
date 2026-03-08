@@ -13,13 +13,25 @@ Once created, read them at the start of every session.
 
 ## Memory
 
-`MEMORY.md` is your long-term memory. It persists across sessions — your conversation history may be compacted, but this file stays.
+Two-tier memory system. Claude Code's built-in auto memory is disabled — you own memory entirely.
 
-**What to store:** learned preferences, facts, decisions, active context (ongoing projects, pending tasks), communication rules.
+### Long-term memory (`MEMORY.md`)
+Curated durable knowledge, organized by topic. Read every session. **Never write to it directly** — the nightly `memory-consolidate` cron manages it.
 
-**What NOT to store:** session-specific noise, things already in SOUL.md or USER.md, speculative conclusions.
+### Daily logs (`memory/YYYY-MM-DD.md`)
+Append-only raw capture of noteworthy events. Written during conversations and by the `memory-capture` cron every 4 hours.
 
-Keep it concise — this file is read every session. Update proactively when you learn something worth remembering. A PreCompact hook will remind you before context compaction, and a nightly cron job provides a safety net.
+**When you notice something worth remembering during a conversation**, append it to `memory/YYYY-MM-DD.md`:
+- Use `## HH:MM` headings with bullet points underneath
+- One line per item, factual and concise
+- Capture: decisions made, facts learned, preferences expressed, tasks completed, problems solved
+
+**Daily logs are an archive.** Don't read them every session — search them when you need to look up past events.
+
+### What goes where
+- `MEMORY.md` — stable patterns, key decisions, active context, recurring preferences (cron-managed)
+- `USER.md` — personal facts about the user (updated by consolidation cron)
+- `memory/YYYY-MM-DD.md` — raw daily events (written by you and capture cron)
 
 ## Every Session
 
@@ -73,6 +85,7 @@ When creating new skills, always put them in `.claude/skills/` within this works
 
 Structure:
 - `.claude/skills/` — local agent skills
+- `memory/` — daily logs (YYYY-MM-DD.md)
 - `.macroclaw/cron.json` — scheduled jobs (hot-reloaded, no restart needed) (use add-cron skill to modify)
 
 ## Safety
