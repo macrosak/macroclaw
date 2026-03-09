@@ -1,18 +1,21 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CronExpressionParser } from "cron-parser";
+import { z } from "zod/v4";
 
-interface CronJob {
-  name: string;
-  cron: string;
-  prompt: string;
-  recurring?: boolean;
-  model?: string;
-}
+const cronJobSchema = z.object({
+  name: z.string(),
+  cron: z.string(),
+  prompt: z.string(),
+  recurring: z.boolean().optional(),
+  model: z.string().optional(),
+});
 
-interface CronConfig {
-  jobs: CronJob[];
-}
+const cronConfigSchema = z.object({
+  jobs: z.array(cronJobSchema),
+});
+
+type CronConfig = z.infer<typeof cronConfigSchema>;
 
 interface Queue {
   push(item: { message: string; model?: string; source?: string; name?: string }): void;
@@ -35,15 +38,15 @@ export function startCron(workspace: string, queue: Queue): () => void {
     let config: CronConfig;
     try {
       const raw = readFileSync(cronPath, "utf-8");
-      config = JSON.parse(raw);
+      const parsed = cronConfigSchema.safeParse(JSON.parse(raw));
+      if (!parsed.success) {
+        console.warn("[cron] cron.json: 'jobs' is not an array");
+        return;
+      }
+      config = parsed.data;
     } catch (err) {
       if (err instanceof Error && "code" in err && err.code === "ENOENT") return;
       console.warn("[cron] Failed to read cron.json:", err instanceof Error ? err.message : err);
-      return;
-    }
-
-    if (!Array.isArray(config.jobs)) {
-      console.warn("[cron] cron.json: 'jobs' is not an array");
       return;
     }
 

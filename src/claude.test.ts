@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { runClaude } from "./claude";
 
 function jsonResponse(action: "send" | "silent", message: string, reason: string): string {
@@ -171,6 +171,23 @@ describe("runClaude", () => {
     const args = (Bun.spawn as any).mock.calls[0][0] as string[];
     const prompt = args[args.length - 1];
     expect(prompt).toBe("hello");
+  });
+
+  it("returns validation-failed when structured_output has wrong shape", async () => {
+    const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
+    const stdout = JSON.stringify({
+      type: "result",
+      duration_ms: 1000,
+      total_cost_usd: 0.05,
+      structured_output: { action: "invalid-action", message: "hi", reason: "ok" },
+    });
+    mockSpawn({ stdout, exitCode: 0 });
+    const result = await runClaude("msg", "--resume", "sid-16", undefined, TEST_WORKSPACE);
+    expect(result.action).toBe("send");
+    expect(result.message).toBe("hi");
+    expect(result.reason).toBe("validation-failed");
+    expect(warnSpy).toHaveBeenCalledWith("[claude] structured_output failed validation:", expect.any(String));
+    warnSpy.mockRestore();
   });
 
   it("parses files array from structured output", async () => {

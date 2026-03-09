@@ -1,38 +1,16 @@
-export interface ClaudeResponse {
-  action: "send" | "silent" | "background";
-  message: string;
-  reason: string;
-  name?: string;
-  files?: string[];
-}
+import { z } from "zod/v4";
 
-const jsonSchema = JSON.stringify({
-  type: "object",
-  properties: {
-    action: {
-      type: "string",
-      enum: ["send", "silent", "background"],
-    },
-    message: {
-      type: "string",
-      description: "The message to send to Telegram, or the prompt for background agents",
-    },
-    name: {
-      type: "string",
-      description: "Label for background agent (only used when action is background)",
-    },
-    reason: {
-      type: "string",
-      description: "Why the agent chose this action (logged, not sent)",
-    },
-    files: {
-      type: "array",
-      items: { type: "string" },
-      description: "Absolute paths to files to send to Telegram (optional)",
-    },
-  },
-  required: ["action", "message", "reason"],
+const claudeResponseSchema = z.object({
+  action: z.enum(["send", "silent", "background"]),
+  message: z.string().describe("The message to send to Telegram, or the prompt for background agents"),
+  reason: z.string().describe("Why the agent chose this action (logged, not sent)"),
+  name: z.string().describe("Label for background agent (only used when action is background)").optional(),
+  files: z.array(z.string()).describe("Absolute paths to files to send to Telegram (optional)").optional(),
 });
+
+export type ClaudeResponse = z.infer<typeof claudeResponseSchema>;
+
+const jsonSchema = JSON.stringify(z.toJSONSchema(claudeResponseSchema));
 
 export async function runClaude(
   message: string,
@@ -93,7 +71,10 @@ export async function runClaude(
       const cost = envelope.total_cost_usd ? `$${envelope.total_cost_usd.toFixed(4)}` : "?";
       console.log(`[claude] → ${duration} ${cost}`);
       if (envelope.structured_output) {
-        return envelope.structured_output as ClaudeResponse;
+        const parsed = claudeResponseSchema.safeParse(envelope.structured_output);
+        if (parsed.success) return parsed.data;
+        console.warn("[claude] structured_output failed validation:", parsed.error.message);
+        return { action: "send", message: envelope.structured_output.message ?? stdout, reason: "validation-failed" };
       }
       console.log(`[claude] no structured_output, envelope: ${JSON.stringify(envelope)}`);
       return { action: "send", message: envelope.result ?? stdout, reason: "no-structured-output" };
