@@ -12,7 +12,7 @@
     "lint:fix": "biome check --fix --unsafe",
     "test": "bun test --coverage",
     "sync-skills": "bun run scripts/sync-skills.ts",
-    "claude": "set -a && . ./.env && set +a && cd ${WORKSPACE:-~/.macroclaw-workspace} && claude --resume $SESSION_ID --model ${MODEL:-sonnet}"
+    "claude": "set -a && . ./.env && set +a && cd ${WORKSPACE:-~/.macroclaw-workspace} && claude --resume $(node -p \"require('$HOME/.macroclaw/settings.json').sessionId\") --model ${MODEL:-sonnet}"
   },
   "dependencies": {
     "cron-parser": "^5.5.0",

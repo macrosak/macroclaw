@@ -1,5 +1,6 @@
-import { newSessionId, runClaude } from "./claude";
+import { runClaude } from "./claude";
 import { BG_TIMEOUT, promptBackgroundAgent } from "./prompts";
+import { newSessionId } from "./settings";
 
 interface BackgroundInfo {
   name: string;
@@ -30,7 +31,7 @@ export function createBackgroundManager(
 
       console.log(`[background] Starting "${name}" (session ${sessionId})`);
 
-      runClaudeFn(prompt, sessionId, model, workspace, promptBackgroundAgent(name), BG_TIMEOUT).then(
+      runClaudeFn(prompt, "--session-id", sessionId, model, workspace, promptBackgroundAgent(name), BG_TIMEOUT).then(
         (response) => {
           active.delete(sessionId);
           const result = response.message || "[No output]";

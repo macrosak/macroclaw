@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, mock } from "bun:test";
-import { newSessionId, runClaude } from "./claude";
+import { runClaude } from "./claude";
 
 function jsonResponse(action: "send" | "silent", message: string, reason: string): string {
   return JSON.stringify({
@@ -36,79 +36,38 @@ function mockSpawn(opts: {
 
 const TEST_WORKSPACE = "/tmp/macroclaw-test-workspace";
 
-// Use unique session IDs per test to avoid knownSessions leaking between tests
-let testCounter = 0;
-function uniqueSession() {
-  return `test-session-${++testCounter}`;
-}
-
 describe("runClaude", () => {
-  it("uses --session-id on first call", async () => {
-    const sid = uniqueSession();
+  it("passes --session-id flag when given", async () => {
     mockSpawn({ stdout: jsonResponse("send", "Hello", "user message"), exitCode: 0 });
-    const result = await runClaude("test message", sid, undefined, TEST_WORKSPACE);
+    const result = await runClaude("test message", "--session-id", "sid-1", undefined, TEST_WORKSPACE);
     expect(result).toEqual({ action: "send", message: "Hello", reason: "user message" });
     expect(Bun.spawn).toHaveBeenCalledWith(
-      expect.arrayContaining(["claude", "-p", "--session-id", sid, "--output-format", "json", "--json-schema"]),
+      expect.arrayContaining(["claude", "-p", "--session-id", "sid-1", "--output-format", "json", "--json-schema"]),
       expect.objectContaining({ cwd: TEST_WORKSPACE, stdout: "pipe", stderr: "pipe" }),
     );
   });
 
-  it("uses --resume on subsequent calls", async () => {
-    const sid = uniqueSession();
-    // First call to mark session as known
-    mockSpawn({ stdout: jsonResponse("send", "first", "ok"), exitCode: 0 });
-    await runClaude("msg1", sid, undefined, TEST_WORKSPACE);
-
-    // Second call should use --resume
-    mockSpawn({ stdout: jsonResponse("send", "second", "ok"), exitCode: 0 });
-    await runClaude("msg2", sid, undefined, TEST_WORKSPACE);
+  it("passes --resume flag when given", async () => {
+    mockSpawn({ stdout: jsonResponse("send", "Hello", "ok"), exitCode: 0 });
+    await runClaude("msg", "--resume", "sid-2", undefined, TEST_WORKSPACE);
     expect(Bun.spawn).toHaveBeenCalledWith(
-      expect.arrayContaining(["claude", "-p", "--resume", sid, "--output-format", "json", "--json-schema"]),
+      expect.arrayContaining(["claude", "-p", "--resume", "sid-2", "--output-format", "json", "--json-schema"]),
       expect.objectContaining({ cwd: TEST_WORKSPACE, stdout: "pipe", stderr: "pipe" }),
     );
-  });
-
-  it("retries with --resume when session already exists", async () => {
-    const sid = uniqueSession();
-    let callCount = 0;
-    Bun.spawn = mock((() => {
-      callCount++;
-      if (callCount === 1) {
-        return {
-          stdout: new Response("").body,
-          stderr: new Response("Session ID is already in use").body,
-          exited: Promise.resolve(1),
-          kill: mock(() => {}),
-        };
-      }
-      return {
-        stdout: new Response(jsonResponse("send", "retried ok", "ok")).body,
-        stderr: new Response("").body,
-        exited: Promise.resolve(0),
-        kill: mock(() => {}),
-      };
-    }) as any);
-
-    const result = await runClaude("msg", sid, undefined, TEST_WORKSPACE);
-    expect(result).toEqual({ action: "send", message: "retried ok", reason: "ok" });
-    expect(callCount).toBe(2);
   });
 
   it("passes model flag when provided", async () => {
-    const sid = uniqueSession();
     mockSpawn({ stdout: jsonResponse("send", "ok", "ok"), exitCode: 0 });
-    await runClaude("msg", sid, "haiku", TEST_WORKSPACE);
+    await runClaude("msg", "--session-id", "sid-3", "haiku", TEST_WORKSPACE);
     expect(Bun.spawn).toHaveBeenCalledWith(
-      expect.arrayContaining(["claude", "-p", "--session-id", sid, "--output-format", "json", "--json-schema", "--model", "haiku", "msg"]),
+      expect.arrayContaining(["claude", "-p", "--session-id", "sid-3", "--output-format", "json", "--json-schema", "--model", "haiku", "msg"]),
       expect.objectContaining({ cwd: TEST_WORKSPACE, stdout: "pipe", stderr: "pipe" }),
     );
   });
 
   it("passes --append-system-prompt when systemPrompt is provided", async () => {
-    const sid = uniqueSession();
     mockSpawn({ stdout: jsonResponse("send", "ok", "ok"), exitCode: 0 });
-    await runClaude("msg", sid, undefined, TEST_WORKSPACE, "You are a background agent.");
+    await runClaude("msg", "--session-id", "sid-4", undefined, TEST_WORKSPACE, "You are a background agent.");
     expect(Bun.spawn).toHaveBeenCalledWith(
       expect.arrayContaining(["--append-system-prompt", "You are a background agent.", "msg"]),
       expect.objectContaining({ cwd: TEST_WORKSPACE }),
@@ -116,17 +75,15 @@ describe("runClaude", () => {
   });
 
   it("omits --append-system-prompt when systemPrompt is undefined", async () => {
-    const sid = uniqueSession();
     mockSpawn({ stdout: jsonResponse("send", "ok", "ok"), exitCode: 0 });
-    await runClaude("msg", sid, undefined, TEST_WORKSPACE);
+    await runClaude("msg", "--session-id", "sid-5", undefined, TEST_WORKSPACE);
     const args = (Bun.spawn as any).mock.calls[0][0] as string[];
     expect(args).not.toContain("--append-system-prompt");
   });
 
   it("returns error response on non-zero exit", async () => {
-    const sid = uniqueSession();
     mockSpawn({ stderr: "something went wrong", exitCode: 1 });
-    const result = await runClaude("bad message", sid, undefined, TEST_WORKSPACE);
+    const result = await runClaude("bad message", "--session-id", "sid-6", undefined, TEST_WORKSPACE);
     expect(result.action).toBe("send");
     expect(result.message).toContain("[Error]");
     expect(result.message).toContain("something went wrong");
@@ -135,7 +92,6 @@ describe("runClaude", () => {
   });
 
   it("returns timeout error when process is killed by timeout", async () => {
-    const sid = uniqueSession();
     let resolveExited!: (code: number) => void;
     const proc = {
       stdout: new Response("").body,
@@ -155,7 +111,7 @@ describe("runClaude", () => {
     }) as any;
 
     Bun.spawn = mock((() => proc) as any);
-    const result = await runClaude("slow message", sid, undefined, TEST_WORKSPACE, undefined, 60_000);
+    const result = await runClaude("slow message", "--session-id", "sid-7", undefined, TEST_WORKSPACE, undefined, 60_000);
     globalThis.setTimeout = origSetTimeout;
 
     expect(proc.kill).toHaveBeenCalled();
@@ -166,105 +122,58 @@ describe("runClaude", () => {
   });
 
   it("returns silent response when agent chooses silent", async () => {
-    const sid = uniqueSession();
     mockSpawn({ stdout: jsonResponse("silent", "", "no new results"), exitCode: 0 });
-    const result = await runClaude("check cron", sid, undefined, TEST_WORKSPACE);
+    const result = await runClaude("check cron", "--resume", "sid-8", undefined, TEST_WORKSPACE);
     expect(result).toEqual({ action: "silent", message: "", reason: "no new results" });
   });
 
   it("falls back to result field when structured_output is missing", async () => {
-    const sid = uniqueSession();
     const envelope = JSON.stringify({ type: "result", result: "plain text", duration_ms: 100, total_cost_usd: 0.01 });
     mockSpawn({ stdout: envelope, exitCode: 0 });
-    const result = await runClaude("msg", sid, undefined, TEST_WORKSPACE);
+    const result = await runClaude("msg", "--resume", "sid-9", undefined, TEST_WORKSPACE);
     expect(result).toEqual({ action: "send", message: "plain text", reason: "no-structured-output" });
   });
 
   it("returns JSON error fallback when stdout is not valid JSON", async () => {
-    const sid = uniqueSession();
     mockSpawn({ stdout: "not json at all", exitCode: 0 });
-    const result = await runClaude("msg", sid, undefined, TEST_WORKSPACE);
+    const result = await runClaude("msg", "--resume", "sid-10", undefined, TEST_WORKSPACE);
     expect(result.action).toBe("send");
     expect(result.message).toContain("[JSON Error]");
     expect(result.message).toContain("not json at all");
     expect(result.reason).toBe("json-parse-failed");
   });
 
-  it("newSessionId returns a valid UUID", () => {
-    const id = newSessionId();
-    expect(id).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
-    );
-    expect(newSessionId()).not.toBe(id);
-  });
-
-  it("calls proc.kill() when timeout fires", async () => {
-    const sid = uniqueSession();
-    let resolveExited!: (code: number) => void;
-    const proc = {
-      stdout: new Response("").body,
-      stderr: new Response("").body,
-      exited: new Promise<number>((resolve) => {
-        resolveExited = resolve;
-      }),
-      kill: mock(() => {
-        resolveExited(137);
-      }),
-    };
-
-    const origSetTimeout = globalThis.setTimeout;
-    globalThis.setTimeout = ((fn: Function) => {
-      fn();
-      return 0 as any;
-    }) as any;
-
-    Bun.spawn = mock((() => proc) as any);
-    const result = await runClaude("timeout test", sid, undefined, TEST_WORKSPACE, undefined, 60_000);
-    globalThis.setTimeout = origSetTimeout;
-
-    expect(proc.kill).toHaveBeenCalled();
-    expect(result.action).toBe("send");
-    expect(result.message).toContain("[Error]");
-    expect(result.message).toContain("timed out after 60s");
-    expect(result.reason).toBe("timeout");
-  });
-
   it("does not set timeout when timeoutMs is not provided", async () => {
-    const sid = uniqueSession();
     mockSpawn({ stdout: jsonResponse("send", "ok", "ok"), exitCode: 0 });
-    const result = await runClaude("msg", sid, undefined, TEST_WORKSPACE);
+    const result = await runClaude("msg", "--resume", "sid-11", undefined, TEST_WORKSPACE);
     expect(result).toEqual({ action: "send", message: "ok", reason: "ok" });
   });
 
   it("prepends file references to prompt", async () => {
-    const sid = uniqueSession();
     mockSpawn({ stdout: jsonResponse("send", "ok", "ok"), exitCode: 0 });
-    await runClaude("describe this", sid, undefined, TEST_WORKSPACE, undefined, undefined, ["/tmp/photo.jpg", "/tmp/doc.pdf"]);
+    await runClaude("describe this", "--session-id", "sid-12", undefined, TEST_WORKSPACE, undefined, undefined, ["/tmp/photo.jpg", "/tmp/doc.pdf"]);
     const args = (Bun.spawn as any).mock.calls[0][0] as string[];
     const prompt = args[args.length - 1];
     expect(prompt).toBe("[File: /tmp/photo.jpg]\n[File: /tmp/doc.pdf]\ndescribe this");
   });
 
   it("sends only file references when message is empty", async () => {
-    const sid = uniqueSession();
     mockSpawn({ stdout: jsonResponse("send", "ok", "ok"), exitCode: 0 });
-    await runClaude("", sid, undefined, TEST_WORKSPACE, undefined, undefined, ["/tmp/photo.jpg"]);
+    await runClaude("", "--session-id", "sid-13", undefined, TEST_WORKSPACE, undefined, undefined, ["/tmp/photo.jpg"]);
     const args = (Bun.spawn as any).mock.calls[0][0] as string[];
     const prompt = args[args.length - 1];
     expect(prompt).toBe("[File: /tmp/photo.jpg]");
   });
 
   it("does not modify prompt when files is empty", async () => {
-    const sid = uniqueSession();
     mockSpawn({ stdout: jsonResponse("send", "ok", "ok"), exitCode: 0 });
-    await runClaude("hello", sid, undefined, TEST_WORKSPACE, undefined, undefined, []);
+    await runClaude("hello", "--session-id", "sid-14", undefined, TEST_WORKSPACE, undefined, undefined, []);
     const args = (Bun.spawn as any).mock.calls[0][0] as string[];
     const prompt = args[args.length - 1];
     expect(prompt).toBe("hello");
   });
 
   it("parses files array from structured output", async () => {
-    const sid = uniqueSession();
     const stdout = JSON.stringify({
       type: "result",
       duration_ms: 1000,
@@ -272,7 +181,7 @@ describe("runClaude", () => {
       structured_output: { action: "send", message: "Here's the chart", reason: "ok", files: ["/tmp/chart.png"] },
     });
     mockSpawn({ stdout, exitCode: 0 });
-    const result = await runClaude("msg", sid, undefined, TEST_WORKSPACE);
+    const result = await runClaude("msg", "--resume", "sid-15", undefined, TEST_WORKSPACE);
     expect(result.files).toEqual(["/tmp/chart.png"]);
   });
 });

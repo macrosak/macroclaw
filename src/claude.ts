@@ -1,7 +1,3 @@
-import { randomUUID } from "node:crypto";
-
-const knownSessions = new Set<string>();
-
 export interface ClaudeResponse {
   action: "send" | "silent" | "background";
   message: string;
@@ -40,6 +36,7 @@ const jsonSchema = JSON.stringify({
 
 export async function runClaude(
   message: string,
+  sessionFlag: "--resume" | "--session-id",
   sessionId: string,
   model: string | undefined,
   workspace: string,
@@ -58,10 +55,6 @@ export async function runClaude(
     prompt = prompt ? `${prefix}\n${prompt}` : prefix;
   }
 
-  // First call for a session uses --session-id, subsequent calls use --resume
-  const sessionFlag = knownSessions.has(sessionId)
-    ? "--resume"
-    : "--session-id";
   const args = ["claude", "-p", sessionFlag, sessionId, "--output-format", "json", "--json-schema", jsonSchema];
   if (model) args.push("--model", model);
   if (systemPrompt) args.push("--append-system-prompt", systemPrompt);
@@ -93,7 +86,6 @@ export async function runClaude(
   }
 
   if (exitCode === 0) {
-    knownSessions.add(sessionId);
     const stdout = await new Response(proc.stdout).text();
     try {
       const envelope = JSON.parse(stdout);
@@ -113,15 +105,5 @@ export async function runClaude(
   const stderr = await new Response(proc.stderr).text();
   console.log(`[claude] error (exit ${exitCode}): ${stderr.slice(0, 200)}`);
 
-  // If --session-id fails because session exists, retry with --resume
-  if (sessionFlag === "--session-id" && stderr.includes("already in use")) {
-    knownSessions.add(sessionId);
-    return runClaude(message, sessionId, model, workspace, systemPrompt, timeoutMs, files);
-  }
-
   return { action: "send", message: `[Error] Claude exited with code ${exitCode}:\n${stderr}`, reason: "process-error" };
-}
-
-export function newSessionId(): string {
-  return randomUUID();
 }

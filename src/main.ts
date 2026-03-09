@@ -22,7 +22,6 @@ initWorkspace(workspace);
 const config: AppConfig = {
   botToken: requireEnv("TELEGRAM_BOT_TOKEN"),
   authorizedChatId: requireEnv("AUTHORIZED_CHAT_ID"),
-  sessionId: process.env.SESSION_ID || "main",
   workspace,
   model: process.env.MODEL,
 };

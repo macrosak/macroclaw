@@ -36,6 +36,11 @@ bun run sync-skills # Deploy system skills to workspace
 - Single authorized chat only
 - Messages are processed serially (FIFO queue)
 
+## Design Docs
+
+- Design docs live in `docs.local/` (gitignored)
+- Once all commits in a design doc are done, move it to `docs.local/archive/` and do not modify it further
+
 ## Workflow
 
 - Work autonomously — never ask "shall I commit?" — just commit and push

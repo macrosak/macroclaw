@@ -30,9 +30,10 @@ describe("createBackgroundManager", () => {
     expect(mgr.list()[0].name).toBe("test-task");
     expect(runClaude).toHaveBeenCalledTimes(1);
     expect(runClaude.mock.calls[0][0]).toBe("do something");
-    expect(runClaude.mock.calls[0][2]).toBe("haiku");
-    expect(runClaude.mock.calls[0][3]).toBe("/workspace");
-    expect(runClaude.mock.calls[0][4]).toContain("background agent named \"test-task\"");
+    expect(runClaude.mock.calls[0][1]).toBe("--session-id");
+    expect(runClaude.mock.calls[0][3]).toBe("haiku");
+    expect(runClaude.mock.calls[0][4]).toBe("/workspace");
+    expect(runClaude.mock.calls[0][5]).toContain("background agent named \"test-task\"");
 
     resolvePromise!({
       action: "send",
@@ -139,7 +140,7 @@ describe("createBackgroundManager", () => {
     mgr.spawn("bg-task", "do work", undefined, "/workspace", queue);
     await new Promise((r) => setTimeout(r, 0));
 
-    expect(runClaude.mock.calls[0][5]).toBe(1_800_000);
+    expect(runClaude.mock.calls[0][6]).toBe(1_800_000);
   });
 
   it("list returns empty array when no agents are running", () => {

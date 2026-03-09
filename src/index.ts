@@ -3,15 +3,16 @@ import { type ClaudeResponse, runClaude } from "./claude";
 import { startCron } from "./cron";
 import { CRON_TIMEOUT, MAIN_TIMEOUT, PROMPT_BACKGROUND_RESULT, PROMPT_CRON_EVENT, PROMPT_USER_MESSAGE } from "./prompts";
 import { createQueue } from "./queue";
+import { loadSettings, newSessionId, saveSettings } from "./settings";
 import { createBot, downloadFile, sendFile, sendResponse } from "./telegram";
 
 export interface AppConfig {
   botToken: string;
   authorizedChatId: string;
-  sessionId: string;
   workspace: string;
   model?: string;
-  runClaude?: (message: string, sessionId: string, model: string | undefined, workspace: string, systemPrompt?: string, timeoutMs?: number, files?: string[]) => Promise<ClaudeResponse>;
+  settingsDir?: string;
+  runClaude?: (message: string, sessionFlag: "--resume" | "--session-id", sessionId: string, model: string | undefined, workspace: string, systemPrompt?: string, timeoutMs?: number, files?: string[]) => Promise<ClaudeResponse>;
 }
 
 export function requireEnv(name: string): string {
@@ -29,6 +30,21 @@ export function createApp(config: AppConfig) {
   const claude = config.runClaude ?? runClaude;
   const background = createBackgroundManager(claude);
 
+  // Session state
+  const settings = loadSettings(config.settingsDir);
+  let sessionId: string;
+  let sessionFlag: "--resume" | "--session-id";
+  let sessionResolved = false;
+
+  if (settings.sessionId) {
+    sessionId = settings.sessionId;
+    sessionFlag = "--resume";
+  } else {
+    sessionId = newSessionId();
+    sessionFlag = "--session-id";
+    saveSettings({ sessionId }, config.settingsDir);
+  }
+
   queue.setHandler(async (item) => {
     console.log(`[incoming] ${item.message}`);
     await bot.api.sendChatAction(config.authorizedChatId, "typing");
@@ -40,7 +56,24 @@ export function createApp(config: AppConfig) {
         ? PROMPT_BACKGROUND_RESULT
         : PROMPT_USER_MESSAGE;
     const timeout = isCron ? CRON_TIMEOUT : MAIN_TIMEOUT;
-    const response = await claude(item.message, config.sessionId, model, config.workspace, systemPrompt, timeout, item.files);
+
+    let response = await claude(item.message, sessionFlag, sessionId, model, config.workspace, systemPrompt, timeout, item.files);
+
+    // Session resolution: if resume failed on first call, create new session
+    if (!sessionResolved && sessionFlag === "--resume" && response.reason === "process-error") {
+      console.log("[session] Resume failed, creating new session");
+      sessionId = newSessionId();
+      sessionFlag = "--session-id";
+      saveSettings({ sessionId }, config.settingsDir);
+      response = await claude(item.message, sessionFlag, sessionId, model, config.workspace, systemPrompt, timeout, item.files);
+    }
+
+    // Mark resolved on first success
+    if (!sessionResolved && response.reason !== "process-error" && response.reason !== "timeout") {
+      sessionResolved = true;
+      sessionFlag = "--resume";
+    }
+
     console.log(`[response] action=${response.action} reason=${response.reason} message=${response.message.slice(0, 120)}`);
 
     if (response.reason === "timeout") {
@@ -79,7 +112,7 @@ export function createApp(config: AppConfig) {
 
   bot.command("session", (ctx) => {
     console.log("[command] /session");
-    ctx.reply(`Session: \`${config.sessionId}\``, { parse_mode: "Markdown" });
+    ctx.reply(`Session: \`${sessionId}\``, { parse_mode: "Markdown" });
   });
 
   bot.command("bg", (ctx) => {
@@ -159,10 +192,9 @@ export function createApp(config: AppConfig) {
         onStart: (botInfo) => {
           console.log(`Bot connected: @${botInfo.username}`);
           console.log(`Authorized chat: ${config.authorizedChatId}`);
-          console.log(`Session: ${config.sessionId}`);
+          console.log(`Session: ${sessionId}`);
         },
       });
     },
   };
 }
-

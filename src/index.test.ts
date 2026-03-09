@@ -1,7 +1,9 @@
-import { describe, expect, it, mock, spyOn } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { existsSync, rmSync } from "node:fs";
 import type { ClaudeResponse } from "./claude";
 import { type AppConfig, createApp, requireEnv } from "./index";
 import { PROMPT_BACKGROUND_RESULT, PROMPT_CRON_EVENT, PROMPT_USER_MESSAGE } from "./prompts";
+import { saveSettings } from "./settings";
 
 // Mock Grammy Bot
 mock.module("grammy", () => ({
@@ -44,12 +46,23 @@ mock.module("grammy", () => ({
   },
 }));
 
+const tmpSettingsDir = "/tmp/macroclaw-test-settings";
+
+beforeEach(() => {
+  if (existsSync(tmpSettingsDir)) rmSync(tmpSettingsDir, { recursive: true });
+  saveSettings({ sessionId: "test-session" }, tmpSettingsDir);
+});
+
+afterEach(() => {
+  if (existsSync(tmpSettingsDir)) rmSync(tmpSettingsDir, { recursive: true });
+});
+
 function makeConfig(overrides?: Partial<AppConfig>): AppConfig {
   return {
     botToken: "test-token",
     authorizedChatId: "12345",
-    sessionId: "test-session",
     workspace: "/tmp/macroclaw-test-workspace",
+    settingsDir: tmpSettingsDir,
     runClaude: mock(async (msg: string): Promise<ClaudeResponse> => ({ action: "send", message: `Response to: ${msg}`, reason: "user message" })),
     ...overrides,
   };
@@ -84,6 +97,96 @@ describe("createApp", () => {
     expect(bot.errorHandler).not.toBeNull();
   });
 
+  it("generates new session ID when settings is empty", () => {
+    if (existsSync(tmpSettingsDir)) rmSync(tmpSettingsDir, { recursive: true });
+    const consoleSpy = spyOn(console, "log").mockImplementation(() => {});
+    const app = createApp(makeConfig());
+    const bot = app.bot as any;
+
+    // /session should return a UUID, not "test-session"
+    const ctx = { reply: mock(() => {}) };
+    bot.commandHandlers.get("session")!(ctx);
+    const reply = (ctx.reply as any).mock.calls[0][0];
+    expect(reply).toMatch(/Session: `[0-9a-f]{8}-/);
+    consoleSpy.mockRestore();
+  });
+
+  describe("session resolution", () => {
+    it("uses --resume for existing session on first call", async () => {
+      const config = makeConfig();
+      const app = createApp(config);
+      const bot = app.bot as any;
+      const handler = bot.filterHandlers.get("message:text")![0];
+
+      handler({ chat: { id: 12345 }, message: { text: "hello" } });
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(config.runClaude).toHaveBeenCalledWith("hello", "--resume", "test-session", undefined, "/tmp/macroclaw-test-workspace", PROMPT_USER_MESSAGE, 60_000, undefined);
+    });
+
+    it("creates new session when resume fails", async () => {
+      let callCount = 0;
+      const config = makeConfig({
+        runClaude: mock(async (msg: string): Promise<ClaudeResponse> => {
+          callCount++;
+          if (callCount === 1) {
+            return { action: "send", message: "[Error] session not found", reason: "process-error" };
+          }
+          return { action: "send", message: `Response to: ${msg}`, reason: "user message" };
+        }),
+      });
+      const app = createApp(config);
+      const bot = app.bot as any;
+      const handler = bot.filterHandlers.get("message:text")![0];
+
+      handler({ chat: { id: 12345 }, message: { text: "hello" } });
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(callCount).toBe(2);
+      // First call: --resume with old session
+      const firstCall = (config.runClaude as any).mock.calls[0];
+      expect(firstCall[1]).toBe("--resume");
+      expect(firstCall[2]).toBe("test-session");
+      // Second call: --session-id with new UUID
+      const secondCall = (config.runClaude as any).mock.calls[1];
+      expect(secondCall[1]).toBe("--session-id");
+      expect(secondCall[2]).not.toBe("test-session");
+      expect(secondCall[2]).toMatch(/^[0-9a-f]{8}-/);
+    });
+
+    it("uses --session-id on first call when no settings exist", async () => {
+      if (existsSync(tmpSettingsDir)) rmSync(tmpSettingsDir, { recursive: true });
+      const config = makeConfig();
+      const app = createApp(config);
+      const bot = app.bot as any;
+      const handler = bot.filterHandlers.get("message:text")![0];
+
+      handler({ chat: { id: 12345 }, message: { text: "hello" } });
+      await new Promise((r) => setTimeout(r, 50));
+
+      const call = (config.runClaude as any).mock.calls[0];
+      expect(call[1]).toBe("--session-id");
+      expect(call[2]).toMatch(/^[0-9a-f]{8}-/);
+    });
+
+    it("switches to --resume after first successful call", async () => {
+      const config = makeConfig();
+      const app = createApp(config);
+      const bot = app.bot as any;
+      const handler = bot.filterHandlers.get("message:text")![0];
+
+      handler({ chat: { id: 12345 }, message: { text: "first" } });
+      await new Promise((r) => setTimeout(r, 50));
+      handler({ chat: { id: 12345 }, message: { text: "second" } });
+      await new Promise((r) => setTimeout(r, 50));
+
+      const firstCall = (config.runClaude as any).mock.calls[0];
+      const secondCall = (config.runClaude as any).mock.calls[1];
+      expect(firstCall[1]).toBe("--resume");
+      expect(secondCall[1]).toBe("--resume");
+    });
+  });
+
   describe("message handler", () => {
     it("queues messages from authorized chat", async () => {
       const config = makeConfig();
@@ -94,7 +197,7 @@ describe("createApp", () => {
       handler({ chat: { id: 12345 }, message: { text: "hello" } });
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(config.runClaude).toHaveBeenCalledWith("hello", "test-session", undefined, "/tmp/macroclaw-test-workspace", PROMPT_USER_MESSAGE, 60_000, undefined);
+      expect(config.runClaude).toHaveBeenCalledWith("hello", "--resume", "test-session", undefined, "/tmp/macroclaw-test-workspace", PROMPT_USER_MESSAGE, 60_000, undefined);
     });
 
     it("passes model override from queue item", async () => {
@@ -104,7 +207,7 @@ describe("createApp", () => {
       app.queue.push({ message: "cron msg", model: "haiku" });
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(config.runClaude).toHaveBeenCalledWith("cron msg", "test-session", "haiku", "/tmp/macroclaw-test-workspace", PROMPT_USER_MESSAGE, 60_000, undefined);
+      expect(config.runClaude).toHaveBeenCalledWith("cron msg", "--resume", "test-session", "haiku", "/tmp/macroclaw-test-workspace", PROMPT_USER_MESSAGE, 60_000, undefined);
       const bot = app.bot as any;
       expect(bot.api.sendMessage).toHaveBeenCalled();
     });
@@ -247,6 +350,7 @@ describe("createApp", () => {
 
       expect(config.runClaude).toHaveBeenCalledWith(
         "[Tool: cron/daily-check] Check for updates",
+        "--resume",
         "test-session",
         undefined,
         "/tmp/macroclaw-test-workspace",
@@ -265,6 +369,7 @@ describe("createApp", () => {
 
       expect(config.runClaude).toHaveBeenCalledWith(
         "[Background: research] Here are the results",
+        "--resume",
         "test-session",
         undefined,
         "/tmp/macroclaw-test-workspace",
@@ -283,7 +388,7 @@ describe("createApp", () => {
       handler({ chat: { id: 12345 }, message: { text: "hello" } });
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(config.runClaude).toHaveBeenCalledWith("hello", "test-session", undefined, "/tmp/macroclaw-test-workspace", PROMPT_USER_MESSAGE, 60_000, undefined);
+      expect(config.runClaude).toHaveBeenCalledWith("hello", "--resume", "test-session", undefined, "/tmp/macroclaw-test-workspace", PROMPT_USER_MESSAGE, 60_000, undefined);
     });
 
     it("passes CRON_TIMEOUT for cron messages", async () => {
@@ -295,6 +400,7 @@ describe("createApp", () => {
 
       expect(config.runClaude).toHaveBeenCalledWith(
         "[Tool: cron/daily-check] Check for updates",
+        "--resume",
         "test-session",
         undefined,
         "/tmp/macroclaw-test-workspace",
@@ -395,7 +501,10 @@ describe("createApp", () => {
 
     it("sends error wrapped in ClaudeResponse", async () => {
       const config = makeConfig({
-        runClaude: mock(async (): Promise<ClaudeResponse> => ({ action: "send", message: "[Error] Claude exited with code 1:\nspawn failed", reason: "process-error" })),
+        runClaude: mock(async (): Promise<ClaudeResponse> => {
+          // First call triggers session resolution retry, second also fails
+          return { action: "send", message: "[Error] Claude exited with code 1:\nspawn failed", reason: "process-error" };
+        }),
       });
       const app = createApp(config);
       const bot = app.bot as any;
@@ -437,8 +546,8 @@ describe("createApp", () => {
       expect(config.runClaude).toHaveBeenCalled();
       const call = (config.runClaude as any).mock.calls[0];
       expect(call[0]).toBe("check this");
-      expect(call[6]).toBeDefined();
-      expect(call[6][0]).toContain("/tmp/macroclaw/inbound/");
+      expect(call[7]).toBeDefined();
+      expect(call[7][0]).toContain("/tmp/macroclaw/inbound/");
 
       globalThis.fetch = origFetch;
     });
@@ -467,7 +576,7 @@ describe("createApp", () => {
       expect(config.runClaude).toHaveBeenCalled();
       const call = (config.runClaude as any).mock.calls[0];
       expect(call[0]).toBe("review this");
-      expect(call[6][0]).toContain("report.pdf");
+      expect(call[7][0]).toContain("report.pdf");
 
       globalThis.fetch = origFetch;
     });
