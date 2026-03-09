@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { startCron } from "./cron";
@@ -81,33 +81,27 @@ describe("startCron", () => {
     expect(queue.push).not.toHaveBeenCalled();
   });
 
-  it("warns on malformed JSON", () => {
+  it("does not push on malformed JSON", () => {
     writeFileSync(CRON_FILE, "not json{{{");
 
-    const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
     const queue = makeQueue();
     const stop = startCron(TEST_DIR, queue);
     stop();
 
-    expect(warnSpy).toHaveBeenCalled();
-    const msg = warnSpy.mock.calls[0][0] as string;
-    expect(msg).toContain("[cron]");
-    warnSpy.mockRestore();
+    expect(queue.push).not.toHaveBeenCalled();
   });
 
-  it("warns when jobs is not an array", () => {
+  it("does not push when jobs is not an array", () => {
     writeCronConfig({ jobs: "not-array" });
 
-    const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
     const queue = makeQueue();
     const stop = startCron(TEST_DIR, queue);
     stop();
 
-    expect(warnSpy).toHaveBeenCalledWith("[cron] cron.json: 'jobs' is not an array");
-    warnSpy.mockRestore();
+    expect(queue.push).not.toHaveBeenCalled();
   });
 
-  it("warns on invalid cron expression and skips that job", () => {
+  it("skips invalid cron expression and processes valid jobs", () => {
     writeCronConfig({
       jobs: [
         { name: "bad", cron: "invalid cron", prompt: "bad" },
@@ -115,19 +109,17 @@ describe("startCron", () => {
       ],
     });
 
-    const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
     const queue = makeQueue();
     const stop = startCron(TEST_DIR, queue);
     stop();
 
-    expect(warnSpy).toHaveBeenCalled();
+    expect(queue.push).toHaveBeenCalledTimes(1);
     expect(queue.push).toHaveBeenCalledWith({
       message: "[Tool: cron/good] good",
       model: undefined,
       source: "cron",
       name: "good",
     });
-    warnSpy.mockRestore();
   });
 
   it("returns a cleanup function that clears the interval", () => {
@@ -239,7 +231,7 @@ describe("startCron", () => {
     expect(updated.jobs).toHaveLength(1);
   });
 
-  it("warns when write-back of cron.json fails", () => {
+  it("still fires job when write-back of cron.json fails", () => {
     // Write config to a path that will be read successfully
     writeCronConfig({
       jobs: [{ name: "once", cron: currentMinuteCron(), prompt: "fire", recurring: false }],
@@ -249,7 +241,6 @@ describe("startCron", () => {
     const { chmodSync } = require("node:fs");
     chmodSync(CRON_FILE, 0o444);
 
-    const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
     const queue = makeQueue();
     const stop = startCron(TEST_DIR, queue);
     stop();
@@ -257,9 +248,6 @@ describe("startCron", () => {
     chmodSync(CRON_FILE, 0o644);
 
     expect(queue.push).toHaveBeenCalledTimes(1);
-    const warnMsg = warnSpy.mock.calls.find((c: any) => (c[0] as string).includes("Failed to write"));
-    expect(warnMsg).toBeDefined();
-    warnSpy.mockRestore();
   });
 
   it("does not write file when no non-recurring jobs fired", () => {

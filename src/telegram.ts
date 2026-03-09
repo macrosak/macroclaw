@@ -3,6 +3,9 @@ import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Bot, InputFile } from "grammy";
+import { createLogger } from "./logger";
+
+const log = createLogger("telegram");
 
 const MAX_LENGTH = 4096;
 const INBOUND_DIR = "/tmp/macroclaw/inbound";
@@ -88,7 +91,7 @@ export async function sendFile(
   filePath: string,
 ): Promise<void> {
   if (!existsSync(filePath)) {
-    console.warn(`[telegram] File not found, skipping: ${filePath}`);
+    log.warn({ filePath }, "File not found, skipping");
     return;
   }
 

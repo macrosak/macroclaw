@@ -1,3 +1,7 @@
+import { createLogger } from "./logger";
+
+const log = createLogger("queue");
+
 export interface QueueItem {
   message: string;
   model?: string;
@@ -30,7 +34,7 @@ export function createQueue() {
         try {
           await handler(item);
         } catch (err) {
-          console.error("[queue] Handler error:", err);
+          log.error({ err }, "Handler error");
         }
       }
 

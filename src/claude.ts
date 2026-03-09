@@ -1,4 +1,7 @@
 import { z } from "zod/v4";
+import { createLogger } from "./logger";
+
+const log = createLogger("claude");
 
 const claudeResponseSchema = z.object({
   action: z.enum(["send", "silent", "background"]),
@@ -38,7 +41,7 @@ export async function runClaude(
   if (systemPrompt) args.push("--append-system-prompt", systemPrompt);
   args.push(prompt);
 
-  console.log(`[claude] ← ${prompt.slice(0, 120)}`);
+  log.debug({ prompt: prompt.slice(0, 120) }, "Sending to Claude");
 
   const proc = Bun.spawn(args, {
     cwd: workspace,
@@ -69,14 +72,14 @@ export async function runClaude(
       const envelope = JSON.parse(stdout);
       const duration = envelope.duration_ms ? `${(envelope.duration_ms / 1000).toFixed(1)}s` : "?";
       const cost = envelope.total_cost_usd ? `$${envelope.total_cost_usd.toFixed(4)}` : "?";
-      console.log(`[claude] → ${duration} ${cost}`);
+      log.debug({ duration, cost }, "Claude response received");
       if (envelope.structured_output) {
         const parsed = claudeResponseSchema.safeParse(envelope.structured_output);
         if (parsed.success) return parsed.data;
-        console.warn("[claude] structured_output failed validation:", parsed.error.message);
+        log.warn({ error: parsed.error.message }, "structured_output failed validation");
         return { action: "send", message: envelope.structured_output.message ?? stdout, reason: "validation-failed" };
       }
-      console.log(`[claude] no structured_output, envelope: ${JSON.stringify(envelope)}`);
+      log.warn({ envelope }, "No structured_output in response");
       return { action: "send", message: envelope.result ?? stdout, reason: "no-structured-output" };
     } catch {
       return { action: "send", message: `[JSON Error] ${stdout}`, reason: "json-parse-failed" };
@@ -84,7 +87,7 @@ export async function runClaude(
   }
 
   const stderr = await new Response(proc.stderr).text();
-  console.log(`[claude] error (exit ${exitCode}): ${stderr.slice(0, 200)}`);
+  log.error({ exitCode, stderr: stderr.slice(0, 200) }, "Claude process failed");
 
   return { action: "send", message: `[Error] Claude exited with code ${exitCode}:\n${stderr}`, reason: "process-error" };
 }

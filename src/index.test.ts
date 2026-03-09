@@ -99,7 +99,6 @@ describe("createApp", () => {
 
   it("generates new session ID when settings is empty", () => {
     if (existsSync(tmpSettingsDir)) rmSync(tmpSettingsDir, { recursive: true });
-    const consoleSpy = spyOn(console, "log").mockImplementation(() => {});
     const app = createApp(makeConfig());
     const bot = app.bot as any;
 
@@ -108,7 +107,6 @@ describe("createApp", () => {
     bot.commandHandlers.get("session")!(ctx);
     const reply = (ctx.reply as any).mock.calls[0][0];
     expect(reply).toMatch(/Session: `[0-9a-f]{8}-/);
-    consoleSpy.mockRestore();
   });
 
   describe("session resolution", () => {
@@ -212,8 +210,7 @@ describe("createApp", () => {
       expect(bot.api.sendMessage).toHaveBeenCalled();
     });
 
-    it("ignores messages from unauthorized chats and logs chat id", async () => {
-      const consoleSpy = spyOn(console, "log").mockImplementation(() => {});
+    it("ignores messages from unauthorized chats", async () => {
       const config = makeConfig();
       const app = createApp(config);
       const bot = app.bot as any;
@@ -223,8 +220,6 @@ describe("createApp", () => {
       await new Promise((r) => setTimeout(r, 50));
 
       expect(config.runClaude).not.toHaveBeenCalled();
-      expect(consoleSpy).toHaveBeenCalledWith("[unauthorized] chat_id=99999");
-      consoleSpy.mockRestore();
     });
 
     it("sends [No output] for empty claude response", async () => {
@@ -244,7 +239,6 @@ describe("createApp", () => {
     });
 
     it("skips sending when action is silent", async () => {
-      const consoleSpy = spyOn(console, "log").mockImplementation(() => {});
       const config = makeConfig({
         runClaude: mock(async (): Promise<ClaudeResponse> => ({ action: "silent", message: "", reason: "no new results" })),
       });
@@ -256,13 +250,9 @@ describe("createApp", () => {
       await new Promise((r) => setTimeout(r, 50));
 
       expect(bot.api.sendMessage).not.toHaveBeenCalled();
-      expect(consoleSpy).toHaveBeenCalledWith("[response] action=silent reason=no new results message=");
-      expect(consoleSpy).toHaveBeenCalledWith("[silent] (no message)");
-      consoleSpy.mockRestore();
     });
 
     it("spawns background agent when action is background", async () => {
-      const consoleSpy = spyOn(console, "log").mockImplementation(() => {});
       let callCount = 0;
       const config = makeConfig({
         runClaude: mock(async (): Promise<ClaudeResponse> => {
@@ -289,11 +279,9 @@ describe("createApp", () => {
       // Background agent result should be fed back into queue
       await new Promise((r) => setTimeout(r, 100));
       expect(config.runClaude).toHaveBeenCalledTimes(3); // 1 main + 1 bg agent + 1 bg result fed back
-      consoleSpy.mockRestore();
     });
 
     it("spawns background agent with unnamed when name is missing", async () => {
-      const consoleSpy = spyOn(console, "log").mockImplementation(() => {});
       let callCount = 0;
       const config = makeConfig({
         runClaude: mock(async (): Promise<ClaudeResponse> => {
@@ -314,11 +302,9 @@ describe("createApp", () => {
       const sendCalls = (bot.api.sendMessage as any).mock.calls;
       const texts = sendCalls.map((c: any) => c[1]);
       expect(texts).toContain('Background agent "unnamed" started.');
-      consoleSpy.mockRestore();
     });
 
     it("handles bg: prefix from Telegram", async () => {
-      const consoleSpy = spyOn(console, "log").mockImplementation(() => {});
       // Never-resolving mock so bg agent stays "running" and doesn't feed back
       const config = makeConfig({
         runClaude: mock(() => new Promise<ClaudeResponse>(() => {})),
@@ -338,7 +324,6 @@ describe("createApp", () => {
       // Should NOT go through main queue — only the bg agent's runClaude call
       expect(config.runClaude).toHaveBeenCalledTimes(1);
       expect(ctx.reply).toHaveBeenCalledWith('Background agent "research-pricing" started.');
-      consoleSpy.mockRestore();
     });
 
     it("passes cron system prompt for cron messages", async () => {
@@ -582,7 +567,6 @@ describe("createApp", () => {
     });
 
     it("queues error message when photo download fails", async () => {
-      const consoleSpy = spyOn(console, "error").mockImplementation(() => {});
       const config = makeConfig();
       const app = createApp(config);
       const bot = app.bot as any;
@@ -598,11 +582,9 @@ describe("createApp", () => {
       expect(config.runClaude).toHaveBeenCalled();
       const msg = (config.runClaude as any).mock.calls[0][0];
       expect(msg).toContain("[File download failed: photo.jpg]");
-      consoleSpy.mockRestore();
     });
 
     it("queues error message when document download fails", async () => {
-      const consoleSpy = spyOn(console, "error").mockImplementation(() => {});
       const config = makeConfig();
       const app = createApp(config);
       const bot = app.bot as any;
@@ -618,7 +600,6 @@ describe("createApp", () => {
       expect(config.runClaude).toHaveBeenCalled();
       const msg = (config.runClaude as any).mock.calls[0][0];
       expect(msg).toContain("[File download failed: huge.pdf]");
-      consoleSpy.mockRestore();
     });
 
     it("ignores photo messages from unauthorized chats", async () => {
@@ -663,7 +644,6 @@ describe("createApp", () => {
     });
 
     it("skips outbound files that don't exist", async () => {
-      const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
       const config = makeConfig({
         runClaude: mock(async (): Promise<ClaudeResponse> => ({
           action: "send",
@@ -681,7 +661,6 @@ describe("createApp", () => {
 
       expect(bot.api.sendPhoto).not.toHaveBeenCalled();
       expect(bot.api.sendMessage).toHaveBeenCalled();
-      warnSpy.mockRestore();
     });
   });
 
@@ -717,7 +696,6 @@ describe("createApp", () => {
     });
 
     it("/bg lists active background agents", async () => {
-      const consoleSpy = spyOn(console, "log").mockImplementation(() => {});
       // runClaude that never resolves (agent stays active)
       const config = makeConfig({
         runClaude: mock(() => new Promise<ClaudeResponse>(() => {})),
@@ -742,33 +720,22 @@ describe("createApp", () => {
       const reply = (bgCtx.reply as any).mock.calls[0][0];
       expect(reply).toContain("long-task");
       expect(reply).toMatch(/\d+s/);
-      consoleSpy.mockRestore();
     });
   });
 
   describe("error handler", () => {
-    it("logs bot errors to console", () => {
-      const consoleSpy = spyOn(console, "error").mockImplementation(() => {});
+    it("does not throw on bot errors", () => {
       const app = createApp(makeConfig());
       const bot = app.bot as any;
 
-      bot.errorHandler({ message: "connection lost" });
-      expect(consoleSpy).toHaveBeenCalledWith("Bot error:", "connection lost");
-      consoleSpy.mockRestore();
+      expect(() => bot.errorHandler({ message: "connection lost" })).not.toThrow();
     });
   });
 
   describe("start", () => {
     it("starts the bot and logs info", () => {
-      const consoleSpy = spyOn(console, "log").mockImplementation(() => {});
       const app = createApp(makeConfig());
-
-      app.start();
-      expect(consoleSpy).toHaveBeenCalledWith("Starting macroclaw...");
-      expect(consoleSpy).toHaveBeenCalledWith("Bot connected: @test_bot");
-      expect(consoleSpy).toHaveBeenCalledWith("Authorized chat: 12345");
-      expect(consoleSpy).toHaveBeenCalledWith("Session: test-session");
-      consoleSpy.mockRestore();
+      expect(() => app.start()).not.toThrow();
     });
 
     it("registers commands with Telegram on start", () => {
@@ -794,12 +761,9 @@ describe("requireEnv", () => {
 
   it("exits when env var is missing", () => {
     const exitSpy = spyOn(process, "exit").mockImplementation(() => { throw new Error("exit"); });
-    const consoleSpy = spyOn(console, "error").mockImplementation(() => {});
 
     expect(() => requireEnv("NONEXISTENT_VAR_XYZ")).toThrow("exit");
-    expect(consoleSpy).toHaveBeenCalledWith("Missing NONEXISTENT_VAR_XYZ in environment");
 
     exitSpy.mockRestore();
-    consoleSpy.mockRestore();
   });
 });

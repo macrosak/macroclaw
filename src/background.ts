@@ -1,6 +1,9 @@
 import { runClaude } from "./claude";
+import { createLogger } from "./logger";
 import { BG_TIMEOUT, promptBackgroundAgent } from "./prompts";
 import { newSessionId } from "./settings";
+
+const log = createLogger("background");
 
 interface BackgroundInfo {
   name: string;
@@ -29,18 +32,18 @@ export function createBackgroundManager(
       const info: BackgroundInfo = { name, sessionId, startTime: new Date() };
       active.set(sessionId, info);
 
-      console.log(`[background] Starting "${name}" (session ${sessionId})`);
+      log.debug({ name, sessionId }, "Starting background agent");
 
       runClaudeFn(prompt, "--session-id", sessionId, model, workspace, promptBackgroundAgent(name), BG_TIMEOUT).then(
         (response) => {
           active.delete(sessionId);
           const result = response.message || "[No output]";
-          console.log(`[background] "${name}" finished: ${result}`);
+          log.debug({ name, result }, "Background agent finished");
           queue.push({ message: `[Background: ${name}] ${result}`, source: "background" });
         },
         (err) => {
           active.delete(sessionId);
-          console.log(`[background] "${name}" failed: ${err}`);
+          log.error({ name, err }, "Background agent failed");
           queue.push({
             message: `[Background: ${name}] [Error] ${err}`,
             source: "background",

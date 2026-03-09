@@ -1,10 +1,13 @@
 import { createBackgroundManager } from "./background";
 import { type ClaudeResponse, runClaude } from "./claude";
 import { startCron } from "./cron";
+import { createLogger } from "./logger";
 import { CRON_TIMEOUT, MAIN_TIMEOUT, PROMPT_BACKGROUND_RESULT, PROMPT_CRON_EVENT, PROMPT_USER_MESSAGE } from "./prompts";
 import { createQueue } from "./queue";
 import { loadSettings, newSessionId, saveSettings } from "./settings";
 import { createBot, downloadFile, sendFile, sendResponse } from "./telegram";
+
+const log = createLogger("bot");
 
 export interface AppConfig {
   botToken: string;
@@ -18,7 +21,7 @@ export interface AppConfig {
 export function requireEnv(name: string): string {
   const value = process.env[name];
   if (!value) {
-    console.error(`Missing ${name} in environment`);
+    log.error({ name }, "Missing environment variable");
     process.exit(1);
   }
   return value;
@@ -43,11 +46,11 @@ export function createApp(config: AppConfig) {
     sessionId = newSessionId();
     sessionFlag = "--session-id";
     saveSettings({ sessionId }, config.settingsDir);
-    console.log(`[session] Created new session: ${sessionId}`);
+    log.info({ sessionId }, "Created new session");
   }
 
   queue.setHandler(async (item) => {
-    console.log(`[incoming] ${item.message}`);
+    log.debug({ message: item.message }, "Incoming message");
     await bot.api.sendChatAction(config.authorizedChatId, "typing");
     const model = item.model ?? config.model;
     const isCron = item.source === "cron";
@@ -63,7 +66,7 @@ export function createApp(config: AppConfig) {
     // Session resolution: if resume failed on first call, create new session
     if (!sessionResolved && sessionFlag === "--resume" && response.reason === "process-error") {
       sessionId = newSessionId();
-      console.log(`[session] Resume failed, created new session: ${sessionId}`);
+      log.info({ sessionId }, "Resume failed, created new session");
       sessionFlag = "--session-id";
       saveSettings({ sessionId }, config.settingsDir);
       response = await claude(item.message, sessionFlag, sessionId, model, config.workspace, systemPrompt, timeout, item.files);
@@ -75,7 +78,7 @@ export function createApp(config: AppConfig) {
       sessionFlag = "--resume";
     }
 
-    console.log(`[response] action=${response.action} reason=${response.reason} message=${response.message.slice(0, 120)}`);
+    log.debug({ action: response.action, reason: response.reason, message: response.message.slice(0, 120) }, "Response");
 
     if (response.reason === "timeout") {
       if (isCron) {
@@ -102,22 +105,22 @@ export function createApp(config: AppConfig) {
       }
       await sendResponse(bot, config.authorizedChatId, response.message || "[No output]");
     } else {
-      console.log(`[silent] ${response.message || "(no message)"}`);
+      log.debug({ message: response.message || "(no message)" }, "Silent response");
     }
   });
 
   bot.command("chatid", (ctx) => {
-    console.log("[command] /chatid");
+    log.debug("Command /chatid");
     ctx.reply(`Chat ID: \`${ctx.chat.id}\``, { parse_mode: "Markdown" });
   });
 
   bot.command("session", (ctx) => {
-    console.log("[command] /session");
+    log.debug("Command /session");
     ctx.reply(`Session: \`${sessionId}\``, { parse_mode: "Markdown" });
   });
 
   bot.command("bg", (ctx) => {
-    console.log("[command] /bg");
+    log.debug("Command /bg");
     const agents = background.list();
     if (agents.length === 0) {
       ctx.reply("No background agents running.");
@@ -138,7 +141,7 @@ export function createApp(config: AppConfig) {
       const path = await downloadFile(bot, largest.file_id, config.botToken, "photo.jpg");
       queue.push({ message: ctx.message.caption ?? "", files: [path] });
     } catch (err) {
-      console.error("[download] Photo download failed:", err);
+      log.error({ err }, "Photo download failed");
       queue.push({ message: `[File download failed: photo.jpg]\n${ctx.message.caption ?? ""}` });
     }
   });
@@ -151,14 +154,14 @@ export function createApp(config: AppConfig) {
       const path = await downloadFile(bot, doc.file_id, config.botToken, name);
       queue.push({ message: ctx.message.caption ?? "", files: [path] });
     } catch (err) {
-      console.error("[download] Document download failed:", err);
+      log.error({ err }, "Document download failed");
       queue.push({ message: `[File download failed: ${name}]\n${ctx.message.caption ?? ""}` });
     }
   });
 
   bot.on("message:text", (ctx) => {
     if (ctx.chat.id.toString() !== config.authorizedChatId) {
-      console.log(`[unauthorized] chat_id=${ctx.chat.id}`);
+      log.debug({ chatId: ctx.chat.id }, "Unauthorized message");
       return;
     }
 
@@ -175,25 +178,23 @@ export function createApp(config: AppConfig) {
   });
 
   bot.catch((err) => {
-    console.error("Bot error:", err.message);
+    log.error({ err: err.message }, "Bot error");
   });
 
   return {
     bot,
     queue,
     start() {
-      console.log("Starting macroclaw...");
+      log.info("Starting macroclaw...");
       startCron(config.workspace, queue);
       bot.api.setMyCommands([
         { command: "chatid", description: "Show current chat ID" },
         { command: "session", description: "Show current session ID" },
         { command: "bg", description: "List background agents" },
-      ]).catch((err) => console.error("Failed to set commands:", err));
+      ]).catch((err) => log.error({ err }, "Failed to set commands"));
       bot.start({
         onStart: (botInfo) => {
-          console.log(`Bot connected: @${botInfo.username}`);
-          console.log(`Authorized chat: ${config.authorizedChatId}`);
-          console.log(`Session: ${sessionId}`);
+          log.info({ username: botInfo.username, chatId: config.authorizedChatId, sessionId }, "Bot connected");
         },
       });
     },

@@ -2,6 +2,9 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { z } from "zod/v4";
+import { createLogger } from "./logger";
+
+const log = createLogger("settings");
 
 const settingsSchema = z.object({
   sessionId: z.string().optional(),
@@ -18,7 +21,7 @@ export function loadSettings(dir: string = defaultDir): Settings {
     const raw = readFileSync(path, "utf-8");
     return settingsSchema.parse(JSON.parse(raw));
   } catch (err) {
-    console.warn("[settings] Failed to load settings.json:", err);
+    log.warn({ err }, "Failed to load settings.json");
     return {};
   }
 }

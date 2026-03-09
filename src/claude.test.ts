@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { afterEach, describe, expect, it, mock } from "bun:test";
 import { runClaude } from "./claude";
 
 function jsonResponse(action: "send" | "silent", message: string, reason: string): string {
@@ -174,7 +174,6 @@ describe("runClaude", () => {
   });
 
   it("returns validation-failed when structured_output has wrong shape", async () => {
-    const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
     const stdout = JSON.stringify({
       type: "result",
       duration_ms: 1000,
@@ -186,8 +185,6 @@ describe("runClaude", () => {
     expect(result.action).toBe("send");
     expect(result.message).toBe("hi");
     expect(result.reason).toBe("validation-failed");
-    expect(warnSpy).toHaveBeenCalledWith("[claude] structured_output failed validation:", expect.any(String));
-    warnSpy.mockRestore();
   });
 
   it("parses files array from structured output", async () => {

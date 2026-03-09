@@ -206,11 +206,7 @@ describe("sendFile", () => {
     await rm(tmpFile, { force: true });
   });
 
-  it("skips missing files with a warning", async () => {
-    const warnSpy = mock(() => {});
-    const origWarn = console.warn;
-    console.warn = warnSpy;
-
+  it("skips missing files without sending", async () => {
     const bot = {
       api: {
         sendPhoto: mock(async () => {}),
@@ -221,11 +217,6 @@ describe("sendFile", () => {
     await sendFile(bot, "123", "/tmp/nonexistent-file-xyz.txt");
     expect(bot.api.sendPhoto).not.toHaveBeenCalled();
     expect(bot.api.sendDocument).not.toHaveBeenCalled();
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("File not found"),
-    );
-
-    console.warn = origWarn;
   });
 
   for (const ext of [".jpg", ".jpeg", ".gif", ".webp"]) {

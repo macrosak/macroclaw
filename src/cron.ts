@@ -2,6 +2,9 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CronExpressionParser } from "cron-parser";
 import { z } from "zod/v4";
+import { createLogger } from "./logger";
+
+const log = createLogger("cron");
 
 const cronJobSchema = z.object({
   name: z.string(),
@@ -40,13 +43,13 @@ export function startCron(workspace: string, queue: Queue): () => void {
       const raw = readFileSync(cronPath, "utf-8");
       const parsed = cronConfigSchema.safeParse(JSON.parse(raw));
       if (!parsed.success) {
-        console.warn("[cron] cron.json: 'jobs' is not an array");
+        log.warn("cron.json: 'jobs' is not an array");
         return;
       }
       config = parsed.data;
     } catch (err) {
       if (err instanceof Error && "code" in err && err.code === "ENOENT") return;
-      console.warn("[cron] Failed to read cron.json:", err instanceof Error ? err.message : err);
+      log.warn({ err: err instanceof Error ? err.message : err }, "Failed to read cron.json");
       return;
     }
 
@@ -71,7 +74,7 @@ export function startCron(workspace: string, queue: Queue): () => void {
           }
         }
       } catch (err) {
-        console.warn(`[cron] Invalid cron expression "${job.cron}":`, err instanceof Error ? err.message : err);
+        log.warn({ cron: job.cron, err: err instanceof Error ? err.message : err }, "Invalid cron expression");
       }
     }
 
@@ -83,7 +86,7 @@ export function startCron(workspace: string, queue: Queue): () => void {
       try {
         writeFileSync(cronPath, `${JSON.stringify(config, null, 2)}\n`);
       } catch (err) {
-        console.warn("[cron] Failed to write cron.json:", err instanceof Error ? err.message : err);
+        log.warn({ err: err instanceof Error ? err.message : err }, "Failed to write cron.json");
       }
     }
   };

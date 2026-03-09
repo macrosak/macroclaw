@@ -1,3 +1,4 @@
 [test]
 coverage = true
 coverageThreshold = { line = 100, function = 100 }
+preload = ["./src/test-setup.ts"]
