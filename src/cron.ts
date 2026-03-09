@@ -63,6 +63,7 @@ export function startCron(workspace: string, queue: Queue): () => void {
         const diff = Math.abs(now.getTime() - prev.getTime());
         // Match if the previous occurrence is within the current minute
         if (diff < 60_000) {
+          log.debug({ name: job.name, cron: job.cron }, "Cron job triggered");
           queue.push({
             message: `[Tool: cron/${job.name}] ${job.prompt}`,
             model: job.model,

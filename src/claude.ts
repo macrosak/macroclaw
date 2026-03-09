@@ -63,6 +63,7 @@ export async function runClaude(
 
   if (timedOut) {
     const secs = Math.round((timeoutMs as number) / 1000);
+    log.warn({ timeoutSecs: secs }, "Claude process timed out");
     return { action: "send", message: `[Error] Claude process timed out after ${secs}s.`, reason: "timeout" };
   }
 
@@ -82,6 +83,7 @@ export async function runClaude(
       log.warn({ envelope }, "No structured_output in response");
       return { action: "send", message: envelope.result ?? stdout, reason: "no-structured-output" };
     } catch {
+      log.warn({ stdout: stdout.slice(0, 200) }, "Failed to parse Claude stdout as JSON");
       return { action: "send", message: `[JSON Error] ${stdout}`, reason: "json-parse-failed" };
     }
   }

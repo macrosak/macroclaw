@@ -178,7 +178,7 @@ export function createApp(config: AppConfig) {
   });
 
   bot.catch((err) => {
-    log.error({ err: err.message }, "Bot error");
+    log.error({ err }, "Bot error");
   });
 
   return {
