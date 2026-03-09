@@ -29,6 +29,18 @@ bun run sync-skills # Deploy system skills to workspace
 
 - To run `claude` CLI from Bash tool: `CLAUDECODE="" claude -p ...` (must explicitly set to empty to allow nested sessions)
 
+## Logging
+
+Use pino via `createLogger` from `src/logger.ts`. Never use `console.log/warn/error`.
+
+- **error** — unexpected failures, caught exceptions that affect functionality
+- **warn** — recoverable issues: validation failures, missing optional config, fallback behavior
+- **info** — significant lifecycle events: startup, shutdown, connection established, session created
+- **debug** — per-message flow: incoming messages, responses, Claude I/O, background task lifecycle
+
+Every module should create its logger at the top: `const log = createLogger("module-name")`.
+Log messages should be concise. Include relevant IDs/context as structured data, not string interpolation.
+
 ## Conventions
 
 - Keep everything lean — this is a personal project
