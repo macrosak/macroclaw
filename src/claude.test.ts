@@ -145,11 +145,18 @@ describe("runClaude", () => {
     expect(result.structuredOutput).toEqual({ action: "silent", actionReason: "no new results" });
   });
 
-  it("returns null structuredOutput when field is missing", async () => {
+  it("returns null structuredOutput and result text when structured_output is missing", async () => {
     const envelope = JSON.stringify({ type: "result", result: "plain text", duration_ms: 100, total_cost_usd: 0.01 });
     mockSpawn({ stdout: envelope, exitCode: 0 });
     const result = await runClaude(opts({ sessionFlag: "--resume", sessionId: "sid-9" }));
     expect(result.structuredOutput).toBeNull();
+    expect(result.result).toBe("plain text");
+  });
+
+  it("returns result from envelope", async () => {
+    mockSpawn({ stdout: jsonResult({ action: "send" }), exitCode: 0 });
+    const result = await runClaude(opts({ sessionFlag: "--resume", sessionId: "sid-9b" }));
+    expect(result.result).toBe("");
   });
 
   it("throws ClaudeParseError when stdout is not valid JSON", async () => {

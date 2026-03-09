@@ -155,8 +155,9 @@ export function createOrchestrator(config: OrchestratorConfig) {
       if (result.structuredOutput) {
         return validateResponse(result.structuredOutput);
       }
-      log.warn("No structured_output in response");
-      return { action: "send", message: String(result.structuredOutput ?? ""), actionReason: "no-structured-output" };
+      log.error({ result: result.result }, "No structured_output in response");
+      const msg = result.result ? `[No structured output] ${result.result}` : "[No structured output]";
+      return { action: "send", message: msg, actionReason: "no-structured-output" };
     } catch (err) {
       if (err instanceof ClaudeTimeoutError) {
         return { action: "send", message: `[Error] Claude process timed out after ${Math.round(err.timeoutMs / 1000)}s.`, actionReason: "timeout" };

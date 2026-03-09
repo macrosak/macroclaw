@@ -15,6 +15,7 @@ export interface ClaudeOptions {
 
 export interface ClaudeResult {
   structuredOutput: unknown;
+  result?: string;
   duration?: string;
   cost?: string;
 }
@@ -50,7 +51,7 @@ export async function runClaude(options: ClaudeOptions): Promise<ClaudeResult> {
   if (options.systemPrompt) args.push("--append-system-prompt", options.systemPrompt);
   args.push(options.prompt);
 
-  log.debug({ prompt: options.prompt.slice(0, 120) }, "Sending to Claude");
+  log.debug({ args }, "Sending to Claude");
 
   const proc = Bun.spawn(args, {
     cwd: options.workspace,
@@ -86,12 +87,13 @@ export async function runClaude(options: ClaudeOptions): Promise<ClaudeResult> {
     const envelope = JSON.parse(stdout);
     const duration = envelope.duration_ms ? `${(envelope.duration_ms / 1000).toFixed(1)}s` : undefined;
     const cost = envelope.total_cost_usd ? `$${envelope.total_cost_usd.toFixed(4)}` : undefined;
+    const structuredOutput = envelope.structured_output ?? null;
+    if (!structuredOutput) {
+      log.debug({ envelope }, "No structured_output in envelope");
+    }
+    const result = typeof envelope.result === "string" ? envelope.result : undefined;
     log.debug({ duration, cost }, "Claude response received");
-    return {
-      structuredOutput: envelope.structured_output ?? null,
-      duration,
-      cost,
-    };
+    return { structuredOutput, result, duration, cost };
   } catch {
     log.warn({ stdout: stdout.slice(0, 200) }, "Failed to parse Claude stdout as JSON");
     throw new ClaudeParseError(stdout);

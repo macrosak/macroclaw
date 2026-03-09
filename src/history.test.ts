@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, spyOn } from "bun:test";
+import { afterAll, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import * as fs from "node:fs/promises";
 import { logPrompt, logResult } from "./history";
 import type { ClaudeResponse, OrchestratorRequest } from "./orchestrator";
@@ -9,6 +9,11 @@ const mockAppendFile = spyOn(fs, "appendFile").mockResolvedValue(undefined);
 beforeEach(() => {
   mockMkdir.mockClear();
   mockAppendFile.mockClear();
+});
+
+afterAll(() => {
+  mockMkdir.mockRestore();
+  mockAppendFile.mockRestore();
 });
 
 describe("logPrompt", () => {
