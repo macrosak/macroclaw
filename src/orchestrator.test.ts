@@ -159,7 +159,19 @@ describe("createOrchestrator", () => {
       expect(result.actionReason).toBe("validation-failed");
     });
 
-    it("returns no-structured-output with result text when structured_output is null", async () => {
+    it("falls back to parsing result as JSON when structured_output is null", async () => {
+      const jsonResult = JSON.stringify({ action: "send", message: "parsed", actionReason: "ok" });
+      const claude = mockClaude({ structuredOutput: null, result: jsonResult });
+      const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
+
+      const result = await orch.processRequest({ type: "user", message: "hi" });
+
+      expect(result.action).toBe("send");
+      expect(result.message).toBe("parsed");
+      expect(result.actionReason).toBe("ok");
+    });
+
+    it("forwards raw result text when structured_output is null and result is not JSON", async () => {
       const claude = mockClaude({ structuredOutput: null, result: "Claude said this" });
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
 
@@ -167,17 +179,17 @@ describe("createOrchestrator", () => {
 
       expect(result.actionReason).toBe("no-structured-output");
       expect(result.action).toBe("send");
-      if (result.action === "send") expect(result.message).toBe("[No structured output] Claude said this");
+      expect(result.message).toBe("Claude said this");
     });
 
-    it("returns no-structured-output without result when result is undefined", async () => {
+    it("returns [No output] when both structured_output and result are missing", async () => {
       const claude = mockClaude({ structuredOutput: null });
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
 
       const result = await orch.processRequest({ type: "user", message: "hi" });
 
       expect(result.actionReason).toBe("no-structured-output");
-      if (result.action === "send") expect(result.message).toBe("[No structured output]");
+      expect(result.message).toBe("[No output]");
     });
 
     it("parses backgroundAgents from structured output", async () => {

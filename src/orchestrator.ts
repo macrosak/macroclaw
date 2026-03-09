@@ -148,9 +148,22 @@ export function createOrchestrator(config: OrchestratorConfig) {
       if (result.structuredOutput) {
         return validateResponse(result.structuredOutput);
       }
-      log.error({ result: result.result }, "No structured_output in response");
-      const msg = result.result ? `[No structured output] ${result.result}` : "[No structured output]";
-      return { action: "send", message: msg, actionReason: "no-structured-output" };
+
+      // Fallback: when tools are used, structured_output may be missing.
+      // Try parsing result as JSON, otherwise wrap raw text as a send response.
+      if (result.result) {
+        try {
+          const parsed = JSON.parse(result.result);
+          log.warn("structured_output missing, parsed result as JSON fallback");
+          return validateResponse(parsed);
+        } catch {
+          // Not JSON — treat as plain text response
+          log.warn("structured_output missing, using raw result text");
+          return { action: "send", message: result.result, actionReason: "no-structured-output" };
+        }
+      }
+      log.error("No structured_output and no result in response");
+      return { action: "send", message: "[No output]", actionReason: "no-structured-output" };
     } catch (err) {
       if (err instanceof ClaudeTimeoutError) {
         return { action: "send", message: `[Error] Claude process timed out after ${Math.round(err.timeoutMs / 1000)}s.`, actionReason: "timeout" };
