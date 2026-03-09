@@ -2,25 +2,17 @@ import { createLogger } from "./logger";
 
 const log = createLogger("queue");
 
-export interface QueueItem {
-  message: string;
-  model?: string;
-  source?: "user" | "cron" | "background" | "timeout";
-  name?: string;
-  files?: string[];
-}
-
-export function createQueue() {
-  const items: QueueItem[] = [];
+export function createQueue<T>() {
+  const items: T[] = [];
   let processing = false;
-  let handler: ((item: QueueItem) => Promise<void>) | null = null;
+  let handler: ((item: T) => Promise<void>) | null = null;
 
   return {
-    setHandler(fn: (item: QueueItem) => Promise<void>) {
+    setHandler(fn: (item: T) => Promise<void>) {
       handler = fn;
     },
 
-    push(item: QueueItem) {
+    push(item: T) {
       items.push(item);
       this.process();
     },
@@ -30,7 +22,7 @@ export function createQueue() {
       processing = true;
 
       while (items.length > 0) {
-        const item = items.shift() as QueueItem;
+        const item = items.shift() as T;
         try {
           await handler(item);
         } catch (err) {

@@ -21,7 +21,7 @@ const cronConfigSchema = z.object({
 type CronConfig = z.infer<typeof cronConfigSchema>;
 
 interface Queue {
-  push(item: { message: string; model?: string; source?: string; name?: string }): void;
+  push(item: { type: "cron"; name: string; prompt: string; model?: string }): void;
 }
 
 const TICK_INTERVAL = 10_000; // 10 seconds
@@ -65,10 +65,10 @@ export function startCron(workspace: string, queue: Queue): () => void {
         if (diff < 60_000) {
           log.debug({ name: job.name, cron: job.cron }, "Cron job triggered");
           queue.push({
-            message: `[Tool: cron/${job.name}] ${job.prompt}`,
-            model: job.model,
-            source: "cron",
+            type: "cron",
             name: job.name,
+            prompt: job.prompt,
+            model: job.model,
           });
           if (job.recurring === false) {
             firedNonRecurring.push(i);

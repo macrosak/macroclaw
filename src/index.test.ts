@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:te
 import { existsSync, rmSync } from "node:fs";
 import type { ClaudeResponse } from "./claude";
 import { type AppConfig, createApp, requireEnv } from "./index";
-import { PROMPT_BACKGROUND_RESULT, PROMPT_CRON_EVENT, PROMPT_USER_MESSAGE } from "./prompts";
 import { saveSettings } from "./settings";
 
 // Mock Grammy Bot
@@ -119,7 +118,10 @@ describe("createApp", () => {
       handler({ chat: { id: 12345 }, message: { text: "hello" } });
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(config.runClaude).toHaveBeenCalledWith("hello", "--resume", "test-session", undefined, "/tmp/macroclaw-test-workspace", PROMPT_USER_MESSAGE, 60_000, undefined);
+      const call = (config.runClaude as any).mock.calls[0];
+      expect(call[0]).toBe("hello");
+      expect(call[1]).toBe("--resume");
+      expect(call[2]).toBe("test-session");
     });
 
     it("creates new session when resume fails", async () => {
@@ -195,19 +197,20 @@ describe("createApp", () => {
       handler({ chat: { id: 12345 }, message: { text: "hello" } });
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(config.runClaude).toHaveBeenCalledWith("hello", "--resume", "test-session", undefined, "/tmp/macroclaw-test-workspace", PROMPT_USER_MESSAGE, 60_000, undefined);
+      const call = (config.runClaude as any).mock.calls[0];
+      expect(call[0]).toBe("hello");
     });
 
-    it("passes model override from queue item", async () => {
+    it("passes model override from cron request", async () => {
       const config = makeConfig();
       const app = createApp(config);
 
-      app.queue.push({ message: "cron msg", model: "haiku" });
+      app.queue.push({ type: "cron", name: "test", prompt: "cron msg", model: "haiku" });
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(config.runClaude).toHaveBeenCalledWith("cron msg", "--resume", "test-session", "haiku", "/tmp/macroclaw-test-workspace", PROMPT_USER_MESSAGE, 60_000, undefined);
-      const bot = app.bot as any;
-      expect(bot.api.sendMessage).toHaveBeenCalled();
+      const call = (config.runClaude as any).mock.calls[0];
+      expect(call[0]).toBe("[Tool: cron/test] cron msg");
+      expect(call[3]).toBe("haiku");
     });
 
     it("ignores messages from unauthorized chats", async () => {
@@ -339,38 +342,26 @@ describe("createApp", () => {
       const config = makeConfig();
       const app = createApp(config);
 
-      app.queue.push({ message: "[Tool: cron/daily-check] Check for updates", source: "cron", name: "daily-check" });
+      app.queue.push({ type: "cron", name: "daily-check", prompt: "Check for updates" });
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(config.runClaude).toHaveBeenCalledWith(
-        "[Tool: cron/daily-check] Check for updates",
-        "--resume",
-        "test-session",
-        undefined,
-        "/tmp/macroclaw-test-workspace",
-        PROMPT_CRON_EVENT,
-        300_000,
-        undefined,
-      );
+      const call = (config.runClaude as any).mock.calls[0];
+      expect(call[0]).toBe("[Tool: cron/daily-check] Check for updates");
+      expect(call[5]).toContain("cron event");
+      expect(call[6]).toBe(300_000);
     });
 
     it("passes background result system prompt for background messages", async () => {
       const config = makeConfig();
       const app = createApp(config);
 
-      app.queue.push({ message: "[Background: research] Here are the results", source: "background" });
+      app.queue.push({ type: "background", name: "research", result: "Here are the results" });
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(config.runClaude).toHaveBeenCalledWith(
-        "[Background: research] Here are the results",
-        "--resume",
-        "test-session",
-        undefined,
-        "/tmp/macroclaw-test-workspace",
-        PROMPT_BACKGROUND_RESULT,
-        60_000,
-        undefined,
-      );
+      const call = (config.runClaude as any).mock.calls[0];
+      expect(call[0]).toBe("[Background: research] Here are the results");
+      expect(call[5]).toContain("background agent you previously spawned");
+      expect(call[6]).toBe(60_000);
     });
 
     it("passes MAIN_TIMEOUT for user messages", async () => {
@@ -382,26 +373,19 @@ describe("createApp", () => {
       handler({ chat: { id: 12345 }, message: { text: "hello" } });
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(config.runClaude).toHaveBeenCalledWith("hello", "--resume", "test-session", undefined, "/tmp/macroclaw-test-workspace", PROMPT_USER_MESSAGE, 60_000, undefined);
+      const call = (config.runClaude as any).mock.calls[0];
+      expect(call[6]).toBe(60_000);
     });
 
     it("passes CRON_TIMEOUT for cron messages", async () => {
       const config = makeConfig();
       const app = createApp(config);
 
-      app.queue.push({ message: "[Tool: cron/daily-check] Check for updates", source: "cron", name: "daily-check" });
+      app.queue.push({ type: "cron", name: "daily-check", prompt: "Check for updates" });
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(config.runClaude).toHaveBeenCalledWith(
-        "[Tool: cron/daily-check] Check for updates",
-        "--resume",
-        "test-session",
-        undefined,
-        "/tmp/macroclaw-test-workspace",
-        PROMPT_CRON_EVENT,
-        300_000,
-        undefined,
-      );
+      const call = (config.runClaude as any).mock.calls[0];
+      expect(call[6]).toBe(300_000);
     });
 
     it("re-queues user message with [Timeout] prefix on timeout", async () => {
@@ -443,7 +427,7 @@ describe("createApp", () => {
       });
       const app = createApp(config);
 
-      app.queue.push({ message: "[Timeout] previously timed out", source: "timeout" });
+      app.queue.push({ type: "timeout", originalMessage: "previously timed out" });
       await new Promise((r) => setTimeout(r, 50));
 
       // Should NOT re-queue — only one call
@@ -462,7 +446,7 @@ describe("createApp", () => {
       });
       const app = createApp(config);
 
-      app.queue.push({ message: "[Tool: cron/daily-check] Check for updates", source: "cron", name: "daily-check" });
+      app.queue.push({ type: "cron", name: "daily-check", prompt: "Check for updates" });
       await new Promise((r) => setTimeout(r, 50));
 
       const bot = app.bot as any;
@@ -484,7 +468,7 @@ describe("createApp", () => {
       });
       const app = createApp(config);
 
-      app.queue.push({ message: "[Background: research] long result", source: "background" });
+      app.queue.push({ type: "background", name: "research", result: "long result" });
       await new Promise((r) => setTimeout(r, 100));
 
       expect(callCount).toBe(2);

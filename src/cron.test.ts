@@ -52,10 +52,10 @@ describe("startCron", () => {
     stop();
 
     expect(queue.push).toHaveBeenCalledWith({
-      message: "[Tool: cron/test-job] do something",
-      model: undefined,
-      source: "cron",
+      type: "cron",
       name: "test-job",
+      prompt: "do something",
+      model: undefined,
     });
   });
 
@@ -115,10 +115,10 @@ describe("startCron", () => {
 
     expect(queue.push).toHaveBeenCalledTimes(1);
     expect(queue.push).toHaveBeenCalledWith({
-      message: "[Tool: cron/good] good",
-      model: undefined,
-      source: "cron",
+      type: "cron",
       name: "good",
+      prompt: "good",
+      model: undefined,
     });
   });
 
@@ -164,8 +164,8 @@ describe("startCron", () => {
     stop();
 
     expect(queue.push).toHaveBeenCalledTimes(2);
-    expect(queue.push).toHaveBeenCalledWith({ message: "[Tool: cron/first] first", model: undefined, source: "cron", name: "first" });
-    expect(queue.push).toHaveBeenCalledWith({ message: "[Tool: cron/second] second", model: undefined, source: "cron", name: "second" });
+    expect(queue.push).toHaveBeenCalledWith({ type: "cron", name: "first", prompt: "first", model: undefined });
+    expect(queue.push).toHaveBeenCalledWith({ type: "cron", name: "second", prompt: "second", model: undefined });
   });
 
   it("passes model override through queue item", () => {
@@ -178,10 +178,10 @@ describe("startCron", () => {
     stop();
 
     expect(queue.push).toHaveBeenCalledWith({
-      message: "[Tool: cron/smart] think hard",
-      model: "opus",
-      source: "cron",
+      type: "cron",
       name: "smart",
+      prompt: "think hard",
+      model: "opus",
     });
   });
 

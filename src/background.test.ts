@@ -5,9 +5,9 @@ import type { ClaudeResponse } from "./claude";
 type MockRunClaude = ReturnType<typeof mock<(...args: any[]) => Promise<ClaudeResponse>>>;
 
 function mockQueue() {
-  const items: { message: string; source?: string }[] = [];
+  const items: { type: "background"; name: string; result: string }[] = [];
   return {
-    push(item: { message: string; source?: string }) {
+    push(item: { type: "background"; name: string; result: string }) {
       items.push(item);
     },
     items,
@@ -46,8 +46,7 @@ describe("createBackgroundManager", () => {
 
     expect(mgr.size).toBe(0);
     expect(queue.items).toHaveLength(1);
-    expect(queue.items[0].message).toBe("[Background: test-task] done!");
-    expect(queue.items[0].source).toBe("background");
+    expect(queue.items[0]).toEqual({ type: "background", name: "test-task", result: "done!" });
   });
 
   it("feeds error back to queue on failure", async () => {
@@ -70,7 +69,8 @@ describe("createBackgroundManager", () => {
 
     expect(mgr.size).toBe(0);
     expect(queue.items).toHaveLength(1);
-    expect(queue.items[0].message).toContain("[Background: failing-task] [Error]");
+    expect(queue.items[0].name).toBe("failing-task");
+    expect(queue.items[0].result).toContain("[Error]");
   });
 
   it("sends [No output] when message is empty", async () => {
@@ -87,7 +87,7 @@ describe("createBackgroundManager", () => {
     mgr.spawn("empty-task", "do something", undefined, "/workspace", queue);
     await new Promise((r) => setTimeout(r, 0));
 
-    expect(queue.items[0].message).toBe("[Background: empty-task] [No output]");
+    expect(queue.items[0]).toEqual({ type: "background", name: "empty-task", result: "[No output]" });
   });
 
   it("tracks multiple concurrent agents", async () => {
@@ -123,7 +123,7 @@ describe("createBackgroundManager", () => {
 
     expect(mgr.size).toBe(2);
     expect(queue.items).toHaveLength(1);
-    expect(queue.items[0].message).toBe("[Background: task-b] b done");
+    expect(queue.items[0]).toEqual({ type: "background", name: "task-b", result: "b done" });
   });
 
   it("passes 30-minute timeout to runClaude", async () => {

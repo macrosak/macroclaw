@@ -12,7 +12,7 @@ interface BackgroundInfo {
 }
 
 interface Queue {
-  push(item: { message: string; source?: string }): void;
+  push(item: { type: "background"; name: string; result: string }): void;
 }
 
 export function createBackgroundManager(
@@ -39,15 +39,12 @@ export function createBackgroundManager(
           active.delete(sessionId);
           const result = (response.action === "send" ? response.message : "") || "[No output]";
           log.debug({ name, result }, "Background agent finished");
-          queue.push({ message: `[Background: ${name}] ${result}`, source: "background" });
+          queue.push({ type: "background", name, result });
         },
         (err) => {
           active.delete(sessionId);
           log.error({ name, err }, "Background agent failed");
-          queue.push({
-            message: `[Background: ${name}] [Error] ${err}`,
-            source: "background",
-          });
+          queue.push({ type: "background", name, result: `[Error] ${err}` });
         },
       );
     },
