@@ -26,7 +26,7 @@ const claudeResponseSchema = z.object({
 
 export type ClaudeResponse = z.infer<typeof claudeResponseSchema>;
 
-const jsonSchema = JSON.stringify(z.toJSONSchema(claudeResponseSchema));
+const jsonSchema = JSON.stringify(z.toJSONSchema(claudeResponseSchema, { target: "jsonSchema7" }));
 
 // --- Request types ---
 
