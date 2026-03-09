@@ -1,8 +1,10 @@
 import { describe, expect, it, mock } from "bun:test";
 import { createBackgroundManager } from "./background";
-import type { ClaudeResponse } from "./claude";
+import type { ClaudeResponse, OrchestratorRequest } from "./orchestrator";
 
-type MockRunClaude = ReturnType<typeof mock<(...args: any[]) => Promise<ClaudeResponse>>>;
+function mockOrchestrator(handler: (request: OrchestratorRequest) => Promise<ClaudeResponse>) {
+  return { processRequest: mock(handler) };
+}
 
 function mockQueue() {
   const items: { type: "background"; name: string; result: string }[] = [];
@@ -20,20 +22,22 @@ describe("createBackgroundManager", () => {
     const claudePromise = new Promise<ClaudeResponse>((r) => {
       resolvePromise = r;
     });
-    const runClaude = mock(() => claudePromise) as MockRunClaude;
+    const orchestrator = mockOrchestrator(() => claudePromise);
     const queue = mockQueue();
-    const mgr = createBackgroundManager(runClaude);
+    const mgr = createBackgroundManager(orchestrator);
 
     mgr.spawn("test-task", "do something", "haiku", "/workspace", queue);
 
     expect(mgr.size).toBe(1);
     expect(mgr.list()[0].name).toBe("test-task");
-    expect(runClaude).toHaveBeenCalledTimes(1);
-    expect(runClaude.mock.calls[0][0]).toBe("do something");
-    expect(runClaude.mock.calls[0][1]).toBe("--session-id");
-    expect(runClaude.mock.calls[0][3]).toBe("haiku");
-    expect(runClaude.mock.calls[0][4]).toBe("/workspace");
-    expect(runClaude.mock.calls[0][5]).toContain("background agent named \"test-task\"");
+    expect(orchestrator.processRequest).toHaveBeenCalledTimes(1);
+    const request = orchestrator.processRequest.mock.calls[0][0];
+    expect(request.type).toBe("bg-task");
+    if (request.type === "bg-task") {
+      expect(request.name).toBe("test-task");
+      expect(request.prompt).toBe("do something");
+      expect(request.model).toBe("haiku");
+    }
 
     resolvePromise!({
       action: "send",
@@ -54,9 +58,9 @@ describe("createBackgroundManager", () => {
     const claudePromise = new Promise<ClaudeResponse>((_, r) => {
       rejectPromise = r;
     });
-    const runClaude = mock(() => claudePromise) as MockRunClaude;
+    const orchestrator = mockOrchestrator(() => claudePromise);
     const queue = mockQueue();
-    const mgr = createBackgroundManager(runClaude);
+    const mgr = createBackgroundManager(orchestrator);
 
     mgr.spawn("failing-task", "do something", undefined, "/workspace", queue);
     expect(mgr.size).toBe(1);
@@ -74,15 +78,13 @@ describe("createBackgroundManager", () => {
   });
 
   it("sends [No output] when message is empty", async () => {
-    const runClaude = mock(() =>
-      Promise.resolve<ClaudeResponse>({
-        action: "send",
-        message: "",
-        actionReason: "empty",
-      }),
-    );
+    const orchestrator = mockOrchestrator(async () => ({
+      action: "send" as const,
+      message: "",
+      actionReason: "empty",
+    }));
     const queue = mockQueue();
-    const mgr = createBackgroundManager(runClaude);
+    const mgr = createBackgroundManager(orchestrator);
 
     mgr.spawn("empty-task", "do something", undefined, "/workspace", queue);
     await new Promise((r) => setTimeout(r, 0));
@@ -94,14 +96,14 @@ describe("createBackgroundManager", () => {
     const promises: Array<{
       resolve: (r: ClaudeResponse) => void;
     }> = [];
-    const runClaude = mock(
+    const orchestrator = mockOrchestrator(
       () =>
         new Promise<ClaudeResponse>((resolve) => {
           promises.push({ resolve });
         }),
     );
     const queue = mockQueue();
-    const mgr = createBackgroundManager(runClaude);
+    const mgr = createBackgroundManager(orchestrator);
 
     mgr.spawn("task-a", "prompt a", undefined, "/workspace", queue);
     mgr.spawn("task-b", "prompt b", undefined, "/workspace", queue);
@@ -126,25 +128,9 @@ describe("createBackgroundManager", () => {
     expect(queue.items[0]).toEqual({ type: "background", name: "task-b", result: "b done" });
   });
 
-  it("passes 30-minute timeout to runClaude", async () => {
-    const runClaude = mock(() =>
-      Promise.resolve<ClaudeResponse>({
-        action: "send",
-        message: "done",
-        actionReason: "ok",
-      }),
-    ) as MockRunClaude;
-    const queue = mockQueue();
-    const mgr = createBackgroundManager(runClaude);
-
-    mgr.spawn("bg-task", "do work", undefined, "/workspace", queue);
-    await new Promise((r) => setTimeout(r, 0));
-
-    expect(runClaude.mock.calls[0][6]).toBe(1_800_000);
-  });
-
   it("list returns empty array when no agents are running", () => {
-    const mgr = createBackgroundManager(mock());
+    const orchestrator = mockOrchestrator(async () => ({ action: "send" as const, message: "", actionReason: "" }));
+    const mgr = createBackgroundManager(orchestrator);
     expect(mgr.list()).toEqual([]);
     expect(mgr.size).toBe(0);
   });

@@ -1,5 +1,5 @@
 import { createBackgroundManager } from "./background";
-import { runClaude } from "./claude";
+import type { ClaudeOptions, ClaudeResult } from "./claude";
 import { startCron } from "./cron";
 import { createLogger } from "./logger";
 import { createOrchestrator, type OrchestratorRequest } from "./orchestrator";
@@ -15,7 +15,7 @@ export interface AppConfig {
   workspace: string;
   model?: string;
   settingsDir?: string;
-  runClaude?: typeof runClaude;
+  runClaude?: (options: ClaudeOptions) => Promise<ClaudeResult>;
 }
 
 export function requireEnv(name: string): string {
@@ -36,7 +36,7 @@ export function createApp(config: AppConfig) {
     settingsDir: config.settingsDir,
     runClaude: config.runClaude,
   });
-  const background = createBackgroundManager(config.runClaude ?? runClaude);
+  const background = createBackgroundManager(orchestrator);
 
   queue.setHandler(async (request) => {
     log.debug({ type: request.type }, "Incoming request");

@@ -1,6 +1,5 @@
-import { runClaude } from "./claude";
 import { createLogger } from "./logger";
-import { BG_TIMEOUT, promptBackgroundAgent } from "./prompts";
+import type { ClaudeResponse, OrchestratorRequest } from "./orchestrator";
 import { newSessionId } from "./settings";
 
 const log = createLogger("background");
@@ -15,9 +14,11 @@ interface Queue {
   push(item: { type: "background"; name: string; result: string }): void;
 }
 
-export function createBackgroundManager(
-  runClaudeFn: typeof runClaude = runClaude,
-) {
+interface Orchestrator {
+  processRequest(request: OrchestratorRequest): Promise<ClaudeResponse>;
+}
+
+export function createBackgroundManager(orchestrator: Orchestrator) {
   const active = new Map<string, BackgroundInfo>();
 
   return {
@@ -25,7 +26,7 @@ export function createBackgroundManager(
       name: string,
       prompt: string,
       model: string | undefined,
-      workspace: string,
+      _workspace: string,
       queue: Queue,
     ) {
       const sessionId = newSessionId();
@@ -34,7 +35,7 @@ export function createBackgroundManager(
 
       log.debug({ name, sessionId }, "Starting background agent");
 
-      runClaudeFn(prompt, "--session-id", sessionId, model, workspace, promptBackgroundAgent(name), BG_TIMEOUT).then(
+      orchestrator.processRequest({ type: "bg-task", name, prompt, model }).then(
         (response) => {
           active.delete(sessionId);
           const result = (response.action === "send" ? response.message : "") || "[No output]";

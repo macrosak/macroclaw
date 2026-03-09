@@ -1,9 +1,40 @@
-import { type ClaudeResponse, runClaude } from "./claude";
+import { z } from "zod/v4";
+import { type ClaudeOptions, ClaudeParseError, ClaudeProcessError, type ClaudeResult, ClaudeTimeoutError, runClaude } from "./claude";
 import { createLogger } from "./logger";
 import { BG_TIMEOUT, CRON_TIMEOUT, MAIN_TIMEOUT, PROMPT_BACKGROUND_RESULT, PROMPT_CRON_EVENT, PROMPT_USER_MESSAGE, promptBackgroundAgent } from "./prompts";
 import { loadSettings, newSessionId, saveSettings } from "./settings";
 
 const log = createLogger("orchestrator");
+
+// --- Response schema (owned by orchestrator) ---
+
+const backgroundAgentSchema = z.object({
+  name: z.string().describe("Label for the background agent"),
+  prompt: z.string().describe("The prompt/task for the background agent"),
+  model: z.enum(["haiku", "sonnet", "opus"]).describe("Model to use for the background agent").optional(),
+});
+
+const sendResponseSchema = z.object({
+  action: z.literal("send"),
+  actionReason: z.string().describe("Why the agent chose this action (logged, not sent)"),
+  message: z.string().describe("The message to send to Telegram"),
+  files: z.array(z.string()).describe("Absolute paths to files to send to Telegram").optional(),
+  backgroundAgents: z.array(backgroundAgentSchema).describe("Background agents to spawn alongside this response").optional(),
+});
+
+const silentResponseSchema = z.object({
+  action: z.literal("silent"),
+  actionReason: z.string().describe("Why the agent chose this action (logged, not sent)"),
+  backgroundAgents: z.array(backgroundAgentSchema).describe("Background agents to spawn alongside this response").optional(),
+});
+
+const claudeResponseSchema = z.discriminatedUnion("action", [sendResponseSchema, silentResponseSchema]);
+
+export type ClaudeResponse = z.infer<typeof claudeResponseSchema>;
+
+const jsonSchema = JSON.stringify(z.toJSONSchema(claudeResponseSchema));
+
+// --- Request types ---
 
 export type OrchestratorRequest =
   | { type: "user"; message: string; files?: string[] }
@@ -12,11 +43,13 @@ export type OrchestratorRequest =
   | { type: "timeout"; originalMessage: string }
   | { type: "bg-task"; name: string; prompt: string; model?: string };
 
+// --- Orchestrator ---
+
 export interface OrchestratorConfig {
   model?: string;
   workspace: string;
   settingsDir?: string;
-  runClaude?: typeof runClaude;
+  runClaude?: (options: ClaudeOptions) => Promise<ClaudeResult>;
 }
 
 export function createOrchestrator(config: OrchestratorConfig) {
@@ -49,11 +82,10 @@ export function createOrchestrator(config: OrchestratorConfig) {
     switch (request.type) {
       case "user":
         return {
-          prompt: request.message,
+          prompt: buildPromptWithFiles(request.message, request.files),
           model: config.model,
           systemPrompt: PROMPT_USER_MESSAGE,
           timeout: MAIN_TIMEOUT,
-          files: request.files,
           useMainSession: true,
         };
       case "cron":
@@ -91,6 +123,53 @@ export function createOrchestrator(config: OrchestratorConfig) {
     }
   }
 
+  function buildPromptWithFiles(message: string, files?: string[]): string {
+    if (!files?.length) return message;
+    const prefix = files.map((f) => `[File: ${f}]`).join("\n");
+    return message ? `${prefix}\n${message}` : prefix;
+  }
+
+  function validateResponse(raw: unknown): ClaudeResponse {
+    const parsed = claudeResponseSchema.safeParse(raw);
+    if (parsed.success) return parsed.data;
+    log.warn({ error: parsed.error.message }, "structured_output failed validation");
+    const rawObj = raw as Record<string, unknown> | null;
+    const msg = typeof rawObj?.message === "string" ? rawObj.message : JSON.stringify(raw);
+    return { action: "send", message: msg, actionReason: "validation-failed" };
+  }
+
+  async function callClaude(built: ReturnType<typeof buildRequest>, flag: "--resume" | "--session-id", sid: string): Promise<ClaudeResponse> {
+    try {
+      const result = await claude({
+        prompt: built.prompt,
+        sessionFlag: flag,
+        sessionId: sid,
+        model: built.model,
+        workspace: config.workspace,
+        systemPrompt: built.systemPrompt,
+        jsonSchema,
+        timeoutMs: built.timeout,
+      });
+
+      if (result.structuredOutput) {
+        return validateResponse(result.structuredOutput);
+      }
+      log.warn("No structured_output in response");
+      return { action: "send", message: String(result.structuredOutput ?? ""), actionReason: "no-structured-output" };
+    } catch (err) {
+      if (err instanceof ClaudeTimeoutError) {
+        return { action: "send", message: `[Error] Claude process timed out after ${Math.round(err.timeoutMs / 1000)}s.`, actionReason: "timeout" };
+      }
+      if (err instanceof ClaudeProcessError) {
+        return { action: "send", message: `[Error] Claude exited with code ${err.exitCode}:\n${err.stderr}`, actionReason: "process-error" };
+      }
+      if (err instanceof ClaudeParseError) {
+        return { action: "send", message: `[JSON Error] ${err.raw}`, actionReason: "json-parse-failed" };
+      }
+      throw err;
+    }
+  }
+
   return {
     get sessionId() {
       return sessionId;
@@ -100,7 +179,7 @@ export function createOrchestrator(config: OrchestratorConfig) {
       const built = buildRequest(request);
 
       if (built.useMainSession) {
-        let response = await claude(built.prompt, sessionFlag, sessionId, built.model, config.workspace, built.systemPrompt, built.timeout, built.files);
+        let response = await callClaude(built, sessionFlag, sessionId);
 
         // Session resolution: if resume failed on first call, create new session
         if (!sessionResolved && sessionFlag === "--resume" && response.actionReason === "process-error") {
@@ -108,7 +187,7 @@ export function createOrchestrator(config: OrchestratorConfig) {
           log.info({ sessionId }, "Resume failed, created new session");
           sessionFlag = "--session-id";
           saveSettings({ sessionId }, config.settingsDir);
-          response = await claude(built.prompt, sessionFlag, sessionId, built.model, config.workspace, built.systemPrompt, built.timeout, built.files);
+          response = await callClaude(built, sessionFlag, sessionId);
         }
 
         // Mark resolved on first success
@@ -123,7 +202,7 @@ export function createOrchestrator(config: OrchestratorConfig) {
       // bg-task: fresh session, no session resolution
       const bgSessionId = newSessionId();
       log.debug({ name: (request as { name: string }).name, sessionId: bgSessionId }, "Processing bg-task");
-      return claude(built.prompt, "--session-id", bgSessionId, built.model, config.workspace, built.systemPrompt, built.timeout);
+      return callClaude(built, "--session-id", bgSessionId);
     },
   };
 }

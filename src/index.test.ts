@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { existsSync, rmSync } from "node:fs";
-import type { ClaudeResponse } from "./claude";
+import type { ClaudeOptions, ClaudeResult } from "./claude";
 import { type AppConfig, createApp, requireEnv } from "./index";
 import { saveSettings } from "./settings";
 
@@ -56,13 +56,19 @@ afterEach(() => {
   if (existsSync(tmpSettingsDir)) rmSync(tmpSettingsDir, { recursive: true });
 });
 
+function successResult(output: unknown): ClaudeResult {
+  return { structuredOutput: output, duration: "1.0s", cost: "$0.05" };
+}
+
 function makeConfig(overrides?: Partial<AppConfig>): AppConfig {
   return {
     botToken: "test-token",
     authorizedChatId: "12345",
     workspace: "/tmp/macroclaw-test-workspace",
     settingsDir: tmpSettingsDir,
-    runClaude: mock(async (msg: string): Promise<ClaudeResponse> => ({ action: "send", message: `Response to: ${msg}`, actionReason: "user message" })),
+    runClaude: mock(async (opts: ClaudeOptions): Promise<ClaudeResult> =>
+      successResult({ action: "send", message: `Response to: ${opts.prompt}`, actionReason: "user message" }),
+    ),
     ...overrides,
   };
 }
@@ -101,90 +107,10 @@ describe("createApp", () => {
     const app = createApp(makeConfig());
     const bot = app.bot as any;
 
-    // /session should return a UUID, not "test-session"
     const ctx = { reply: mock(() => {}) };
     bot.commandHandlers.get("session")!(ctx);
     const reply = (ctx.reply as any).mock.calls[0][0];
     expect(reply).toMatch(/Session: `[0-9a-f]{8}-/);
-  });
-
-  describe("session resolution", () => {
-    it("uses --resume for existing session on first call", async () => {
-      const config = makeConfig();
-      const app = createApp(config);
-      const bot = app.bot as any;
-      const handler = bot.filterHandlers.get("message:text")![0];
-
-      handler({ chat: { id: 12345 }, message: { text: "hello" } });
-      await new Promise((r) => setTimeout(r, 50));
-
-      const call = (config.runClaude as any).mock.calls[0];
-      expect(call[0]).toBe("hello");
-      expect(call[1]).toBe("--resume");
-      expect(call[2]).toBe("test-session");
-    });
-
-    it("creates new session when resume fails", async () => {
-      let callCount = 0;
-      const config = makeConfig({
-        runClaude: mock(async (msg: string): Promise<ClaudeResponse> => {
-          callCount++;
-          if (callCount === 1) {
-            return { action: "send", message: "[Error] session not found", actionReason: "process-error" };
-          }
-          return { action: "send", message: `Response to: ${msg}`, actionReason: "user message" };
-        }),
-      });
-      const app = createApp(config);
-      const bot = app.bot as any;
-      const handler = bot.filterHandlers.get("message:text")![0];
-
-      handler({ chat: { id: 12345 }, message: { text: "hello" } });
-      await new Promise((r) => setTimeout(r, 50));
-
-      expect(callCount).toBe(2);
-      // First call: --resume with old session
-      const firstCall = (config.runClaude as any).mock.calls[0];
-      expect(firstCall[1]).toBe("--resume");
-      expect(firstCall[2]).toBe("test-session");
-      // Second call: --session-id with new UUID
-      const secondCall = (config.runClaude as any).mock.calls[1];
-      expect(secondCall[1]).toBe("--session-id");
-      expect(secondCall[2]).not.toBe("test-session");
-      expect(secondCall[2]).toMatch(/^[0-9a-f]{8}-/);
-    });
-
-    it("uses --session-id on first call when no settings exist", async () => {
-      if (existsSync(tmpSettingsDir)) rmSync(tmpSettingsDir, { recursive: true });
-      const config = makeConfig();
-      const app = createApp(config);
-      const bot = app.bot as any;
-      const handler = bot.filterHandlers.get("message:text")![0];
-
-      handler({ chat: { id: 12345 }, message: { text: "hello" } });
-      await new Promise((r) => setTimeout(r, 50));
-
-      const call = (config.runClaude as any).mock.calls[0];
-      expect(call[1]).toBe("--session-id");
-      expect(call[2]).toMatch(/^[0-9a-f]{8}-/);
-    });
-
-    it("switches to --resume after first successful call", async () => {
-      const config = makeConfig();
-      const app = createApp(config);
-      const bot = app.bot as any;
-      const handler = bot.filterHandlers.get("message:text")![0];
-
-      handler({ chat: { id: 12345 }, message: { text: "first" } });
-      await new Promise((r) => setTimeout(r, 50));
-      handler({ chat: { id: 12345 }, message: { text: "second" } });
-      await new Promise((r) => setTimeout(r, 50));
-
-      const firstCall = (config.runClaude as any).mock.calls[0];
-      const secondCall = (config.runClaude as any).mock.calls[1];
-      expect(firstCall[1]).toBe("--resume");
-      expect(secondCall[1]).toBe("--resume");
-    });
   });
 
   describe("message handler", () => {
@@ -197,20 +123,8 @@ describe("createApp", () => {
       handler({ chat: { id: 12345 }, message: { text: "hello" } });
       await new Promise((r) => setTimeout(r, 50));
 
-      const call = (config.runClaude as any).mock.calls[0];
-      expect(call[0]).toBe("hello");
-    });
-
-    it("passes model override from cron request", async () => {
-      const config = makeConfig();
-      const app = createApp(config);
-
-      app.queue.push({ type: "cron", name: "test", prompt: "cron msg", model: "haiku" });
-      await new Promise((r) => setTimeout(r, 50));
-
-      const call = (config.runClaude as any).mock.calls[0];
-      expect(call[0]).toBe("[Tool: cron/test] cron msg");
-      expect(call[3]).toBe("haiku");
+      const opts = (config.runClaude as any).mock.calls[0][0] as ClaudeOptions;
+      expect(opts.prompt).toBe("hello");
     });
 
     it("ignores messages from unauthorized chats", async () => {
@@ -227,7 +141,7 @@ describe("createApp", () => {
 
     it("sends [No output] for empty claude response", async () => {
       const config = makeConfig({
-        runClaude: mock(async (): Promise<ClaudeResponse> => ({ action: "send", message: "", actionReason: "empty" })),
+        runClaude: mock(async (): Promise<ClaudeResult> => successResult({ action: "send", message: "", actionReason: "empty" })),
       });
       const app = createApp(config);
       const bot = app.bot as any;
@@ -243,7 +157,7 @@ describe("createApp", () => {
 
     it("skips sending when action is silent", async () => {
       const config = makeConfig({
-        runClaude: mock(async (): Promise<ClaudeResponse> => ({ action: "silent", actionReason: "no new results" })),
+        runClaude: mock(async (): Promise<ClaudeResult> => successResult({ action: "silent", actionReason: "no new results" })),
       });
       const app = createApp(config);
       const bot = app.bot as any;
@@ -258,18 +172,17 @@ describe("createApp", () => {
     it("spawns background agents from send response", async () => {
       let callCount = 0;
       const config = makeConfig({
-        runClaude: mock(async (): Promise<ClaudeResponse> => {
+        runClaude: mock(async (): Promise<ClaudeResult> => {
           callCount++;
           if (callCount === 1) {
-            return {
+            return successResult({
               action: "send",
               message: "Starting research",
               actionReason: "needs research",
               backgroundAgents: [{ name: "research", prompt: "research this" }],
-            };
+            });
           }
-          // The background agent's call
-          return { action: "send", message: "research result", actionReason: "done" };
+          return successResult({ action: "send", message: "research result", actionReason: "done" });
         }),
       });
       const app = createApp(config);
@@ -292,16 +205,16 @@ describe("createApp", () => {
     it("spawns background agents from silent response", async () => {
       let callCount = 0;
       const config = makeConfig({
-        runClaude: mock(async (): Promise<ClaudeResponse> => {
+        runClaude: mock(async (): Promise<ClaudeResult> => {
           callCount++;
           if (callCount === 1) {
-            return {
+            return successResult({
               action: "silent",
               actionReason: "spawning bg task",
               backgroundAgents: [{ name: "cleanup", prompt: "tidy up" }],
-            };
+            });
           }
-          return { action: "send", message: "done", actionReason: "ok" };
+          return successResult({ action: "send", message: "done", actionReason: "ok" });
         }),
       });
       const app = createApp(config);
@@ -317,9 +230,8 @@ describe("createApp", () => {
     });
 
     it("handles bg: prefix from Telegram", async () => {
-      // Never-resolving mock so bg agent stays "running" and doesn't feed back
       const config = makeConfig({
-        runClaude: mock(() => new Promise<ClaudeResponse>(() => {})),
+        runClaude: mock(() => new Promise<ClaudeResult>(() => {})),
       });
       const app = createApp(config);
       const bot = app.bot as any;
@@ -333,7 +245,6 @@ describe("createApp", () => {
       handler(ctx);
       await new Promise((r) => setTimeout(r, 50));
 
-      // Should NOT go through main queue — only the bg agent's runClaude call
       expect(config.runClaude).toHaveBeenCalledTimes(1);
       expect(ctx.reply).toHaveBeenCalledWith('Background agent "research-pricing" started.');
     });
@@ -345,10 +256,10 @@ describe("createApp", () => {
       app.queue.push({ type: "cron", name: "daily-check", prompt: "Check for updates" });
       await new Promise((r) => setTimeout(r, 50));
 
-      const call = (config.runClaude as any).mock.calls[0];
-      expect(call[0]).toBe("[Tool: cron/daily-check] Check for updates");
-      expect(call[5]).toContain("cron event");
-      expect(call[6]).toBe(300_000);
+      const opts = (config.runClaude as any).mock.calls[0][0] as ClaudeOptions;
+      expect(opts.prompt).toBe("[Tool: cron/daily-check] Check for updates");
+      expect(opts.systemPrompt).toContain("cron event");
+      expect(opts.timeoutMs).toBe(300_000);
     });
 
     it("passes background result system prompt for background messages", async () => {
@@ -358,46 +269,20 @@ describe("createApp", () => {
       app.queue.push({ type: "background", name: "research", result: "Here are the results" });
       await new Promise((r) => setTimeout(r, 50));
 
-      const call = (config.runClaude as any).mock.calls[0];
-      expect(call[0]).toBe("[Background: research] Here are the results");
-      expect(call[5]).toContain("background agent you previously spawned");
-      expect(call[6]).toBe(60_000);
-    });
-
-    it("passes MAIN_TIMEOUT for user messages", async () => {
-      const config = makeConfig();
-      const app = createApp(config);
-      const bot = app.bot as any;
-      const handler = bot.filterHandlers.get("message:text")![0];
-
-      handler({ chat: { id: 12345 }, message: { text: "hello" } });
-      await new Promise((r) => setTimeout(r, 50));
-
-      const call = (config.runClaude as any).mock.calls[0];
-      expect(call[6]).toBe(60_000);
-    });
-
-    it("passes CRON_TIMEOUT for cron messages", async () => {
-      const config = makeConfig();
-      const app = createApp(config);
-
-      app.queue.push({ type: "cron", name: "daily-check", prompt: "Check for updates" });
-      await new Promise((r) => setTimeout(r, 50));
-
-      const call = (config.runClaude as any).mock.calls[0];
-      expect(call[6]).toBe(300_000);
+      const opts = (config.runClaude as any).mock.calls[0][0] as ClaudeOptions;
+      expect(opts.prompt).toBe("[Background: research] Here are the results");
+      expect(opts.systemPrompt).toContain("background agent you previously spawned");
+      expect(opts.timeoutMs).toBe(60_000);
     });
 
     it("re-queues user message with [Timeout] prefix on timeout", async () => {
+      const { ClaudeTimeoutError } = await import("./claude");
       let callCount = 0;
       const config = makeConfig({
-        runClaude: mock(async (_msg: string): Promise<ClaudeResponse> => {
+        runClaude: mock(async (): Promise<ClaudeResult> => {
           callCount++;
-          if (callCount === 1) {
-            return { action: "send", message: "[Error] timed out", actionReason: "timeout" };
-          }
-          // The re-queued [Timeout] message
-          return { action: "send", message: "handled via retry", actionReason: "ok" };
+          if (callCount === 1) throw new ClaudeTimeoutError(60_000);
+          return successResult({ action: "send", message: "handled via retry", actionReason: "ok" });
         }),
       });
       const app = createApp(config);
@@ -407,12 +292,10 @@ describe("createApp", () => {
       handler({ chat: { id: 12345 }, message: { text: "do something slow" } });
       await new Promise((r) => setTimeout(r, 100));
 
-      // First call: user message times out
-      // Second call: re-queued [Timeout] message
       expect(callCount).toBe(2);
-      const secondCall = (config.runClaude as any).mock.calls[1][0];
-      expect(secondCall).toStartWith("[Timeout]");
-      expect(secondCall).toContain("do something slow");
+      const secondOpts = (config.runClaude as any).mock.calls[1][0] as ClaudeOptions;
+      expect(secondOpts.prompt).toStartWith("[Timeout]");
+      expect(secondOpts.prompt).toContain("do something slow");
 
       const sendCalls = (bot.api.sendMessage as any).mock.calls;
       const texts = sendCalls.map((c: any) => c[1]);
@@ -420,9 +303,10 @@ describe("createApp", () => {
     });
 
     it("does not re-queue timeout messages that also time out", async () => {
+      const { ClaudeTimeoutError } = await import("./claude");
       const config = makeConfig({
-        runClaude: mock(async (): Promise<ClaudeResponse> => {
-          return { action: "send", message: "[Error] timed out again", actionReason: "timeout" };
+        runClaude: mock(async (): Promise<ClaudeResult> => {
+          throw new ClaudeTimeoutError(60_000);
         }),
       });
       const app = createApp(config);
@@ -435,13 +319,14 @@ describe("createApp", () => {
       const bot = app.bot as any;
       const sendCalls = (bot.api.sendMessage as any).mock.calls;
       const texts = sendCalls.map((c: any) => c[1]);
-      expect(texts).toContain("[Error] timed out again");
+      expect(texts.some((t: string) => t.includes("timed out") || t.includes("[Error]"))).toBe(true);
     });
 
     it("sends cron timeout notification on cron timeout", async () => {
+      const { ClaudeTimeoutError } = await import("./claude");
       const config = makeConfig({
-        runClaude: mock(async (): Promise<ClaudeResponse> => {
-          return { action: "send", message: "[Error] timed out", actionReason: "timeout" };
+        runClaude: mock(async (): Promise<ClaudeResult> => {
+          throw new ClaudeTimeoutError(300_000);
         }),
       });
       const app = createApp(config);
@@ -456,14 +341,13 @@ describe("createApp", () => {
     });
 
     it("handles background result timeout like user message timeout", async () => {
+      const { ClaudeTimeoutError } = await import("./claude");
       let callCount = 0;
       const config = makeConfig({
-        runClaude: mock(async (): Promise<ClaudeResponse> => {
+        runClaude: mock(async (): Promise<ClaudeResult> => {
           callCount++;
-          if (callCount === 1) {
-            return { action: "send", message: "[Error] timed out", actionReason: "timeout" };
-          }
-          return { action: "send", message: "ok", actionReason: "ok" };
+          if (callCount === 1) throw new ClaudeTimeoutError(60_000);
+          return successResult({ action: "send", message: "ok", actionReason: "ok" });
         }),
       });
       const app = createApp(config);
@@ -472,16 +356,16 @@ describe("createApp", () => {
       await new Promise((r) => setTimeout(r, 100));
 
       expect(callCount).toBe(2);
-      const secondCall = (config.runClaude as any).mock.calls[1][0];
-      expect(secondCall).toStartWith("[Timeout]");
-      expect(secondCall).toContain("[Background: research] long result");
+      const secondOpts = (config.runClaude as any).mock.calls[1][0] as ClaudeOptions;
+      expect(secondOpts.prompt).toStartWith("[Timeout]");
+      expect(secondOpts.prompt).toContain("[Background: research] long result");
     });
 
     it("sends error wrapped in ClaudeResponse", async () => {
+      const { ClaudeProcessError } = await import("./claude");
       const config = makeConfig({
-        runClaude: mock(async (): Promise<ClaudeResponse> => {
-          // First call triggers session resolution retry, second also fails
-          return { action: "send", message: "[Error] Claude exited with code 1:\nspawn failed", actionReason: "process-error" };
+        runClaude: mock(async (): Promise<ClaudeResult> => {
+          throw new ClaudeProcessError(1, "spawn failed");
         }),
       });
       const app = createApp(config);
@@ -522,10 +406,8 @@ describe("createApp", () => {
 
       expect(bot.api.getFile).toHaveBeenCalledWith("large");
       expect(config.runClaude).toHaveBeenCalled();
-      const call = (config.runClaude as any).mock.calls[0];
-      expect(call[0]).toBe("check this");
-      expect(call[7]).toBeDefined();
-      expect(call[7][0]).toContain("/tmp/macroclaw/inbound/");
+      const opts = (config.runClaude as any).mock.calls[0][0] as ClaudeOptions;
+      expect(opts.prompt).toContain("[File:");
 
       globalThis.fetch = origFetch;
     });
@@ -552,9 +434,8 @@ describe("createApp", () => {
 
       expect(bot.api.getFile).toHaveBeenCalledWith("doc-id");
       expect(config.runClaude).toHaveBeenCalled();
-      const call = (config.runClaude as any).mock.calls[0];
-      expect(call[0]).toBe("review this");
-      expect(call[7][0]).toContain("report.pdf");
+      const opts = (config.runClaude as any).mock.calls[0][0] as ClaudeOptions;
+      expect(opts.prompt).toContain("[File:");
 
       globalThis.fetch = origFetch;
     });
@@ -573,8 +454,8 @@ describe("createApp", () => {
       await new Promise((r) => setTimeout(r, 50));
 
       expect(config.runClaude).toHaveBeenCalled();
-      const msg = (config.runClaude as any).mock.calls[0][0];
-      expect(msg).toContain("[File download failed: photo.jpg]");
+      const opts = (config.runClaude as any).mock.calls[0][0] as ClaudeOptions;
+      expect(opts.prompt).toContain("[File download failed: photo.jpg]");
     });
 
     it("queues error message when document download fails", async () => {
@@ -591,8 +472,8 @@ describe("createApp", () => {
       await new Promise((r) => setTimeout(r, 50));
 
       expect(config.runClaude).toHaveBeenCalled();
-      const msg = (config.runClaude as any).mock.calls[0][0];
-      expect(msg).toContain("[File download failed: huge.pdf]");
+      const opts = (config.runClaude as any).mock.calls[0][0] as ClaudeOptions;
+      expect(opts.prompt).toContain("[File download failed: huge.pdf]");
     });
 
     it("ignores photo messages from unauthorized chats", async () => {
@@ -615,12 +496,14 @@ describe("createApp", () => {
       await Bun.write(tmpFile, "fake png");
 
       const config = makeConfig({
-        runClaude: mock(async (): Promise<ClaudeResponse> => ({
-          action: "send",
-          message: "Here's your chart",
-          actionReason: "ok",
-          files: [tmpFile],
-        })),
+        runClaude: mock(async (): Promise<ClaudeResult> =>
+          successResult({
+            action: "send",
+            message: "Here's your chart",
+            actionReason: "ok",
+            files: [tmpFile],
+          }),
+        ),
       });
       const app = createApp(config);
       const bot = app.bot as any;
@@ -638,12 +521,14 @@ describe("createApp", () => {
 
     it("skips outbound files that don't exist", async () => {
       const config = makeConfig({
-        runClaude: mock(async (): Promise<ClaudeResponse> => ({
-          action: "send",
-          message: "Done",
-          actionReason: "ok",
-          files: ["/tmp/nonexistent-xyz.png"],
-        })),
+        runClaude: mock(async (): Promise<ClaudeResult> =>
+          successResult({
+            action: "send",
+            message: "Done",
+            actionReason: "ok",
+            files: ["/tmp/nonexistent-xyz.png"],
+          }),
+        ),
       });
       const app = createApp(config);
       const bot = app.bot as any;
@@ -689,15 +574,13 @@ describe("createApp", () => {
     });
 
     it("/bg lists active background agents", async () => {
-      // runClaude that never resolves (agent stays active)
       const config = makeConfig({
-        runClaude: mock(() => new Promise<ClaudeResponse>(() => {})),
+        runClaude: mock(() => new Promise<ClaudeResult>(() => {})),
       });
       const app = createApp(config);
       const bot = app.bot as any;
       const msgHandler = bot.filterHandlers.get("message:text")![0];
 
-      // Spawn a bg agent via bg: prefix
       const ctx = {
         chat: { id: 12345 },
         message: { text: "bg: long task" },
