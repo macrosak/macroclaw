@@ -43,6 +43,7 @@ export function createApp(config: AppConfig) {
     sessionId = newSessionId();
     sessionFlag = "--session-id";
     saveSettings({ sessionId }, config.settingsDir);
+    console.log(`[session] Created new session: ${sessionId}`);
   }
 
   queue.setHandler(async (item) => {
@@ -61,8 +62,8 @@ export function createApp(config: AppConfig) {
 
     // Session resolution: if resume failed on first call, create new session
     if (!sessionResolved && sessionFlag === "--resume" && response.reason === "process-error") {
-      console.log("[session] Resume failed, creating new session");
       sessionId = newSessionId();
+      console.log(`[session] Resume failed, created new session: ${sessionId}`);
       sessionFlag = "--session-id";
       saveSettings({ sessionId }, config.settingsDir);
       response = await claude(item.message, sessionFlag, sessionId, model, config.workspace, systemPrompt, timeout, item.files);
