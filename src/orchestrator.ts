@@ -1,5 +1,6 @@
 import { z } from "zod/v4";
 import { type ClaudeOptions, ClaudeParseError, ClaudeProcessError, type ClaudeResult, ClaudeTimeoutError, runClaude } from "./claude";
+import { logPrompt, logResult } from "./history";
 import { createLogger } from "./logger";
 import { BG_TIMEOUT, CRON_TIMEOUT, MAIN_TIMEOUT, PROMPT_BACKGROUND_RESULT, PROMPT_CRON_EVENT, PROMPT_USER_MESSAGE, promptBackgroundAgent } from "./prompts";
 import { loadSettings, newSessionId, saveSettings } from "./settings";
@@ -177,6 +178,7 @@ export function createOrchestrator(config: OrchestratorConfig) {
 
     async processRequest(request: OrchestratorRequest): Promise<ClaudeResponse> {
       const built = buildRequest(request);
+      await logPrompt(request);
 
       if (built.useMainSession) {
         let response = await callClaude(built, sessionFlag, sessionId);
@@ -196,13 +198,16 @@ export function createOrchestrator(config: OrchestratorConfig) {
           sessionFlag = "--resume";
         }
 
+        await logResult(response);
         return response;
       }
 
       // bg-task: fresh session, no session resolution
       const bgSessionId = newSessionId();
       log.debug({ name: (request as { name: string }).name, sessionId: bgSessionId }, "Processing bg-task");
-      return callClaude(built, "--session-id", bgSessionId);
+      const bgResponse = await callClaude(built, "--session-id", bgSessionId);
+      await logResult(bgResponse);
+      return bgResponse;
     },
   };
 }
