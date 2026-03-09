@@ -553,12 +553,14 @@ describe("createApp", () => {
         chat: { id: 12345 },
         callbackQuery: { data: "Yes" },
         answerCallbackQuery: mock(async () => {}),
+        editMessageReplyMarkup: mock(async () => {}),
       };
 
       await handler(ctx);
       await new Promise((r) => setTimeout(r, 50));
 
       expect(ctx.answerCallbackQuery).toHaveBeenCalled();
+      expect(ctx.editMessageReplyMarkup).toHaveBeenCalledWith({ reply_markup: { inline_keyboard: [] } });
       expect(config.runClaude).toHaveBeenCalled();
       const opts = (config.runClaude as any).mock.calls[0][0] as ClaudeOptions;
       expect(opts.prompt).toBe('The user clicked MessageButton: "Yes"');
@@ -574,6 +576,7 @@ describe("createApp", () => {
         chat: { id: 99999 },
         callbackQuery: { data: "Yes" },
         answerCallbackQuery: mock(async () => {}),
+        editMessageReplyMarkup: mock(async () => {}),
       };
 
       await handler(ctx);
