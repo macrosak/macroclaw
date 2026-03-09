@@ -37,7 +37,7 @@ export function createBackgroundManager(
       runClaudeFn(prompt, "--session-id", sessionId, model, workspace, promptBackgroundAgent(name), BG_TIMEOUT).then(
         (response) => {
           active.delete(sessionId);
-          const result = response.message || "[No output]";
+          const result = (response.action === "send" ? response.message : "") || "[No output]";
           log.debug({ name, result }, "Background agent finished");
           queue.push({ message: `[Background: ${name}] ${result}`, source: "background" });
         },

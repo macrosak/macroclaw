@@ -63,7 +63,7 @@ function makeConfig(overrides?: Partial<AppConfig>): AppConfig {
     authorizedChatId: "12345",
     workspace: "/tmp/macroclaw-test-workspace",
     settingsDir: tmpSettingsDir,
-    runClaude: mock(async (msg: string): Promise<ClaudeResponse> => ({ action: "send", message: `Response to: ${msg}`, reason: "user message" })),
+    runClaude: mock(async (msg: string): Promise<ClaudeResponse> => ({ action: "send", message: `Response to: ${msg}`, actionReason: "user message" })),
     ...overrides,
   };
 }
@@ -128,9 +128,9 @@ describe("createApp", () => {
         runClaude: mock(async (msg: string): Promise<ClaudeResponse> => {
           callCount++;
           if (callCount === 1) {
-            return { action: "send", message: "[Error] session not found", reason: "process-error" };
+            return { action: "send", message: "[Error] session not found", actionReason: "process-error" };
           }
-          return { action: "send", message: `Response to: ${msg}`, reason: "user message" };
+          return { action: "send", message: `Response to: ${msg}`, actionReason: "user message" };
         }),
       });
       const app = createApp(config);
@@ -224,7 +224,7 @@ describe("createApp", () => {
 
     it("sends [No output] for empty claude response", async () => {
       const config = makeConfig({
-        runClaude: mock(async (): Promise<ClaudeResponse> => ({ action: "send", message: "", reason: "empty" })),
+        runClaude: mock(async (): Promise<ClaudeResponse> => ({ action: "send", message: "", actionReason: "empty" })),
       });
       const app = createApp(config);
       const bot = app.bot as any;
@@ -240,7 +240,7 @@ describe("createApp", () => {
 
     it("skips sending when action is silent", async () => {
       const config = makeConfig({
-        runClaude: mock(async (): Promise<ClaudeResponse> => ({ action: "silent", message: "", reason: "no new results" })),
+        runClaude: mock(async (): Promise<ClaudeResponse> => ({ action: "silent", actionReason: "no new results" })),
       });
       const app = createApp(config);
       const bot = app.bot as any;
@@ -252,16 +252,21 @@ describe("createApp", () => {
       expect(bot.api.sendMessage).not.toHaveBeenCalled();
     });
 
-    it("spawns background agent when action is background", async () => {
+    it("spawns background agents from send response", async () => {
       let callCount = 0;
       const config = makeConfig({
         runClaude: mock(async (): Promise<ClaudeResponse> => {
           callCount++;
           if (callCount === 1) {
-            return { action: "background", message: "research this", reason: "needs research", name: "research" };
+            return {
+              action: "send",
+              message: "Starting research",
+              actionReason: "needs research",
+              backgroundAgents: [{ name: "research", prompt: "research this" }],
+            };
           }
           // The background agent's call
-          return { action: "send", message: "research result", reason: "done" };
+          return { action: "send", message: "research result", actionReason: "done" };
         }),
       });
       const app = createApp(config);
@@ -271,9 +276,9 @@ describe("createApp", () => {
       handler({ chat: { id: 12345 }, message: { text: "hello" } });
       await new Promise((r) => setTimeout(r, 50));
 
-      // Main session got the background response and confirmed to user
       const sendCalls = (bot.api.sendMessage as any).mock.calls;
       const texts = sendCalls.map((c: any) => c[1]);
+      expect(texts).toContain("Starting research");
       expect(texts).toContain('Background agent "research" started.');
 
       // Background agent result should be fed back into queue
@@ -281,15 +286,19 @@ describe("createApp", () => {
       expect(config.runClaude).toHaveBeenCalledTimes(3); // 1 main + 1 bg agent + 1 bg result fed back
     });
 
-    it("spawns background agent with unnamed when name is missing", async () => {
+    it("spawns background agents from silent response", async () => {
       let callCount = 0;
       const config = makeConfig({
         runClaude: mock(async (): Promise<ClaudeResponse> => {
           callCount++;
           if (callCount === 1) {
-            return { action: "background", message: "do something", reason: "bg" };
+            return {
+              action: "silent",
+              actionReason: "spawning bg task",
+              backgroundAgents: [{ name: "cleanup", prompt: "tidy up" }],
+            };
           }
-          return { action: "send", message: "done", reason: "ok" };
+          return { action: "send", message: "done", actionReason: "ok" };
         }),
       });
       const app = createApp(config);
@@ -301,7 +310,7 @@ describe("createApp", () => {
 
       const sendCalls = (bot.api.sendMessage as any).mock.calls;
       const texts = sendCalls.map((c: any) => c[1]);
-      expect(texts).toContain('Background agent "unnamed" started.');
+      expect(texts).toContain('Background agent "cleanup" started.');
     });
 
     it("handles bg: prefix from Telegram", async () => {
@@ -401,10 +410,10 @@ describe("createApp", () => {
         runClaude: mock(async (_msg: string): Promise<ClaudeResponse> => {
           callCount++;
           if (callCount === 1) {
-            return { action: "send", message: "[Error] timed out", reason: "timeout" };
+            return { action: "send", message: "[Error] timed out", actionReason: "timeout" };
           }
           // The re-queued [Timeout] message
-          return { action: "send", message: "handled via retry", reason: "ok" };
+          return { action: "send", message: "handled via retry", actionReason: "ok" };
         }),
       });
       const app = createApp(config);
@@ -429,7 +438,7 @@ describe("createApp", () => {
     it("does not re-queue timeout messages that also time out", async () => {
       const config = makeConfig({
         runClaude: mock(async (): Promise<ClaudeResponse> => {
-          return { action: "send", message: "[Error] timed out again", reason: "timeout" };
+          return { action: "send", message: "[Error] timed out again", actionReason: "timeout" };
         }),
       });
       const app = createApp(config);
@@ -448,7 +457,7 @@ describe("createApp", () => {
     it("sends cron timeout notification on cron timeout", async () => {
       const config = makeConfig({
         runClaude: mock(async (): Promise<ClaudeResponse> => {
-          return { action: "send", message: "[Error] timed out", reason: "timeout" };
+          return { action: "send", message: "[Error] timed out", actionReason: "timeout" };
         }),
       });
       const app = createApp(config);
@@ -468,9 +477,9 @@ describe("createApp", () => {
         runClaude: mock(async (): Promise<ClaudeResponse> => {
           callCount++;
           if (callCount === 1) {
-            return { action: "send", message: "[Error] timed out", reason: "timeout" };
+            return { action: "send", message: "[Error] timed out", actionReason: "timeout" };
           }
-          return { action: "send", message: "ok", reason: "ok" };
+          return { action: "send", message: "ok", actionReason: "ok" };
         }),
       });
       const app = createApp(config);
@@ -488,7 +497,7 @@ describe("createApp", () => {
       const config = makeConfig({
         runClaude: mock(async (): Promise<ClaudeResponse> => {
           // First call triggers session resolution retry, second also fails
-          return { action: "send", message: "[Error] Claude exited with code 1:\nspawn failed", reason: "process-error" };
+          return { action: "send", message: "[Error] Claude exited with code 1:\nspawn failed", actionReason: "process-error" };
         }),
       });
       const app = createApp(config);
@@ -625,7 +634,7 @@ describe("createApp", () => {
         runClaude: mock(async (): Promise<ClaudeResponse> => ({
           action: "send",
           message: "Here's your chart",
-          reason: "ok",
+          actionReason: "ok",
           files: [tmpFile],
         })),
       });
@@ -648,7 +657,7 @@ describe("createApp", () => {
         runClaude: mock(async (): Promise<ClaudeResponse> => ({
           action: "send",
           message: "Done",
-          reason: "ok",
+          actionReason: "ok",
           files: ["/tmp/nonexistent-xyz.png"],
         })),
       });

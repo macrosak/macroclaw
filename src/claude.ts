@@ -3,13 +3,27 @@ import { createLogger } from "./logger";
 
 const log = createLogger("claude");
 
-const claudeResponseSchema = z.object({
-  action: z.enum(["send", "silent", "background"]),
-  message: z.string().describe("The message to send to Telegram, or the prompt for background agents"),
-  reason: z.string().describe("Why the agent chose this action (logged, not sent)"),
-  name: z.string().describe("Label for background agent (only used when action is background)").optional(),
-  files: z.array(z.string()).describe("Absolute paths to files to send to Telegram (optional)").optional(),
+const backgroundAgentSchema = z.object({
+  name: z.string().describe("Label for the background agent"),
+  prompt: z.string().describe("The prompt/task for the background agent"),
+  model: z.enum(["haiku", "sonnet", "opus"]).describe("Model to use for the background agent").optional(),
 });
+
+const sendResponseSchema = z.object({
+  action: z.literal("send"),
+  actionReason: z.string().describe("Why the agent chose this action (logged, not sent)"),
+  message: z.string().describe("The message to send to Telegram"),
+  files: z.array(z.string()).describe("Absolute paths to files to send to Telegram").optional(),
+  backgroundAgents: z.array(backgroundAgentSchema).describe("Background agents to spawn alongside this response").optional(),
+});
+
+const silentResponseSchema = z.object({
+  action: z.literal("silent"),
+  actionReason: z.string().describe("Why the agent chose this action (logged, not sent)"),
+  backgroundAgents: z.array(backgroundAgentSchema).describe("Background agents to spawn alongside this response").optional(),
+});
+
+const claudeResponseSchema = z.discriminatedUnion("action", [sendResponseSchema, silentResponseSchema]);
 
 export type ClaudeResponse = z.infer<typeof claudeResponseSchema>;
 
@@ -64,7 +78,7 @@ export async function runClaude(
   if (timedOut) {
     const secs = Math.round((timeoutMs as number) / 1000);
     log.warn({ timeoutSecs: secs }, "Claude process timed out");
-    return { action: "send", message: `[Error] Claude process timed out after ${secs}s.`, reason: "timeout" };
+    return { action: "send", message: `[Error] Claude process timed out after ${secs}s.`, actionReason: "timeout" };
   }
 
   if (exitCode === 0) {
@@ -78,18 +92,18 @@ export async function runClaude(
         const parsed = claudeResponseSchema.safeParse(envelope.structured_output);
         if (parsed.success) return parsed.data;
         log.warn({ error: parsed.error.message }, "structured_output failed validation");
-        return { action: "send", message: envelope.structured_output.message ?? stdout, reason: "validation-failed" };
+        return { action: "send", message: envelope.structured_output.message ?? stdout, actionReason: "validation-failed" };
       }
       log.warn({ envelope }, "No structured_output in response");
-      return { action: "send", message: envelope.result ?? stdout, reason: "no-structured-output" };
+      return { action: "send", message: envelope.result ?? stdout, actionReason: "no-structured-output" };
     } catch {
       log.warn({ stdout: stdout.slice(0, 200) }, "Failed to parse Claude stdout as JSON");
-      return { action: "send", message: `[JSON Error] ${stdout}`, reason: "json-parse-failed" };
+      return { action: "send", message: `[JSON Error] ${stdout}`, actionReason: "json-parse-failed" };
     }
   }
 
   const stderr = await new Response(proc.stderr).text();
   log.error({ exitCode, stderr: stderr.slice(0, 200) }, "Claude process failed");
 
-  return { action: "send", message: `[Error] Claude exited with code ${exitCode}:\n${stderr}`, reason: "process-error" };
+  return { action: "send", message: `[Error] Claude exited with code ${exitCode}:\n${stderr}`, actionReason: "process-error" };
 }

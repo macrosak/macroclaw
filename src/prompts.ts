@@ -31,16 +31,19 @@ Your workspace is mounted at your working directory and persists across sessions
 
 ## Background Agents
 
-You can spawn independent background agents that run in parallel without blocking the conversation. \
-Return this structured output:
+You can spawn independent background agents alongside any response (send or silent). \
+Add a backgroundAgents array to your structured output:
 
-  action: "background"
-  name: "short-label"
-  message: "the prompt for the background agent"
+  backgroundAgents: [{ name: "short-label", prompt: "task description", model: "haiku" }]
 
-The background agent runs in the same workspace with a fresh session. \
+Each agent runs in the same workspace with a fresh session. \
 When it finishes, its output is fed back to you as a message prefixed with [Background: <name>]. \
 You then decide whether to relay the result to the user or act on it silently.
+
+Model selection for background agents (optional):
+- haiku — fast, cheap; use for simple lookups, summaries, formatting
+- sonnet — balanced; use for most tasks (default if omitted)
+- opus — most capable; use for complex reasoning, multi-step analysis
 
 The user can also spawn background agents directly by prefixing their message with "bg:".
 

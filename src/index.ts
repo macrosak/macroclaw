@@ -64,7 +64,7 @@ export function createApp(config: AppConfig) {
     let response = await claude(item.message, sessionFlag, sessionId, model, config.workspace, systemPrompt, timeout, item.files);
 
     // Session resolution: if resume failed on first call, create new session
-    if (!sessionResolved && sessionFlag === "--resume" && response.reason === "process-error") {
+    if (!sessionResolved && sessionFlag === "--resume" && response.actionReason === "process-error") {
       sessionId = newSessionId();
       log.info({ sessionId }, "Resume failed, created new session");
       sessionFlag = "--session-id";
@@ -73,14 +73,14 @@ export function createApp(config: AppConfig) {
     }
 
     // Mark resolved on first success
-    if (!sessionResolved && response.reason !== "process-error" && response.reason !== "timeout") {
+    if (!sessionResolved && response.actionReason !== "process-error" && response.actionReason !== "timeout") {
       sessionResolved = true;
       sessionFlag = "--resume";
     }
 
-    log.debug({ action: response.action, reason: response.reason, message: response.message.slice(0, 120) }, "Response");
+    log.debug({ action: response.action, actionReason: response.actionReason }, "Response");
 
-    if (response.reason === "timeout") {
+    if (response.actionReason === "timeout") {
       if (isCron) {
         const cronName = item.name ?? "unknown";
         await sendResponse(bot, config.authorizedChatId, `Cron job "${cronName}" timed out after ${CRON_TIMEOUT / 1000} seconds.`);
@@ -88,16 +88,13 @@ export function createApp(config: AppConfig) {
         await sendResponse(bot, config.authorizedChatId, "Request timed out. Retrying as a background task...");
         queue.push({ message: `[Timeout] The previous request timed out after ${MAIN_TIMEOUT / 1000} seconds. The user asked: "${item.message}". This task needs more time — spawn a background agent to handle it.`, source: "timeout" });
       } else {
-        await sendResponse(bot, config.authorizedChatId, response.message || "[Error] Retry also timed out.");
+        const msg = response.action === "send" ? response.message : "";
+        await sendResponse(bot, config.authorizedChatId, msg || "[Error] Retry also timed out.");
       }
       return;
     }
 
-    if (response.action === "background") {
-      const name = response.name || "unnamed";
-      background.spawn(name, response.message, model, config.workspace, queue);
-      await sendResponse(bot, config.authorizedChatId, `Background agent "${name}" started.`);
-    } else if (response.action === "send") {
+    if (response.action === "send") {
       if (response.files?.length) {
         for (const filePath of response.files) {
           await sendFile(bot, config.authorizedChatId, filePath);
@@ -105,7 +102,16 @@ export function createApp(config: AppConfig) {
       }
       await sendResponse(bot, config.authorizedChatId, response.message || "[No output]");
     } else {
-      log.debug({ message: response.message || "(no message)" }, "Silent response");
+      log.debug("Silent response");
+    }
+
+    // Spawn background agents if any
+    if (response.backgroundAgents?.length) {
+      for (const agent of response.backgroundAgents) {
+        const agentModel = agent.model ?? model;
+        background.spawn(agent.name, agent.prompt, agentModel, config.workspace, queue);
+        await sendResponse(bot, config.authorizedChatId, `Background agent "${agent.name}" started.`);
+      }
     }
   });
 

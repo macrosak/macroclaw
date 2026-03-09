@@ -38,7 +38,7 @@ describe("createBackgroundManager", () => {
     resolvePromise!({
       action: "send",
       message: "done!",
-      reason: "completed",
+      actionReason: "completed",
     });
     await claudePromise;
     // Allow microtask (.then) to run
@@ -78,7 +78,7 @@ describe("createBackgroundManager", () => {
       Promise.resolve<ClaudeResponse>({
         action: "send",
         message: "",
-        reason: "empty",
+        actionReason: "empty",
       }),
     );
     const queue = mockQueue();
@@ -117,7 +117,7 @@ describe("createBackgroundManager", () => {
     promises[1].resolve({
       action: "send",
       message: "b done",
-      reason: "ok",
+      actionReason: "ok",
     });
     await new Promise((r) => setTimeout(r, 0));
 
@@ -131,7 +131,7 @@ describe("createBackgroundManager", () => {
       Promise.resolve<ClaudeResponse>({
         action: "send",
         message: "done",
-        reason: "ok",
+        actionReason: "ok",
       }),
     ) as MockRunClaude;
     const queue = mockQueue();
