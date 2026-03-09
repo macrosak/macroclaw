@@ -134,9 +134,10 @@ export function createApp(config: AppConfig) {
 
   bot.on("callback_query:data", async (ctx) => {
     await ctx.answerCallbackQuery();
-    await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } });
-    if (ctx.chat?.id.toString() !== config.authorizedChatId) return;
     const label = ctx.callbackQuery.data;
+    const original = ctx.callbackQuery.message?.text ?? "";
+    await ctx.editMessageText(`${original}\n\n<i>Selected: ${label}</i>`, { parse_mode: "HTML" });
+    if (ctx.chat?.id.toString() !== config.authorizedChatId) return;
     log.debug({ label }, "Button clicked");
     queue.push({ type: "button", label });
   });
