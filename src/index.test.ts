@@ -80,12 +80,13 @@ describe("createApp", () => {
     expect(app.queue).toBeDefined();
   });
 
-  it("registers message:text, message:photo, and message:document handlers", () => {
+  it("registers message:text, message:photo, message:document, and callback_query:data handlers", () => {
     const app = createApp(makeConfig());
     const bot = app.bot as any;
     expect(bot.filterHandlers.has("message:text")).toBe(true);
     expect(bot.filterHandlers.has("message:photo")).toBe(true);
     expect(bot.filterHandlers.has("message:document")).toBe(true);
+    expect(bot.filterHandlers.has("callback_query:data")).toBe(true);
   });
 
   it("registers chatid, session, and bg commands", () => {
@@ -517,6 +518,69 @@ describe("createApp", () => {
 
       const { rm } = await import("node:fs/promises");
       await rm(tmpFile, { force: true });
+    });
+
+    it("passes buttons to sendResponse", async () => {
+      const config = makeConfig({
+        runClaude: mock(async (): Promise<ClaudeResult> =>
+          successResult({
+            action: "send",
+            message: "Choose one",
+            actionReason: "ok",
+            buttons: [[{ label: "Yes" }, { label: "No" }]],
+          }),
+        ),
+      });
+      const app = createApp(config);
+      const bot = app.bot as any;
+      const handler = bot.filterHandlers.get("message:text")![0];
+
+      handler({ chat: { id: 12345 }, message: { text: "hello" } });
+      await new Promise((r) => setTimeout(r, 50));
+
+      const calls = (bot.api.sendMessage as any).mock.calls;
+      const lastCall = calls[calls.length - 1];
+      expect(lastCall[2].reply_markup).toBeDefined();
+    });
+
+    it("handles callback_query by pushing button event to queue", async () => {
+      const config = makeConfig();
+      const app = createApp(config);
+      const bot = app.bot as any;
+      const handler = bot.filterHandlers.get("callback_query:data")![0];
+
+      const ctx = {
+        chat: { id: 12345 },
+        callbackQuery: { data: "Yes" },
+        answerCallbackQuery: mock(async () => {}),
+      };
+
+      await handler(ctx);
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(ctx.answerCallbackQuery).toHaveBeenCalled();
+      expect(config.runClaude).toHaveBeenCalled();
+      const opts = (config.runClaude as any).mock.calls[0][0] as ClaudeOptions;
+      expect(opts.prompt).toBe('The user clicked MessageButton: "Yes"');
+    });
+
+    it("ignores callback_query from unauthorized chats", async () => {
+      const config = makeConfig();
+      const app = createApp(config);
+      const bot = app.bot as any;
+      const handler = bot.filterHandlers.get("callback_query:data")![0];
+
+      const ctx = {
+        chat: { id: 99999 },
+        callbackQuery: { data: "Yes" },
+        answerCallbackQuery: mock(async () => {}),
+      };
+
+      await handler(ctx);
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(ctx.answerCallbackQuery).toHaveBeenCalled();
+      expect(config.runClaude).not.toHaveBeenCalled();
     });
 
     it("skips outbound files that don't exist", async () => {

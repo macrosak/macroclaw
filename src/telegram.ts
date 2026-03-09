@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { Bot, InputFile } from "grammy";
+import { Bot, InlineKeyboard, InputFile } from "grammy";
 import { createLogger } from "./logger";
 
 const log = createLogger("telegram");
@@ -15,38 +15,51 @@ export function createBot(token: string) {
   return new Bot(token);
 }
 
+export function buildInlineKeyboard(buttons: Array<Array<{ label: string }>>): InlineKeyboard {
+  const kb = new InlineKeyboard();
+  for (let i = 0; i < buttons.length; i++) {
+    if (i > 0) kb.row();
+    for (const btn of buttons[i]) {
+      kb.text(btn.label, btn.label);
+    }
+  }
+  return kb;
+}
+
 export async function sendResponse(
   bot: Bot,
   chatId: string,
   text: string,
+  buttons?: Array<Array<{ label: string }>>,
 ): Promise<void> {
   const opts = { parse_mode: "HTML" as const };
+  const replyMarkup = buttons?.length ? buildInlineKeyboard(buttons) : undefined;
 
   if (text.length <= MAX_LENGTH) {
-    await bot.api.sendMessage(chatId, text, opts);
+    await bot.api.sendMessage(chatId, text, { ...opts, reply_markup: replyMarkup });
     return;
   }
 
   // Split at line boundaries into chunks <= MAX_LENGTH
   const lines = text.split("\n");
+  const chunks: string[] = [];
   let chunk = "";
 
   for (const line of lines) {
-    // If a single line exceeds MAX_LENGTH, hard-split it
     if (line.length > MAX_LENGTH) {
       if (chunk) {
-        await bot.api.sendMessage(chatId, chunk, opts);
+        chunks.push(chunk);
         chunk = "";
       }
       for (let i = 0; i < line.length; i += MAX_LENGTH) {
-        await bot.api.sendMessage(chatId, line.slice(i, i + MAX_LENGTH), opts);
+        chunks.push(line.slice(i, i + MAX_LENGTH));
       }
       continue;
     }
 
     const candidate = chunk ? `${chunk}\n${line}` : line;
     if (candidate.length > MAX_LENGTH) {
-      await bot.api.sendMessage(chatId, chunk, opts);
+      chunks.push(chunk);
       chunk = line;
     } else {
       chunk = candidate;
@@ -54,7 +67,13 @@ export async function sendResponse(
   }
 
   if (chunk) {
-    await bot.api.sendMessage(chatId, chunk, opts);
+    chunks.push(chunk);
+  }
+
+  // Send all chunks; attach buttons to the last one only
+  for (let i = 0; i < chunks.length; i++) {
+    const isLast = i === chunks.length - 1;
+    await bot.api.sendMessage(chatId, chunks[i], { ...opts, reply_markup: isLast ? replyMarkup : undefined });
   }
 }
 

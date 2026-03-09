@@ -67,7 +67,7 @@ export function createApp(config: AppConfig) {
           await sendFile(bot, config.authorizedChatId, filePath);
         }
       }
-      await sendResponse(bot, config.authorizedChatId, response.message || "[No output]");
+      await sendResponse(bot, config.authorizedChatId, response.message || "[No output]", response.buttons);
     } else {
       log.debug("Silent response");
     }
@@ -130,6 +130,14 @@ export function createApp(config: AppConfig) {
       log.error({ err }, "Document download failed");
       queue.push({ type: "user", message: `[File download failed: ${name}]\n${ctx.message.caption ?? ""}` });
     }
+  });
+
+  bot.on("callback_query:data", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    if (ctx.chat?.id.toString() !== config.authorizedChatId) return;
+    const label = ctx.callbackQuery.data;
+    log.debug({ label }, "Button clicked");
+    queue.push({ type: "button", label });
   });
 
   bot.on("message:text", (ctx) => {

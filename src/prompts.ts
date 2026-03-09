@@ -80,7 +80,21 @@ For cron messages, decide whether the result is worth sending to the user:
 
 Use "silent" when a check finds nothing new. Only send when there's something the user should see.
 
-Jobs are hot-reloaded — editing cron.json takes effect immediately, no restart needed.`;
+Jobs are hot-reloaded — editing cron.json takes effect immediately, no restart needed.
+
+## MessageButtons
+
+You can attach inline keyboard buttons to messages by including a \`buttons\` field in your response. \
+Buttons are arrays of rows, each row an array of { label: string }. \
+When the user taps a button, you'll receive: "The user clicked MessageButton: "<label>"" \
+Use buttons for quick replies, confirmations, navigation, or any time tapping is easier than typing.`;
+
+export const PROMPT_BUTTON_CLICK = `\
+${INTRO_FULL}
+
+## Current Context
+
+The user tapped an inline keyboard button on a previous message.`;
 
 export const PROMPT_USER_MESSAGE = `\
 ${INTRO_FULL}

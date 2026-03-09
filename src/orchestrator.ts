@@ -2,7 +2,7 @@ import { z } from "zod/v4";
 import { type ClaudeOptions, ClaudeParseError, ClaudeProcessError, type ClaudeResult, ClaudeTimeoutError, runClaude } from "./claude";
 import { logPrompt, logResult } from "./history";
 import { createLogger } from "./logger";
-import { BG_TIMEOUT, CRON_TIMEOUT, MAIN_TIMEOUT, PROMPT_BACKGROUND_RESULT, PROMPT_CRON_EVENT, PROMPT_USER_MESSAGE, promptBackgroundAgent } from "./prompts";
+import { BG_TIMEOUT, CRON_TIMEOUT, MAIN_TIMEOUT, PROMPT_BACKGROUND_RESULT, PROMPT_BUTTON_CLICK, PROMPT_CRON_EVENT, PROMPT_USER_MESSAGE, promptBackgroundAgent } from "./prompts";
 import { loadSettings, newSessionId, saveSettings } from "./settings";
 
 const log = createLogger("orchestrator");
@@ -16,11 +16,16 @@ const backgroundAgentSchema = z.object({
   model: z.enum(["haiku", "sonnet", "opus"]).describe("Model to use for the background agent").optional(),
 });
 
+const buttonSchema = z.object({
+  label: z.string().describe("Button text shown to the user"),
+});
+
 const claudeResponseSchema = z.object({
   action: z.enum(["send", "silent"]).describe("'send' to reply to the user, 'silent' to do nothing"),
   actionReason: z.string().describe("Why the agent chose this action (logged, not sent)"),
   message: z.string().describe("The message to send to Telegram (required when action is 'send')").optional(),
   files: z.array(z.string()).describe("Absolute paths to files to send to Telegram").optional(),
+  buttons: z.array(z.array(buttonSchema)).describe("Inline keyboard rows; each row is an array of buttons").optional(),
   backgroundAgents: z.array(backgroundAgentSchema).describe("Background agents to spawn alongside this response").optional(),
 });
 
@@ -35,7 +40,8 @@ export type OrchestratorRequest =
   | { type: "cron"; name: string; prompt: string; model?: string }
   | { type: "background"; name: string; result: string }
   | { type: "timeout"; originalMessage: string }
-  | { type: "bg-task"; name: string; prompt: string; model?: string };
+  | { type: "bg-task"; name: string; prompt: string; model?: string }
+  | { type: "button"; label: string };
 
 // --- Orchestrator ---
 
@@ -103,6 +109,14 @@ export function createOrchestrator(config: OrchestratorConfig) {
           prompt: `[Timeout] The previous request timed out after ${MAIN_TIMEOUT / 1000} seconds. The user asked: "${request.originalMessage}". This task needs more time — spawn a background agent to handle it.`,
           model: config.model,
           systemPrompt: PROMPT_USER_MESSAGE,
+          timeout: MAIN_TIMEOUT,
+          useMainSession: true,
+        };
+      case "button":
+        return {
+          prompt: `The user clicked MessageButton: "${request.label}"`,
+          model: config.model,
+          systemPrompt: PROMPT_BUTTON_CLICK,
           timeout: MAIN_TIMEOUT,
           useMainSession: true,
         };

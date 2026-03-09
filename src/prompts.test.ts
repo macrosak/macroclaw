@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
   PROMPT_BACKGROUND_RESULT,
+  PROMPT_BUTTON_CLICK,
   PROMPT_CRON_EVENT,
   PROMPT_USER_MESSAGE,
   promptBackgroundAgent,
@@ -39,6 +40,17 @@ describe("prompts", () => {
     expect(prompt).toContain("30-minute timeout");
   });
 
+  it("PROMPT_BUTTON_CLICK contains shared intro and button context", () => {
+    expect(PROMPT_BUTTON_CLICK).toContain("macroclaw");
+    expect(PROMPT_BUTTON_CLICK).toContain("MessageButtons");
+    expect(PROMPT_BUTTON_CLICK).toContain("tapped an inline keyboard button");
+  });
+
+  it("INTRO_FULL prompts contain MessageButtons docs", () => {
+    expect(PROMPT_USER_MESSAGE).toContain("MessageButtons");
+    expect(PROMPT_USER_MESSAGE).toContain("buttons");
+  });
+
   it("INTRO_FULL prompts contain file capabilities", () => {
     expect(PROMPT_USER_MESSAGE).toContain("[File: /path]");
     expect(PROMPT_USER_MESSAGE).toContain("files");
@@ -57,6 +69,7 @@ describe("prompts", () => {
       PROMPT_USER_MESSAGE,
       PROMPT_CRON_EVENT,
       PROMPT_BACKGROUND_RESULT,
+      PROMPT_BUTTON_CLICK,
       promptBackgroundAgent("test"),
     ];
     for (const prompt of all) {

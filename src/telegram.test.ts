@@ -1,7 +1,7 @@
 import { describe, expect, it, mock } from "bun:test";
 import { existsSync } from "node:fs";
 import { readFile, rm } from "node:fs/promises";
-import { createBot, downloadFile, sendFile, sendResponse } from "./telegram";
+import { buildInlineKeyboard, createBot, downloadFile, sendFile, sendResponse } from "./telegram";
 
 // Mock bot API
 function mockBot() {
@@ -92,6 +92,49 @@ describe("sendResponse", () => {
     await sendResponse(bot, "123", "hello\nworld");
     expect(bot.api.sendMessage).toHaveBeenCalledTimes(1);
     expect(bot.calls[0].text).toBe("hello\nworld");
+  });
+
+  it("attaches buttons to a single message", async () => {
+    const bot = mockBot();
+    const buttons = [[{ label: "Yes" }, { label: "No" }]];
+    await sendResponse(bot, "123", "Choose:", buttons);
+    expect(bot.api.sendMessage).toHaveBeenCalledTimes(1);
+    expect(bot.calls[0].opts.reply_markup).toBeDefined();
+  });
+
+  it("attaches buttons to last chunk only when splitting", async () => {
+    const bot = mockBot();
+    const line = "a".repeat(2000);
+    const text = `${line}\n${line}\n${line}`;
+    const buttons = [[{ label: "Ok" }]];
+    await sendResponse(bot, "123", text, buttons);
+    expect(bot.api.sendMessage).toHaveBeenCalledTimes(2);
+    // First chunk: no buttons
+    expect(bot.calls[0].opts.reply_markup).toBeUndefined();
+    // Last chunk: has buttons
+    expect(bot.calls[1].opts.reply_markup).toBeDefined();
+  });
+
+  it("sends without keyboard when buttons is empty", async () => {
+    const bot = mockBot();
+    await sendResponse(bot, "123", "Hello", []);
+    expect(bot.api.sendMessage).toHaveBeenCalledTimes(1);
+    expect(bot.calls[0].opts.reply_markup).toBeUndefined();
+  });
+});
+
+describe("buildInlineKeyboard", () => {
+  it("builds keyboard with rows and buttons", () => {
+    const kb = buildInlineKeyboard([[{ label: "A" }, { label: "B" }], [{ label: "C" }]]);
+    expect(kb).toBeDefined();
+    // InlineKeyboard from grammy — verify it's an object with inline_keyboard
+    expect(kb.inline_keyboard).toBeDefined();
+    expect(kb.inline_keyboard.length).toBe(2);
+    expect(kb.inline_keyboard[0].length).toBe(2);
+    const btn = kb.inline_keyboard[0][0] as any;
+    expect(btn.text).toBe("A");
+    expect(btn.callback_data).toBe("A");
+    expect((kb.inline_keyboard[1][0] as any).text).toBe("C");
   });
 });
 

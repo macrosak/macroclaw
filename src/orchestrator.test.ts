@@ -136,6 +136,18 @@ describe("createOrchestrator", () => {
 
       expect(claude.mock.calls[0][0].model).toBe("haiku");
     });
+
+    it("builds button click prompt", async () => {
+      const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }));
+      const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
+
+      await orch.processRequest({ type: "button", label: "Yes" });
+
+      const opts = claude.mock.calls[0][0];
+      expect(opts.prompt).toBe('The user clicked MessageButton: "Yes"');
+      expect(opts.systemPrompt).toContain("tapped an inline keyboard button");
+      expect(opts.timeoutMs).toBe(60_000);
+    });
   });
 
   describe("schema validation", () => {
@@ -190,6 +202,21 @@ describe("createOrchestrator", () => {
 
       expect(result.actionReason).toBe("no-structured-output");
       expect(result.message).toBe("[No output]");
+    });
+
+    it("parses buttons from structured output", async () => {
+      const output = {
+        action: "send",
+        message: "Choose",
+        actionReason: "ok",
+        buttons: [[{ label: "Yes" }, { label: "No" }], [{ label: "Maybe" }]],
+      };
+      const claude = mockClaude(successResult(output));
+      const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
+
+      const result = await orch.processRequest({ type: "user", message: "hi" });
+
+      expect(result.buttons).toEqual([[{ label: "Yes" }, { label: "No" }], [{ label: "Maybe" }]]);
     });
 
     it("parses backgroundAgents from structured output", async () => {
