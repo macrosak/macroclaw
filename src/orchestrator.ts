@@ -8,6 +8,7 @@ import { loadSettings, newSessionId, saveSettings } from "./settings";
 const log = createLogger("orchestrator");
 
 // --- Response schema (owned by orchestrator) ---
+// Flat object (no oneOf/discriminatedUnion) — Claude CLI --json-schema requires a single top-level object.
 
 const backgroundAgentSchema = z.object({
   name: z.string().describe("Label for the background agent"),
@@ -15,21 +16,13 @@ const backgroundAgentSchema = z.object({
   model: z.enum(["haiku", "sonnet", "opus"]).describe("Model to use for the background agent").optional(),
 });
 
-const sendResponseSchema = z.object({
-  action: z.literal("send"),
+const claudeResponseSchema = z.object({
+  action: z.enum(["send", "silent"]).describe("'send' to reply to the user, 'silent' to do nothing"),
   actionReason: z.string().describe("Why the agent chose this action (logged, not sent)"),
-  message: z.string().describe("The message to send to Telegram"),
+  message: z.string().describe("The message to send to Telegram (required when action is 'send')").optional(),
   files: z.array(z.string()).describe("Absolute paths to files to send to Telegram").optional(),
   backgroundAgents: z.array(backgroundAgentSchema).describe("Background agents to spawn alongside this response").optional(),
 });
-
-const silentResponseSchema = z.object({
-  action: z.literal("silent"),
-  actionReason: z.string().describe("Why the agent chose this action (logged, not sent)"),
-  backgroundAgents: z.array(backgroundAgentSchema).describe("Background agents to spawn alongside this response").optional(),
-});
-
-const claudeResponseSchema = z.discriminatedUnion("action", [sendResponseSchema, silentResponseSchema]);
 
 export type ClaudeResponse = z.infer<typeof claudeResponseSchema>;
 
