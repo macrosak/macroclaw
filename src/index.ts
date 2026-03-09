@@ -1,11 +1,10 @@
 import { createBackgroundManager } from "./background";
-import { type ClaudeResponse, runClaude } from "./claude";
+import { runClaude } from "./claude";
 import { startCron } from "./cron";
 import { createLogger } from "./logger";
-import type { OrchestratorRequest } from "./orchestrator";
-import { CRON_TIMEOUT, MAIN_TIMEOUT, PROMPT_BACKGROUND_RESULT, PROMPT_CRON_EVENT, PROMPT_USER_MESSAGE } from "./prompts";
+import { createOrchestrator, type OrchestratorRequest } from "./orchestrator";
+import { CRON_TIMEOUT } from "./prompts";
 import { createQueue } from "./queue";
-import { loadSettings, newSessionId, saveSettings } from "./settings";
 import { createBot, downloadFile, sendFile, sendResponse } from "./telegram";
 
 const log = createLogger("bot");
@@ -16,7 +15,7 @@ export interface AppConfig {
   workspace: string;
   model?: string;
   settingsDir?: string;
-  runClaude?: (message: string, sessionFlag: "--resume" | "--session-id", sessionId: string, model: string | undefined, workspace: string, systemPrompt?: string, timeoutMs?: number, files?: string[]) => Promise<ClaudeResponse>;
+  runClaude?: typeof runClaude;
 }
 
 export function requireEnv(name: string): string {
@@ -31,81 +30,19 @@ export function requireEnv(name: string): string {
 export function createApp(config: AppConfig) {
   const bot = createBot(config.botToken);
   const queue = createQueue<OrchestratorRequest>();
-  const claude = config.runClaude ?? runClaude;
-  const background = createBackgroundManager(claude);
-
-  // Session state
-  const settings = loadSettings(config.settingsDir);
-  let sessionId: string;
-  let sessionFlag: "--resume" | "--session-id";
-  let sessionResolved = false;
-
-  if (settings.sessionId) {
-    sessionId = settings.sessionId;
-    sessionFlag = "--resume";
-  } else {
-    sessionId = newSessionId();
-    sessionFlag = "--session-id";
-    saveSettings({ sessionId }, config.settingsDir);
-    log.info({ sessionId }, "Created new session");
-  }
+  const orchestrator = createOrchestrator({
+    model: config.model,
+    workspace: config.workspace,
+    settingsDir: config.settingsDir,
+    runClaude: config.runClaude,
+  });
+  const background = createBackgroundManager(config.runClaude ?? runClaude);
 
   queue.setHandler(async (request) => {
     log.debug({ type: request.type }, "Incoming request");
     await bot.api.sendChatAction(config.authorizedChatId, "typing");
 
-    // Derive prompt, model, system prompt, timeout from request type
-    let message: string;
-    let model = config.model;
-    let systemPrompt: string;
-    let timeout: number;
-    let files: string[] | undefined;
-
-    switch (request.type) {
-      case "user":
-        message = request.message;
-        files = request.files;
-        systemPrompt = PROMPT_USER_MESSAGE;
-        timeout = MAIN_TIMEOUT;
-        break;
-      case "cron":
-        message = `[Tool: cron/${request.name}] ${request.prompt}`;
-        model = request.model ?? config.model;
-        systemPrompt = PROMPT_CRON_EVENT;
-        timeout = CRON_TIMEOUT;
-        break;
-      case "background":
-        message = `[Background: ${request.name}] ${request.result}`;
-        systemPrompt = PROMPT_BACKGROUND_RESULT;
-        timeout = MAIN_TIMEOUT;
-        break;
-      case "timeout":
-        message = `[Timeout] The previous request timed out after ${MAIN_TIMEOUT / 1000} seconds. The user asked: "${request.originalMessage}". This task needs more time — spawn a background agent to handle it.`;
-        systemPrompt = PROMPT_USER_MESSAGE;
-        timeout = MAIN_TIMEOUT;
-        break;
-      default:
-        log.warn({ request }, "Unknown request type in queue");
-        return;
-    }
-
-    let response = await claude(message, sessionFlag, sessionId, model, config.workspace, systemPrompt, timeout, files);
-
-    // Session resolution: if resume failed on first call, create new session
-    if (!sessionResolved && sessionFlag === "--resume" && response.actionReason === "process-error") {
-      sessionId = newSessionId();
-      log.info({ sessionId }, "Resume failed, created new session");
-      sessionFlag = "--session-id";
-      saveSettings({ sessionId }, config.settingsDir);
-      response = await claude(message, sessionFlag, sessionId, model, config.workspace, systemPrompt, timeout, files);
-    }
-
-    // Mark resolved on first success
-    if (!sessionResolved && response.actionReason !== "process-error" && response.actionReason !== "timeout") {
-      sessionResolved = true;
-      sessionFlag = "--resume";
-    }
-
+    const response = await orchestrator.processRequest(request);
     log.debug({ action: response.action, actionReason: response.actionReason }, "Response");
 
     if (response.actionReason === "timeout") {
@@ -113,7 +50,10 @@ export function createApp(config: AppConfig) {
         await sendResponse(bot, config.authorizedChatId, `Cron job "${request.name}" timed out after ${CRON_TIMEOUT / 1000} seconds.`);
       } else if (request.type !== "timeout") {
         await sendResponse(bot, config.authorizedChatId, "Request timed out. Retrying as a background task...");
-        queue.push({ type: "timeout", originalMessage: message });
+        const prompt = request.type === "user" ? request.message
+          : request.type === "background" ? `[Background: ${request.name}] ${request.result}`
+          : "";
+        queue.push({ type: "timeout", originalMessage: prompt });
       } else {
         const msg = response.action === "send" ? response.message : "";
         await sendResponse(bot, config.authorizedChatId, msg || "[Error] Retry also timed out.");
@@ -135,7 +75,7 @@ export function createApp(config: AppConfig) {
     // Spawn background agents if any
     if (response.backgroundAgents?.length) {
       for (const agent of response.backgroundAgents) {
-        const agentModel = agent.model ?? model;
+        const agentModel = agent.model ?? config.model;
         background.spawn(agent.name, agent.prompt, agentModel, config.workspace, queue);
         await sendResponse(bot, config.authorizedChatId, `Background agent "${agent.name}" started.`);
       }
@@ -149,7 +89,7 @@ export function createApp(config: AppConfig) {
 
   bot.command("session", (ctx) => {
     log.debug("Command /session");
-    ctx.reply(`Session: \`${sessionId}\``, { parse_mode: "Markdown" });
+    ctx.reply(`Session: \`${orchestrator.sessionId}\``, { parse_mode: "Markdown" });
   });
 
   bot.command("bg", (ctx) => {
@@ -227,7 +167,7 @@ export function createApp(config: AppConfig) {
       ]).catch((err) => log.error({ err }, "Failed to set commands"));
       bot.start({
         onStart: (botInfo) => {
-          log.info({ username: botInfo.username, chatId: config.authorizedChatId, sessionId }, "Bot connected");
+          log.info({ username: botInfo.username, chatId: config.authorizedChatId, sessionId: orchestrator.sessionId }, "Bot connected");
         },
       });
     },
