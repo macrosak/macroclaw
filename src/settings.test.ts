@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, spyOn } from "bun:test";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadSettings, newSessionId, saveSettings } from "./settings";
@@ -25,10 +25,13 @@ describe("loadSettings", () => {
     expect(loadSettings(tmpDir)).toEqual({ sessionId: "abc-123" });
   });
 
-  it("returns empty object when file is corrupt", () => {
+  it("returns empty object and logs warning when file is corrupt", () => {
+    const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
     mkdirSync(tmpDir, { recursive: true });
     writeFileSync(join(tmpDir, "settings.json"), "not json");
     expect(loadSettings(tmpDir)).toEqual({});
+    expect(warnSpy).toHaveBeenCalledWith("[settings] Failed to load settings.json:", expect.any(SyntaxError));
+    warnSpy.mockRestore();
   });
 });
 

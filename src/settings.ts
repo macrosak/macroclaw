@@ -17,7 +17,8 @@ export function loadSettings(dir: string = defaultDir): Settings {
     if (!existsSync(path)) return {};
     const raw = readFileSync(path, "utf-8");
     return settingsSchema.parse(JSON.parse(raw));
-  } catch {
+  } catch (err) {
+    console.warn("[settings] Failed to load settings.json:", err);
     return {};
   }
 }
