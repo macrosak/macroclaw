@@ -16,7 +16,8 @@
   },
   "dependencies": {
     "cron-parser": "^5.5.0",
-    "grammy": "^1.39.3"
+    "grammy": "^1.39.3",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.6",
