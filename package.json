@@ -6,12 +6,12 @@
   "scripts": {
     "start": "bun run src/main.ts",
     "dev": "bun run --watch src/main.ts",
-    "check": "tsc --noEmit && biome check && bun test --coverage $(find src -name '*.test.ts' ! -name '*.integration.test.ts')",
+    "check": "tsc --noEmit && biome check && bun test",
     "typecheck": "tsc --noEmit",
     "lint": "biome check",
     "lint:fix": "biome check --fix --unsafe",
-    "test": "bun test --coverage $(find src -name '*.test.ts' ! -name '*.integration.test.ts')",
-    "test:integration": "bun test src/*.integration.test.ts --timeout 120000",
+    "test": "bun test",
+    "test:integration": "bun test src/*.integration-test.ts --timeout 120000",
     "sync-skills": "bun run scripts/sync-skills.ts",
     "claude": "set -a && . ./.env && set +a && cd ${WORKSPACE:-~/.macroclaw-workspace} && claude --resume $(node -p \"require('$HOME/.macroclaw/settings.json').sessionId\") --model ${MODEL:-sonnet}"
   },

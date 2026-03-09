@@ -51,7 +51,16 @@ export async function runClaude(options: ClaudeOptions): Promise<ClaudeResult> {
   if (options.systemPrompt) args.push("--append-system-prompt", options.systemPrompt);
   args.push(options.prompt);
 
-  log.debug({ args }, `Sending to Claude: ${args.join(" ")}`);
+  log.debug(
+    {
+      model: options.model,
+      sessionFlag: options.sessionFlag,
+      sessionId: options.sessionId,
+      promptLen: options.prompt.length,
+      hasSystemPrompt: !!options.systemPrompt,
+    },
+    "Sending to Claude",
+  );
 
   const proc = Bun.spawn(args, {
     cwd: options.workspace,
