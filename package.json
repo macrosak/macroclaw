@@ -4,8 +4,8 @@
   "description": "Telegram-to-Claude-Code bridge",
   "type": "module",
   "scripts": {
-    "start": "bun run src/main.ts",
-    "dev": "bun run --watch src/main.ts",
+    "start": "bun run src/index.ts",
+    "dev": "bun run --watch src/index.ts",
     "check": "tsc --noEmit && biome check && bun test",
     "typecheck": "tsc --noEmit",
     "lint": "biome check",

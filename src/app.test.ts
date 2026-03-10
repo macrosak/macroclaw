@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { existsSync, rmSync } from "node:fs";
+import { App, type AppConfig } from "./app";
 import type { Claude, ClaudeDeferredResult, ClaudeResult, ClaudeRunOptions } from "./claude";
-import { App, type AppConfig, requireEnv } from "./index";
 import { saveSettings } from "./settings";
 
 // Mock Grammy Bot
@@ -731,18 +731,3 @@ describe("App", () => {
   });
 });
 
-describe("requireEnv", () => {
-  it("returns the env value when set", () => {
-    process.env.TEST_VAR_MACROCLAW = "hello";
-    expect(requireEnv("TEST_VAR_MACROCLAW")).toBe("hello");
-    delete process.env.TEST_VAR_MACROCLAW;
-  });
-
-  it("exits when env var is missing", () => {
-    const exitSpy = spyOn(process, "exit").mockImplementation(() => { throw new Error("exit"); });
-
-    expect(() => requireEnv("NONEXISTENT_VAR_XYZ")).toThrow("exit");
-
-    exitSpy.mockRestore();
-  });
-});
