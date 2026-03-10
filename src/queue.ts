@@ -2,43 +2,41 @@ import { createLogger } from "./logger";
 
 const log = createLogger("queue");
 
-export function createQueue<T>() {
-  const items: T[] = [];
-  let processing = false;
-  let handler: ((item: T) => Promise<void>) | null = null;
+export class Queue<T> {
+  #items: T[] = [];
+  #processing = false;
+  #handler: ((item: T) => Promise<void>) | null = null;
 
-  return {
-    setHandler(fn: (item: T) => Promise<void>) {
-      handler = fn;
-    },
+  setHandler(fn: (item: T) => Promise<void>) {
+    this.#handler = fn;
+  }
 
-    push(item: T) {
-      items.push(item);
-      this.process();
-    },
+  push(item: T) {
+    this.#items.push(item);
+    this.process();
+  }
 
-    async process() {
-      if (processing || !handler) return;
-      processing = true;
+  async process() {
+    if (this.#processing || !this.#handler) return;
+    this.#processing = true;
 
-      while (items.length > 0) {
-        const item = items.shift() as T;
-        try {
-          await handler(item);
-        } catch (err) {
-          log.error({ err }, "Handler error");
-        }
+    while (this.#items.length > 0) {
+      const item = this.#items.shift() as T;
+      try {
+        await this.#handler(item);
+      } catch (err) {
+        log.error({ err }, "Handler error");
       }
+    }
 
-      processing = false;
-    },
+    this.#processing = false;
+  }
 
-    get length() {
-      return items.length;
-    },
+  get length() {
+    return this.#items.length;
+  }
 
-    get isProcessing() {
-      return processing;
-    },
-  };
+  get isProcessing() {
+    return this.#processing;
+  }
 }

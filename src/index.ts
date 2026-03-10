@@ -4,7 +4,7 @@ import { type ClaudeDeferredResult, type ClaudeOptions, type ClaudeResult, isDef
 import { startCron } from "./cron";
 import { createLogger } from "./logger";
 import { type ClaudeResponse, createOrchestrator, type OrchestratorRequest } from "./orchestrator";
-import { createQueue } from "./queue";
+import { Queue } from "./queue";
 import { createBot, downloadFile, sendFile, sendResponse } from "./telegram";
 
 const log = createLogger("bot");
@@ -29,7 +29,7 @@ export function requireEnv(name: string): string {
 
 export function createApp(config: AppConfig) {
   const bot = createBot(config.botToken);
-  const queue = createQueue<OrchestratorRequest>();
+  const queue = new Queue<OrchestratorRequest>();
   const orchestrator = createOrchestrator({
     model: config.model,
     workspace: config.workspace,
