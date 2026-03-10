@@ -26,7 +26,7 @@ describe("BackgroundManager", () => {
     const queue = mockQueue();
     const mgr = new BackgroundManager(orchestrator);
 
-    mgr.spawn("test-task", "do something", "haiku", "/workspace", queue);
+    mgr.spawn("test-task", "do something", "haiku", queue);
 
     expect(mgr.size).toBe(1);
     expect(mgr.list()[0].name).toBe("test-task");
@@ -62,7 +62,7 @@ describe("BackgroundManager", () => {
     const queue = mockQueue();
     const mgr = new BackgroundManager(orchestrator);
 
-    mgr.spawn("failing-task", "do something", undefined, "/workspace", queue);
+    mgr.spawn("failing-task", "do something", undefined, queue);
     expect(mgr.size).toBe(1);
 
     rejectPromise!(new Error("spawn failed"));
@@ -86,7 +86,7 @@ describe("BackgroundManager", () => {
     const queue = mockQueue();
     const mgr = new BackgroundManager(orchestrator);
 
-    mgr.spawn("empty-task", "do something", undefined, "/workspace", queue);
+    mgr.spawn("empty-task", "do something", undefined, queue);
     await new Promise((r) => setTimeout(r, 0));
 
     expect(queue.items[0]).toEqual({ type: "background", name: "empty-task", result: "[No output]" });
@@ -105,9 +105,9 @@ describe("BackgroundManager", () => {
     const queue = mockQueue();
     const mgr = new BackgroundManager(orchestrator);
 
-    mgr.spawn("task-a", "prompt a", undefined, "/workspace", queue);
-    mgr.spawn("task-b", "prompt b", undefined, "/workspace", queue);
-    mgr.spawn("task-c", "prompt c", undefined, "/workspace", queue);
+    mgr.spawn("task-a", "prompt a", undefined, queue);
+    mgr.spawn("task-b", "prompt b", undefined, queue);
+    mgr.spawn("task-c", "prompt c", undefined, queue);
 
     expect(mgr.size).toBe(3);
     expect(mgr.list().map((t) => t.name)).toEqual([

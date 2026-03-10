@@ -38,7 +38,6 @@ export class BackgroundManager {
     name: string,
     prompt: string,
     model: string | undefined,
-    _workspace: string,
     queue: Queue,
   ) {
     const sessionId = newSessionId();

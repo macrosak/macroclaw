@@ -41,6 +41,23 @@ Use pino via `createLogger` from `src/logger.ts`. Never use `console.log/warn/er
 Every module should create its logger at the top: `const log = createLogger("module-name")`.
 Log messages should be concise. Include relevant IDs/context as structured data, not string interpolation.
 
+## Architecture
+
+```
+App (index.ts)               — root class, wires everything, Telegram handlers
+├── Queue<OrchestratorRequest> (queue.ts)  — serial FIFO message processing
+├── Orchestrator (orchestrator.ts)         — session management, prompt building, response validation
+│   └── Claude (claude.ts)                 — spawns `claude` CLI, handles timeouts/deferred results
+├── BackgroundManager (background.ts)      — tracks background agents, feeds results back to queue
+└── CronScheduler (cron.ts)                — reads .macroclaw/cron.json, pushes matching jobs to queue
+```
+
+- `createBot` (telegram.ts) and `createLogger` (logger.ts) stay as plain functions — thin wrappers with no state
+- All classes use runtime private fields (`#`) for encapsulation
+- `Claude` holds stable config (workspace, jsonSchema); per-request params go on `run()`
+- `Orchestrator` owns the response JSON schema and takes a `Claude` instance
+- `BackgroundManager` takes an `Orchestrator` — it doesn't need workspace or claude directly
+
 ## Conventions
 
 - Keep everything lean — this is a personal project

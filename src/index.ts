@@ -88,7 +88,7 @@ export class App {
     if (response.backgroundAgents?.length) {
       for (const agent of response.backgroundAgents) {
         const agentModel = agent.model ?? this.#config.model;
-        this.#background.spawn(agent.name, agent.prompt, agentModel, this.#config.workspace, this.#queue);
+        this.#background.spawn(agent.name, agent.prompt, agentModel, this.#queue);
         await sendResponse(this.#bot, this.#config.authorizedChatId, `Background agent "${agent.name}" started.`);
       }
     }
@@ -147,7 +147,7 @@ export class App {
       if (prompt) {
         log.debug({ prompt }, "Command /bg spawn");
         const name = prompt.slice(0, 30).replace(/\s+/g, "-");
-        this.#background.spawn(name, prompt, this.#config.model, this.#config.workspace, this.#queue);
+        this.#background.spawn(name, prompt, this.#config.model, this.#queue);
         ctx.reply(`Background agent "${name}" started.`);
         return;
       }
