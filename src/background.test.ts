@@ -32,8 +32,8 @@ describe("BackgroundManager", () => {
     expect(mgr.list()[0].name).toBe("test-task");
     expect(orchestrator.processRequest).toHaveBeenCalledTimes(1);
     const request = orchestrator.processRequest.mock.calls[0][0];
-    expect(request.type).toBe("bg-task");
-    if (request.type === "bg-task") {
+    expect(request.type).toBe("background-agent");
+    if (request.type === "background-agent") {
       expect(request.name).toBe("test-task");
       expect(request.prompt).toBe("do something");
       expect(request.model).toBe("haiku");
@@ -50,7 +50,7 @@ describe("BackgroundManager", () => {
 
     expect(mgr.size).toBe(0);
     expect(queue.items).toHaveLength(1);
-    expect(queue.items[0]).toEqual({ type: "background", name: "test-task", result: "done!" });
+    expect(queue.items[0]).toEqual({ type: "background-agent-result", name: "test-task", result: "done!" });
   });
 
   it("feeds error back to queue on failure", async () => {
@@ -89,7 +89,7 @@ describe("BackgroundManager", () => {
     mgr.spawn("empty-task", "do something", undefined, queue);
     await new Promise((r) => setTimeout(r, 0));
 
-    expect(queue.items[0]).toEqual({ type: "background", name: "empty-task", result: "[No output]" });
+    expect(queue.items[0]).toEqual({ type: "background-agent-result", name: "empty-task", result: "[No output]" });
   });
 
   it("tracks multiple concurrent agents", async () => {
@@ -125,7 +125,7 @@ describe("BackgroundManager", () => {
 
     expect(mgr.size).toBe(2);
     expect(queue.items).toHaveLength(1);
-    expect(queue.items[0]).toEqual({ type: "background", name: "task-b", result: "b done" });
+    expect(queue.items[0]).toEqual({ type: "background-agent-result", name: "task-b", result: "b done" });
   });
 
   it("adopt registers an already-running process and feeds result back", async () => {
@@ -150,7 +150,7 @@ describe("BackgroundManager", () => {
 
     expect(mgr.size).toBe(0);
     expect(queue.items).toHaveLength(1);
-    expect(queue.items[0]).toEqual({ type: "background", name: "timeout-task", result: "completed!", sessionId: "session-123" });
+    expect(queue.items[0]).toEqual({ type: "background-agent-result", name: "timeout-task", result: "completed!", sessionId: "session-123" });
   });
 
   it("adopt feeds error back on failure", async () => {

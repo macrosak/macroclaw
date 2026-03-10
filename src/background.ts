@@ -12,7 +12,7 @@ interface BackgroundInfo {
 }
 
 export interface BackgroundQueueItem {
-  type: "background";
+  type: "background-agent-result";
   name: string;
   result: string;
   sessionId?: string;
@@ -46,7 +46,7 @@ export class BackgroundManager {
 
     log.debug({ name, sessionId }, "Starting background agent");
 
-    this.#orchestrator.processRequest({ type: "bg-task", name, prompt, model }).then(
+    this.#orchestrator.processRequest({ type: "background-agent", name, prompt, model }).then(
       async (rawResponse) => {
         let response: ClaudeResponse;
         if (isDeferred(rawResponse)) {
@@ -62,12 +62,12 @@ export class BackgroundManager {
         this.#active.delete(sessionId);
         const result = (response.action === "send" ? response.message : "") || "[No output]";
         log.debug({ name, result }, "Background agent finished");
-        queue.push({ type: "background", name, result });
+        queue.push({ type: "background-agent-result", name, result });
       },
       (err) => {
         this.#active.delete(sessionId);
         log.error({ name, err }, "Background agent failed");
-        queue.push({ type: "background", name, result: `[Error] ${err}` });
+        queue.push({ type: "background-agent-result", name, result: `[Error] ${err}` });
       },
     );
   }
@@ -88,12 +88,12 @@ export class BackgroundManager {
         this.#active.delete(sessionId);
         const result = (response.action === "send" ? response.message : "") || "[No output]";
         log.debug({ name, result }, "Adopted task finished");
-        queue.push({ type: "background", name, result, sessionId });
+        queue.push({ type: "background-agent-result", name, result, sessionId });
       },
       (err) => {
         this.#active.delete(sessionId);
         log.error({ name, err }, "Adopted task failed");
-        queue.push({ type: "background", name, result: `[Error] ${err}`, sessionId });
+        queue.push({ type: "background-agent-result", name, result: `[Error] ${err}`, sessionId });
       },
     );
   }

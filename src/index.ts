@@ -100,7 +100,7 @@ export class App {
       await this.#bot.api.sendChatAction(this.#config.authorizedChatId, "typing");
 
       // Background result with matching session ID: apply directly without Claude round-trip
-      if (request.type === "background" && "sessionId" in request && request.sessionId === this.#orchestrator.sessionId) {
+      if (request.type === "background-agent-result" && "sessionId" in request && request.sessionId === this.#orchestrator.sessionId) {
         log.debug({ name: request.name }, "Background result on current session, applying directly");
         await sendResponse(this.#bot, this.#config.authorizedChatId, request.result || "[No output]");
         return;

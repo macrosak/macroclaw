@@ -38,8 +38,8 @@ const jsonSchema = JSON.stringify(z.toJSONSchema(claudeResponseSchema, { target:
 export type OrchestratorRequest =
   | { type: "user"; message: string; files?: string[] }
   | { type: "cron"; name: string; prompt: string; model?: string }
-  | { type: "background"; name: string; result: string; sessionId?: string }
-  | { type: "bg-task"; name: string; prompt: string; model?: string }
+  | { type: "background-agent-result"; name: string; result: string; sessionId?: string }
+  | { type: "background-agent"; name: string; prompt: string; model?: string }
   | { type: "button"; label: string };
 
 function escapeHtml(text: string): string {
@@ -132,8 +132,8 @@ export class Orchestrator {
       return result.response;
     }
 
-    // bg-task: fork from main session for full context
-    log.debug({ name: (request as { name: string }).name }, "Processing bg-task (forked session)");
+    // background-agent: fork from main session for full context
+    log.debug({ name: (request as { name: string }).name }, "Processing background-agent (forked session)");
     const bgResult = await this.#callClaude(built, "--resume", this.#sessionId, true);
     if (isDeferred(bgResult)) return bgResult;
     await logResult(bgResult.response);
@@ -158,7 +158,7 @@ export class Orchestrator {
           timeout: CRON_TIMEOUT,
           useMainSession: true,
         };
-      case "background":
+      case "background-agent-result":
         return {
           prompt: `[Background: ${request.name}] ${request.result}`,
           model: this.#config.model,
@@ -174,7 +174,7 @@ export class Orchestrator {
           timeout: MAIN_TIMEOUT,
           useMainSession: true,
         };
-      case "bg-task":
+      case "background-agent":
         return {
           prompt: request.prompt,
           model: request.model ?? this.#config.model,

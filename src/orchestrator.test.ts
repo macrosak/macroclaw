@@ -99,7 +99,7 @@ describe("Orchestrator", () => {
       const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }));
       const orch = new Orchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, claude });
 
-      await processSync(orch, { type: "background", name: "research", result: "found it" });
+      await processSync(orch, { type: "background-agent-result", name: "research", result: "found it" });
 
       const opts = claude.run.mock.calls[0][0];
       expect(opts.prompt).toBe("[Background: research] found it");
@@ -107,12 +107,12 @@ describe("Orchestrator", () => {
       expect(opts.timeoutMs).toBe(60_000);
     });
 
-    it("builds bg-task with forked session and bg timeout", async () => {
+    it("builds background-agent with forked session and bg timeout", async () => {
       saveSettings({ sessionId: "main-session" }, tmpSettingsDir);
       const claude = mockClaude(successResult({ action: "send", message: "done", actionReason: "ok" }));
       const orch = new Orchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, claude });
 
-      await processSync(orch, { type: "bg-task", name: "worker", prompt: "do work" });
+      await processSync(orch, { type: "background-agent", name: "worker", prompt: "do work" });
 
       const opts = claude.run.mock.calls[0][0];
       expect(opts.prompt).toBe("do work");
@@ -123,11 +123,11 @@ describe("Orchestrator", () => {
       expect(opts.timeoutMs).toBe(1_800_000);
     });
 
-    it("uses bg-task model override", async () => {
+    it("uses background-agent model override", async () => {
       const claude = mockClaude(successResult({ action: "send", message: "done", actionReason: "ok" }));
       const orch = new Orchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, model: "sonnet", claude });
 
-      await processSync(orch, { type: "bg-task", name: "fast", prompt: "quick check", model: "haiku" });
+      await processSync(orch, { type: "background-agent", name: "fast", prompt: "quick check", model: "haiku" });
 
       expect(claude.run.mock.calls[0][0].model).toBe("haiku");
     });
@@ -329,13 +329,13 @@ describe("Orchestrator", () => {
       expect(orch.sessionId).toBe("test-id");
     });
 
-    it("bg-task forks from main session without affecting it", async () => {
+    it("background-agent forks from main session without affecting it", async () => {
       saveSettings({ sessionId: "main-session" }, tmpSettingsDir);
       const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }, "main-session"));
       const orch = new Orchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, claude });
 
       await processSync(orch, { type: "user", message: "hello" });
-      await processSync(orch, { type: "bg-task", name: "worker", prompt: "work" });
+      await processSync(orch, { type: "background-agent", name: "worker", prompt: "work" });
       await processSync(orch, { type: "user", message: "again" });
 
       expect(claude.run.mock.calls[0][0].sessionId).toBe("main-session");
