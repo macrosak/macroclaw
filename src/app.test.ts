@@ -378,7 +378,7 @@ describe("App", () => {
       expect(ctx.editMessageReplyMarkup).toHaveBeenCalledWith({ reply_markup: { inline_keyboard: [[{ text: "✓ Yes", callback_data: "_noop" }]] } });
       expect((config.claude as any).run).toHaveBeenCalled();
       const opts = (config.claude as any).run.mock.calls[0][0] as ClaudeRunOptions;
-      expect(opts.prompt).toBe('The user clicked MessageButton: "Yes"');
+      expect(opts.prompt).toBe('[Context: button-click] User tapped "Yes"');
     });
 
     it("ignores callback_query from unauthorized chats", async () => {

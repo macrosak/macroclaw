@@ -2,7 +2,7 @@ import { z } from "zod/v4";
 import { Claude, type ClaudeDeferredResult, ClaudeParseError, ClaudeProcessError, type ClaudeResult, isDeferred } from "./claude";
 import { logPrompt, logResult } from "./history";
 import { createLogger } from "./logger";
-import { BG_TIMEOUT, CRON_TIMEOUT, MAIN_TIMEOUT, PROMPT_BACKGROUND_RESULT, PROMPT_BUTTON_CLICK, PROMPT_CRON_EVENT, PROMPT_USER_MESSAGE, promptBackgroundAgent } from "./prompts";
+import { BG_TIMEOUT, CRON_TIMEOUT, MAIN_TIMEOUT, SYSTEM_PROMPT } from "./prompts";
 import { Queue } from "./queue";
 import { loadSettings, newSessionId, type Settings, saveSettings } from "./settings";
 
@@ -76,7 +76,6 @@ export interface OrchestratorConfig {
 interface BuiltRequest {
   prompt: string;
   model: string | undefined;
-  systemPrompt: string;
   timeout: number;
   files?: string[];
   useMainSession: boolean;
@@ -320,39 +319,34 @@ export class Orchestrator {
         return {
           prompt: this.#buildPromptWithFiles(request.message, request.files),
           model: this.#config.model,
-          systemPrompt: PROMPT_USER_MESSAGE,
           timeout: MAIN_TIMEOUT,
           useMainSession: true,
         };
       case "cron":
         return {
-          prompt: `[Tool: cron/${request.name}] ${request.prompt}`,
+          prompt: `[Context: cron/${request.name}] ${request.prompt}`,
           model: request.model ?? this.#config.model,
-          systemPrompt: PROMPT_CRON_EVENT,
           timeout: CRON_TIMEOUT,
           useMainSession: true,
         };
       case "background-agent-result":
         return {
-          prompt: `[Background: ${request.name}] ${request.response.message || "[No output]"}`,
+          prompt: `[Context: background-result/${request.name}] ${request.response.message || "[No output]"}`,
           model: this.#config.model,
-          systemPrompt: PROMPT_BACKGROUND_RESULT,
           timeout: MAIN_TIMEOUT,
           useMainSession: true,
         };
       case "button":
         return {
-          prompt: `The user clicked MessageButton: "${request.label}"`,
+          prompt: `[Context: button-click] User tapped "${request.label}"`,
           model: this.#config.model,
-          systemPrompt: PROMPT_BUTTON_CLICK,
           timeout: MAIN_TIMEOUT,
           useMainSession: true,
         };
       case "background-agent":
         return {
-          prompt: request.prompt,
+          prompt: `[Context: background-agent/${request.name}] ${request.prompt}`,
           model: request.model ?? this.#config.model,
-          systemPrompt: promptBackgroundAgent(request.name),
           timeout: BG_TIMEOUT,
           useMainSession: false,
         };
@@ -392,7 +386,7 @@ export class Orchestrator {
         sessionId: sid,
         forkSession,
         model: built.model,
-        systemPrompt: built.systemPrompt,
+        systemPrompt: SYSTEM_PROMPT,
         timeoutMs: built.timeout,
       });
 

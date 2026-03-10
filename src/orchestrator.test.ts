@@ -54,7 +54,7 @@ describe("Orchestrator", () => {
 
       const opts = claude.run.mock.calls[0][0];
       expect(opts.prompt).toBe("hello");
-      expect(opts.systemPrompt).toContain("direct message from the user");
+      expect(opts.systemPrompt).toContain("macroclaw");
       expect(opts.timeoutMs).toBe(60_000);
     });
 
@@ -87,8 +87,8 @@ describe("Orchestrator", () => {
       await waitForProcessing();
 
       const opts = claude.run.mock.calls[0][0];
-      expect(opts.prompt).toBe("[Tool: cron/daily] check updates");
-      expect(opts.systemPrompt).toContain("cron event");
+      expect(opts.prompt).toBe("[Context: cron/daily] check updates");
+      expect(opts.systemPrompt).toContain("macroclaw");
       expect(opts.timeoutMs).toBe(300_000);
     });
 
@@ -120,8 +120,8 @@ describe("Orchestrator", () => {
       await waitForProcessing();
 
       const opts = claude.run.mock.calls[0][0];
-      expect(opts.prompt).toBe('The user clicked MessageButton: "Yes"');
-      expect(opts.systemPrompt).toContain("tapped an inline keyboard button");
+      expect(opts.prompt).toBe('[Context: button-click] User tapped "Yes"');
+      expect(opts.systemPrompt).toContain("macroclaw");
       expect(opts.timeoutMs).toBe(60_000);
     });
   });
@@ -353,7 +353,7 @@ describe("Orchestrator", () => {
       orch.handleButton("Yes");
       await waitForProcessing();
 
-      expect(claude.run.mock.calls[0][0].prompt).toBe('The user clicked MessageButton: "Yes"');
+      expect(claude.run.mock.calls[0][0].prompt).toBe('[Context: button-click] User tapped "Yes"');
       expect(responses[0].message).toBe("button response");
     });
 
@@ -364,7 +364,7 @@ describe("Orchestrator", () => {
       orch.handleCron("daily-check", "Check for updates", "haiku");
       await waitForProcessing();
 
-      expect(claude.run.mock.calls[0][0].prompt).toBe("[Tool: cron/daily-check] Check for updates");
+      expect(claude.run.mock.calls[0][0].prompt).toBe("[Context: cron/daily-check] Check for updates");
       expect(claude.run.mock.calls[0][0].model).toBe("haiku");
       expect(responses[0].message).toBe("cron done");
     });
