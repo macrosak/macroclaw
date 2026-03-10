@@ -1,3 +1,4 @@
+import { type ClaudeDeferredResult, isDeferred } from "./claude";
 import { createLogger } from "./logger";
 import type { ClaudeResponse, OrchestratorRequest } from "./orchestrator";
 import { newSessionId } from "./settings";
@@ -15,7 +16,7 @@ interface Queue {
 }
 
 interface Orchestrator {
-  processRequest(request: OrchestratorRequest): Promise<ClaudeResponse>;
+  processRequest(request: OrchestratorRequest): Promise<ClaudeResponse | ClaudeDeferredResult>;
 }
 
 export function createBackgroundManager(orchestrator: Orchestrator) {
@@ -36,7 +37,18 @@ export function createBackgroundManager(orchestrator: Orchestrator) {
       log.debug({ name, sessionId }, "Starting background agent");
 
       orchestrator.processRequest({ type: "bg-task", name, prompt, model }).then(
-        (response) => {
+        async (rawResponse) => {
+          let response: ClaudeResponse;
+          if (isDeferred(rawResponse)) {
+            try {
+              const r = await rawResponse.completion;
+              response = { action: "send", message: String(r.structuredOutput ?? r.result ?? ""), actionReason: "deferred-completed" };
+            } catch (err) {
+              response = { action: "send", message: `[Error] ${err}`, actionReason: "deferred-failed" };
+            }
+          } else {
+            response = rawResponse;
+          }
           active.delete(sessionId);
           const result = (response.action === "send" ? response.message : "") || "[No output]";
           log.debug({ name, result }, "Background agent finished");

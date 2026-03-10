@@ -1,5 +1,5 @@
 import { createBackgroundManager } from "./background";
-import type { ClaudeOptions, ClaudeResult } from "./claude";
+import { type ClaudeDeferredResult, type ClaudeOptions, type ClaudeResult, isDeferred } from "./claude";
 import { startCron } from "./cron";
 import { createLogger } from "./logger";
 import { createOrchestrator, type OrchestratorRequest } from "./orchestrator";
@@ -15,7 +15,7 @@ export interface AppConfig {
   workspace: string;
   model?: string;
   settingsDir?: string;
-  runClaude?: (options: ClaudeOptions) => Promise<ClaudeResult>;
+  runClaude?: (options: ClaudeOptions) => Promise<ClaudeResult | ClaudeDeferredResult>;
 }
 
 export function requireEnv(name: string): string {
@@ -42,7 +42,12 @@ export function createApp(config: AppConfig) {
     log.debug({ type: request.type }, "Incoming request");
     await bot.api.sendChatAction(config.authorizedChatId, "typing");
 
-    const response = await orchestrator.processRequest(request);
+    const rawResponse = await orchestrator.processRequest(request);
+    if (isDeferred(rawResponse)) {
+      // TODO: wire up deferred handling (commit 5)
+      return;
+    }
+    const response = rawResponse;
     log.debug({ action: response.action, actionReason: response.actionReason }, "Response");
 
     if (response.actionReason === "timeout") {

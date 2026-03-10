@@ -1,8 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { existsSync, rmSync } from "node:fs";
-import { type ClaudeOptions, ClaudeParseError, ClaudeProcessError, type ClaudeResult, ClaudeTimeoutError } from "./claude";
-import { createOrchestrator } from "./orchestrator";
+import { type ClaudeOptions, ClaudeParseError, ClaudeProcessError, type ClaudeResult, ClaudeTimeoutError, isDeferred } from "./claude";
+import { type ClaudeResponse, createOrchestrator } from "./orchestrator";
 import { saveSettings } from "./settings";
+
+async function processSync(orch: ReturnType<typeof createOrchestrator>, ...args: Parameters<ReturnType<typeof createOrchestrator>["processRequest"]>): Promise<ClaudeResponse> {
+  const result = await orch.processRequest(...args);
+  if (isDeferred(result)) throw new Error("Expected sync result, got deferred");
+  return result;
+}
 
 const tmpSettingsDir = "/tmp/macroclaw-test-orchestrator-settings";
 const TEST_WORKSPACE = "/tmp/macroclaw-test-workspace";
@@ -32,7 +38,7 @@ describe("createOrchestrator", () => {
       const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }));
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
 
-      await orch.processRequest({ type: "user", message: "hello" });
+      await processSync(orch,{ type: "user", message: "hello" });
 
       const opts = claude.mock.calls[0][0];
       expect(opts.prompt).toBe("hello");
@@ -44,7 +50,7 @@ describe("createOrchestrator", () => {
       const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }));
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
 
-      await orch.processRequest({ type: "user", message: "check this", files: ["/tmp/photo.jpg", "/tmp/doc.pdf"] });
+      await processSync(orch,{ type: "user", message: "check this", files: ["/tmp/photo.jpg", "/tmp/doc.pdf"] });
 
       const opts = claude.mock.calls[0][0];
       expect(opts.prompt).toBe("[File: /tmp/photo.jpg]\n[File: /tmp/doc.pdf]\ncheck this");
@@ -54,7 +60,7 @@ describe("createOrchestrator", () => {
       const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }));
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
 
-      await orch.processRequest({ type: "user", message: "", files: ["/tmp/photo.jpg"] });
+      await processSync(orch,{ type: "user", message: "", files: ["/tmp/photo.jpg"] });
 
       expect(claude.mock.calls[0][0].prompt).toBe("[File: /tmp/photo.jpg]");
     });
@@ -63,7 +69,7 @@ describe("createOrchestrator", () => {
       const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }));
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
 
-      await orch.processRequest({ type: "cron", name: "daily", prompt: "check updates" });
+      await processSync(orch,{ type: "cron", name: "daily", prompt: "check updates" });
 
       const opts = claude.mock.calls[0][0];
       expect(opts.prompt).toBe("[Tool: cron/daily] check updates");
@@ -75,7 +81,7 @@ describe("createOrchestrator", () => {
       const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }));
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, model: "sonnet", runClaude: claude });
 
-      await orch.processRequest({ type: "cron", name: "smart", prompt: "think", model: "opus" });
+      await processSync(orch,{ type: "cron", name: "smart", prompt: "think", model: "opus" });
 
       expect(claude.mock.calls[0][0].model).toBe("opus");
     });
@@ -84,7 +90,7 @@ describe("createOrchestrator", () => {
       const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }));
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, model: "sonnet", runClaude: claude });
 
-      await orch.processRequest({ type: "cron", name: "basic", prompt: "check" });
+      await processSync(orch,{ type: "cron", name: "basic", prompt: "check" });
 
       expect(claude.mock.calls[0][0].model).toBe("sonnet");
     });
@@ -93,7 +99,7 @@ describe("createOrchestrator", () => {
       const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }));
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
 
-      await orch.processRequest({ type: "background", name: "research", result: "found it" });
+      await processSync(orch,{ type: "background", name: "research", result: "found it" });
 
       const opts = claude.mock.calls[0][0];
       expect(opts.prompt).toBe("[Background: research] found it");
@@ -105,7 +111,7 @@ describe("createOrchestrator", () => {
       const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }));
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
 
-      await orch.processRequest({ type: "timeout", originalMessage: "do something slow" });
+      await processSync(orch,{ type: "timeout", originalMessage: "do something slow" });
 
       const opts = claude.mock.calls[0][0];
       expect(opts.prompt).toContain("[Timeout]");
@@ -118,7 +124,7 @@ describe("createOrchestrator", () => {
       const claude = mockClaude(successResult({ action: "send", message: "done", actionReason: "ok" }));
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
 
-      await orch.processRequest({ type: "bg-task", name: "worker", prompt: "do work" });
+      await processSync(orch,{ type: "bg-task", name: "worker", prompt: "do work" });
 
       const opts = claude.mock.calls[0][0];
       expect(opts.prompt).toBe("do work");
@@ -133,7 +139,7 @@ describe("createOrchestrator", () => {
       const claude = mockClaude(successResult({ action: "send", message: "done", actionReason: "ok" }));
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, model: "sonnet", runClaude: claude });
 
-      await orch.processRequest({ type: "bg-task", name: "fast", prompt: "quick check", model: "haiku" });
+      await processSync(orch,{ type: "bg-task", name: "fast", prompt: "quick check", model: "haiku" });
 
       expect(claude.mock.calls[0][0].model).toBe("haiku");
     });
@@ -142,7 +148,7 @@ describe("createOrchestrator", () => {
       const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }));
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
 
-      await orch.processRequest({ type: "button", label: "Yes" });
+      await processSync(orch,{ type: "button", label: "Yes" });
 
       const opts = claude.mock.calls[0][0];
       expect(opts.prompt).toBe('The user clicked MessageButton: "Yes"');
@@ -156,7 +162,7 @@ describe("createOrchestrator", () => {
       const claude = mockClaude(successResult({ action: "send", message: "hello", actionReason: "ok" }));
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
 
-      const result = await orch.processRequest({ type: "user", message: "hi" });
+      const result = await processSync(orch,{ type: "user", message: "hi" });
 
       expect(result).toEqual({ action: "send", message: "hello", actionReason: "ok" });
     });
@@ -165,7 +171,7 @@ describe("createOrchestrator", () => {
       const claude = mockClaude(successResult({ action: "invalid", message: "hi", actionReason: "ok" }));
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
 
-      const result = await orch.processRequest({ type: "user", message: "hi" });
+      const result = await processSync(orch,{ type: "user", message: "hi" });
 
       expect(result.action).toBe("send");
       if (result.action === "send") expect(result.message).toBe("hi");
@@ -176,7 +182,7 @@ describe("createOrchestrator", () => {
       const claude = mockClaude({ structuredOutput: null, sessionId: "s1", result: "Claude said this" });
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
 
-      const result = await orch.processRequest({ type: "user", message: "hi" });
+      const result = await processSync(orch,{ type: "user", message: "hi" });
 
       expect(result.actionReason).toBe("no-structured-output");
       expect(result.action).toBe("send");
@@ -187,7 +193,7 @@ describe("createOrchestrator", () => {
       const claude = mockClaude({ structuredOutput: null, sessionId: "s1", result: "<b>bold</b> & stuff" });
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
 
-      const result = await orch.processRequest({ type: "user", message: "hi" });
+      const result = await processSync(orch,{ type: "user", message: "hi" });
 
       expect(result.message).toBe("[No structured output] &lt;b&gt;bold&lt;/b&gt; &amp; stuff");
     });
@@ -196,7 +202,7 @@ describe("createOrchestrator", () => {
       const claude = mockClaude({ structuredOutput: null, sessionId: "s1" });
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
 
-      const result = await orch.processRequest({ type: "user", message: "hi" });
+      const result = await processSync(orch,{ type: "user", message: "hi" });
 
       expect(result.actionReason).toBe("no-structured-output");
       expect(result.message).toBe("[No output]");
@@ -212,7 +218,7 @@ describe("createOrchestrator", () => {
       const claude = mockClaude(successResult(output));
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
 
-      const result = await orch.processRequest({ type: "user", message: "hi" });
+      const result = await processSync(orch,{ type: "user", message: "hi" });
 
       expect(result.buttons).toEqual([[{ label: "Yes" }, { label: "No" }], [{ label: "Maybe" }]]);
     });
@@ -227,7 +233,7 @@ describe("createOrchestrator", () => {
       const claude = mockClaude(successResult(output));
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
 
-      const result = await orch.processRequest({ type: "user", message: "hi" });
+      const result = await processSync(orch,{ type: "user", message: "hi" });
 
       expect(result.backgroundAgents).toEqual([{ name: "research", prompt: "look into this", model: "haiku" }]);
     });
@@ -237,7 +243,7 @@ describe("createOrchestrator", () => {
       const claude = mockClaude(successResult(output));
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
 
-      const result = await orch.processRequest({ type: "user", message: "hi" });
+      const result = await processSync(orch,{ type: "user", message: "hi" });
 
       expect(result.action === "send" && result.files).toEqual(["/tmp/chart.png"]);
     });
@@ -248,7 +254,7 @@ describe("createOrchestrator", () => {
       const claude = mock(async () => { throw new ClaudeTimeoutError(60_000); });
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
 
-      const result = await orch.processRequest({ type: "user", message: "hi" });
+      const result = await processSync(orch,{ type: "user", message: "hi" });
 
       expect(result.action).toBe("send");
       if (result.action === "send") expect(result.message).toContain("timed out after 60s");
@@ -259,7 +265,7 @@ describe("createOrchestrator", () => {
       const claude = mock(async () => { throw new ClaudeProcessError(1, "spawn failed"); });
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
 
-      const result = await orch.processRequest({ type: "user", message: "hi" });
+      const result = await processSync(orch,{ type: "user", message: "hi" });
 
       expect(result.action).toBe("send");
       if (result.action === "send") {
@@ -273,7 +279,7 @@ describe("createOrchestrator", () => {
       const claude = mock(async () => { throw new ClaudeParseError("not json"); });
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
 
-      const result = await orch.processRequest({ type: "user", message: "hi" });
+      const result = await processSync(orch,{ type: "user", message: "hi" });
 
       expect(result.action).toBe("send");
       if (result.action === "send") expect(result.message).toContain("[JSON Error]");
@@ -284,7 +290,7 @@ describe("createOrchestrator", () => {
       const claude = mock(async () => { throw new Error("unexpected"); });
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
 
-      await expect(orch.processRequest({ type: "user", message: "hi" })).rejects.toThrow("unexpected");
+      await expect(processSync(orch, { type: "user", message: "hi" })).rejects.toThrow("unexpected");
     });
   });
 
@@ -294,7 +300,7 @@ describe("createOrchestrator", () => {
       const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }));
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
 
-      await orch.processRequest({ type: "user", message: "hello" });
+      await processSync(orch,{ type: "user", message: "hello" });
 
       expect(claude.mock.calls[0][0].sessionFlag).toBe("--resume");
       expect(claude.mock.calls[0][0].sessionId).toBe("existing-session");
@@ -304,7 +310,7 @@ describe("createOrchestrator", () => {
       const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }));
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
 
-      await orch.processRequest({ type: "user", message: "hello" });
+      await processSync(orch,{ type: "user", message: "hello" });
 
       expect(claude.mock.calls[0][0].sessionFlag).toBe("--session-id");
       expect(claude.mock.calls[0][0].sessionId).toMatch(/^[0-9a-f]{8}-/);
@@ -320,7 +326,7 @@ describe("createOrchestrator", () => {
       });
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
 
-      await orch.processRequest({ type: "user", message: "hello" });
+      await processSync(orch,{ type: "user", message: "hello" });
 
       expect(callCount).toBe(2);
       expect(claude.mock.calls[0][0].sessionFlag).toBe("--resume");
@@ -332,8 +338,8 @@ describe("createOrchestrator", () => {
       const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }));
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
 
-      await orch.processRequest({ type: "user", message: "first" });
-      await orch.processRequest({ type: "user", message: "second" });
+      await processSync(orch,{ type: "user", message: "first" });
+      await processSync(orch,{ type: "user", message: "second" });
 
       expect(claude.mock.calls[0][0].sessionFlag).toBe("--session-id");
       expect(claude.mock.calls[1][0].sessionFlag).toBe("--resume");
@@ -350,9 +356,9 @@ describe("createOrchestrator", () => {
       const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }));
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
 
-      await orch.processRequest({ type: "user", message: "hello" });
-      await orch.processRequest({ type: "bg-task", name: "worker", prompt: "work" });
-      await orch.processRequest({ type: "user", message: "again" });
+      await processSync(orch,{ type: "user", message: "hello" });
+      await processSync(orch,{ type: "bg-task", name: "worker", prompt: "work" });
+      await processSync(orch,{ type: "user", message: "again" });
 
       expect(claude.mock.calls[0][0].sessionId).toBe("main-session");
       expect(claude.mock.calls[1][0].sessionId).toBe("main-session"); // forked from main

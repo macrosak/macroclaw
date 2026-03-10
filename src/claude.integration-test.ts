@@ -4,7 +4,13 @@
  */
 import { describe, expect, it } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { runClaude } from "./claude";
+import { type ClaudeResult, isDeferred, runClaude } from "./claude";
+
+async function runClaudeSync(...args: Parameters<typeof runClaude>): Promise<ClaudeResult> {
+  const result = await runClaude(...args);
+  if (isDeferred(result)) throw new Error("Expected sync result, got deferred");
+  return result;
+}
 
 const WORKSPACE = "/tmp/macroclaw-integration-test";
 const SIMPLE_SCHEMA = JSON.stringify({
@@ -45,7 +51,7 @@ const FULL_SCHEMA = JSON.stringify({
 
 describe("claude CLI structured output", () => {
   it("simple schema without system prompt", async () => {
-    const result = await runClaude({
+    const result = await runClaudeSync({
       prompt: "Say hello",
       sessionFlag: "--session-id",
       sessionId: randomUUID(),
@@ -59,7 +65,7 @@ describe("claude CLI structured output", () => {
   }, 60_000);
 
   it("simple schema with system prompt", async () => {
-    const result = await runClaude({
+    const result = await runClaudeSync({
       prompt: "Say hello",
       sessionFlag: "--session-id",
       sessionId: randomUUID(),
@@ -74,7 +80,7 @@ describe("claude CLI structured output", () => {
   }, 60_000);
 
   it("full schema with system prompt", async () => {
-    const result = await runClaude({
+    const result = await runClaudeSync({
       prompt: "Say hello",
       sessionFlag: "--session-id",
       sessionId: randomUUID(),
@@ -89,7 +95,7 @@ describe("claude CLI structured output", () => {
   }, 60_000);
 
   it("full schema with real system prompt and workspace", async () => {
-    const result = await runClaude({
+    const result = await runClaudeSync({
       prompt: "Say hello",
       sessionFlag: "--session-id",
       sessionId: randomUUID(),

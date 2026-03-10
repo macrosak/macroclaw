@@ -1,5 +1,5 @@
 import { z } from "zod/v4";
-import { type ClaudeOptions, ClaudeParseError, ClaudeProcessError, type ClaudeResult, ClaudeTimeoutError, runClaude } from "./claude";
+import { type ClaudeDeferredResult, type ClaudeOptions, ClaudeParseError, ClaudeProcessError, type ClaudeResult, ClaudeTimeoutError, isDeferred, runClaude } from "./claude";
 import { logPrompt, logResult } from "./history";
 import { createLogger } from "./logger";
 import { BG_TIMEOUT, CRON_TIMEOUT, MAIN_TIMEOUT, PROMPT_BACKGROUND_RESULT, PROMPT_BUTTON_CLICK, PROMPT_CRON_EVENT, PROMPT_USER_MESSAGE, promptBackgroundAgent } from "./prompts";
@@ -53,7 +53,7 @@ export interface OrchestratorConfig {
   model?: string;
   workspace: string;
   settingsDir?: string;
-  runClaude?: (options: ClaudeOptions) => Promise<ClaudeResult>;
+  runClaude?: (options: ClaudeOptions) => Promise<ClaudeResult | ClaudeDeferredResult>;
 }
 
 export function createOrchestrator(config: OrchestratorConfig) {
@@ -150,7 +150,17 @@ export function createOrchestrator(config: OrchestratorConfig) {
     return { action: "send", message: msg, actionReason: "validation-failed" };
   }
 
-  async function callClaude(built: ReturnType<typeof buildRequest>, flag: "--resume" | "--session-id", sid: string, forkSession?: boolean): Promise<ClaudeResponse> {
+  function resultToResponse(result: ClaudeResult): ClaudeResponse {
+    if (result.structuredOutput) {
+      return validateResponse(result.structuredOutput);
+    }
+    log.error({ hasResult: !!result.result }, "No structured_output in response");
+    const raw = result.result ? escapeHtml(result.result) : "";
+    const msg = raw ? `[No structured output] ${raw}` : "[No output]";
+    return { action: "send", message: msg, actionReason: "no-structured-output" };
+  }
+
+  async function callClaude(built: ReturnType<typeof buildRequest>, flag: "--resume" | "--session-id", sid: string, forkSession?: boolean): Promise<ClaudeResponse | ClaudeDeferredResult> {
     try {
       const result = await claude({
         prompt: built.prompt,
@@ -164,14 +174,9 @@ export function createOrchestrator(config: OrchestratorConfig) {
         timeoutMs: built.timeout,
       });
 
-      if (result.structuredOutput) {
-        return validateResponse(result.structuredOutput);
-      }
+      if (isDeferred(result)) return result;
 
-      log.error({ hasResult: !!result.result }, "No structured_output in response");
-      const raw = result.result ? escapeHtml(result.result) : "";
-      const msg = raw ? `[No structured output] ${raw}` : "[No output]";
-      return { action: "send", message: msg, actionReason: "no-structured-output" };
+      return resultToResponse(result);
     } catch (err) {
       if (err instanceof ClaudeTimeoutError) {
         return { action: "send", message: `[Error] Claude process timed out after ${Math.round(err.timeoutMs / 1000)}s.`, actionReason: "timeout" };
@@ -191,7 +196,7 @@ export function createOrchestrator(config: OrchestratorConfig) {
       return sessionId;
     },
 
-    async processRequest(request: OrchestratorRequest): Promise<ClaudeResponse> {
+    async processRequest(request: OrchestratorRequest): Promise<ClaudeResponse | ClaudeDeferredResult> {
       const built = buildRequest(request);
       await logPrompt(request);
 
@@ -199,13 +204,15 @@ export function createOrchestrator(config: OrchestratorConfig) {
         let response = await callClaude(built, sessionFlag, sessionId);
 
         // Session resolution: if resume failed on first call, create new session
-        if (!sessionResolved && sessionFlag === "--resume" && response.actionReason === "process-error") {
+        if (!isDeferred(response) && !sessionResolved && sessionFlag === "--resume" && response.actionReason === "process-error") {
           sessionId = newSessionId();
           log.info({ sessionId }, "Resume failed, created new session");
           sessionFlag = "--session-id";
           saveSettings({ sessionId }, config.settingsDir);
           response = await callClaude(built, sessionFlag, sessionId);
         }
+
+        if (isDeferred(response)) return response;
 
         // Mark resolved on first success
         if (!sessionResolved && response.actionReason !== "process-error" && response.actionReason !== "timeout") {
@@ -220,6 +227,7 @@ export function createOrchestrator(config: OrchestratorConfig) {
       // bg-task: fork from main session for full context
       log.debug({ name: (request as { name: string }).name }, "Processing bg-task (forked session)");
       const bgResponse = await callClaude(built, "--resume", sessionId, true);
+      if (isDeferred(bgResponse)) return bgResponse;
       await logResult(bgResponse);
       return bgResponse;
     },
