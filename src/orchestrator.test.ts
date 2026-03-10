@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { existsSync, rmSync } from "node:fs";
-import { type ClaudeOptions, ClaudeParseError, ClaudeProcessError, type ClaudeResult, ClaudeTimeoutError, isDeferred } from "./claude";
+import { type ClaudeOptions, ClaudeParseError, ClaudeProcessError, type ClaudeResult, isDeferred } from "./claude";
 import { type ClaudeResponse, createOrchestrator } from "./orchestrator";
 import { saveSettings } from "./settings";
 
@@ -104,18 +104,6 @@ describe("createOrchestrator", () => {
       const opts = claude.mock.calls[0][0];
       expect(opts.prompt).toBe("[Background: research] found it");
       expect(opts.systemPrompt).toContain("background agent you previously spawned");
-      expect(opts.timeoutMs).toBe(60_000);
-    });
-
-    it("builds timeout retry prompt", async () => {
-      const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }));
-      const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
-
-      await processSync(orch,{ type: "timeout", originalMessage: "do something slow" });
-
-      const opts = claude.mock.calls[0][0];
-      expect(opts.prompt).toContain("[Timeout]");
-      expect(opts.prompt).toContain("do something slow");
       expect(opts.timeoutMs).toBe(60_000);
     });
 
@@ -250,17 +238,6 @@ describe("createOrchestrator", () => {
   });
 
   describe("error mapping", () => {
-    it("maps ClaudeTimeoutError to timeout response", async () => {
-      const claude = mock(async () => { throw new ClaudeTimeoutError(60_000); });
-      const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
-
-      const result = await processSync(orch,{ type: "user", message: "hi" });
-
-      expect(result.action).toBe("send");
-      if (result.action === "send") expect(result.message).toContain("timed out after 60s");
-      expect(result.actionReason).toBe("timeout");
-    });
-
     it("maps ClaudeProcessError to process-error response", async () => {
       const claude = mock(async () => { throw new ClaudeProcessError(1, "spawn failed"); });
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });

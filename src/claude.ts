@@ -32,12 +32,6 @@ export function isDeferred<T>(result: T | ClaudeDeferredResult): result is Claud
   return result != null && typeof result === "object" && "deferred" in result && (result as ClaudeDeferredResult).deferred === true;
 }
 
-export class ClaudeTimeoutError extends Error {
-  constructor(public timeoutMs: number) {
-    super(`Claude process timed out after ${Math.round(timeoutMs / 1000)}s`);
-  }
-}
-
 export class ClaudeProcessError extends Error {
   constructor(
     public exitCode: number,

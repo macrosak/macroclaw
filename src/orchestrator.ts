@@ -1,5 +1,5 @@
 import { z } from "zod/v4";
-import { type ClaudeDeferredResult, type ClaudeOptions, ClaudeParseError, ClaudeProcessError, type ClaudeResult, ClaudeTimeoutError, isDeferred, runClaude } from "./claude";
+import { type ClaudeDeferredResult, type ClaudeOptions, ClaudeParseError, ClaudeProcessError, type ClaudeResult, isDeferred, runClaude } from "./claude";
 import { logPrompt, logResult } from "./history";
 import { createLogger } from "./logger";
 import { BG_TIMEOUT, CRON_TIMEOUT, MAIN_TIMEOUT, PROMPT_BACKGROUND_RESULT, PROMPT_BUTTON_CLICK, PROMPT_CRON_EVENT, PROMPT_USER_MESSAGE, promptBackgroundAgent } from "./prompts";
@@ -39,7 +39,6 @@ export type OrchestratorRequest =
   | { type: "user"; message: string; files?: string[] }
   | { type: "cron"; name: string; prompt: string; model?: string }
   | { type: "background"; name: string; result: string; sessionId?: string }
-  | { type: "timeout"; originalMessage: string }
   | { type: "bg-task"; name: string; prompt: string; model?: string }
   | { type: "button"; label: string };
 
@@ -105,14 +104,6 @@ export function createOrchestrator(config: OrchestratorConfig) {
           prompt: `[Background: ${request.name}] ${request.result}`,
           model: config.model,
           systemPrompt: PROMPT_BACKGROUND_RESULT,
-          timeout: MAIN_TIMEOUT,
-          useMainSession: true,
-        };
-      case "timeout":
-        return {
-          prompt: `[Timeout] The previous request timed out after ${MAIN_TIMEOUT / 1000} seconds. The user asked: "${request.originalMessage}". This task needs more time — spawn a background agent to handle it.`,
-          model: config.model,
-          systemPrompt: PROMPT_USER_MESSAGE,
           timeout: MAIN_TIMEOUT,
           useMainSession: true,
         };
@@ -183,9 +174,6 @@ export function createOrchestrator(config: OrchestratorConfig) {
 
       return resultToCallResult(result);
     } catch (err) {
-      if (err instanceof ClaudeTimeoutError) {
-        return { response: { action: "send", message: `[Error] Claude process timed out after ${Math.round(err.timeoutMs / 1000)}s.`, actionReason: "timeout" }, sessionId: sid };
-      }
       if (err instanceof ClaudeProcessError) {
         return { response: { action: "send", message: `[Error] Claude exited with code ${err.exitCode}:\n${err.stderr}`, actionReason: "process-error" }, sessionId: sid };
       }
@@ -227,7 +215,7 @@ export function createOrchestrator(config: OrchestratorConfig) {
         }
 
         // Mark resolved on first success
-        if (!sessionResolved && result.response.actionReason !== "process-error" && result.response.actionReason !== "timeout") {
+        if (!sessionResolved && result.response.actionReason !== "process-error") {
           sessionResolved = true;
           sessionFlag = "--resume";
         }
