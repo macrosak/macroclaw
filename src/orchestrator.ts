@@ -1,5 +1,5 @@
 import { z } from "zod/v4";
-import { type ClaudeDeferredResult, type ClaudeOptions, ClaudeParseError, ClaudeProcessError, type ClaudeResult, isDeferred, runClaude } from "./claude";
+import { Claude, type ClaudeDeferredResult, ClaudeParseError, ClaudeProcessError, type ClaudeResult, isDeferred } from "./claude";
 import { logPrompt, logResult } from "./history";
 import { createLogger } from "./logger";
 import { BG_TIMEOUT, CRON_TIMEOUT, MAIN_TIMEOUT, PROMPT_BACKGROUND_RESULT, PROMPT_BUTTON_CLICK, PROMPT_CRON_EVENT, PROMPT_USER_MESSAGE, promptBackgroundAgent } from "./prompts";
@@ -52,41 +52,100 @@ export interface OrchestratorConfig {
   model?: string;
   workspace: string;
   settingsDir?: string;
-  runClaude?: (options: ClaudeOptions) => Promise<ClaudeResult | ClaudeDeferredResult>;
+  claude?: Claude;
 }
 
-export function createOrchestrator(config: OrchestratorConfig) {
-  const claude = config.runClaude ?? runClaude;
+interface BuiltRequest {
+  prompt: string;
+  model: string | undefined;
+  systemPrompt: string;
+  timeout: number;
+  files?: string[];
+  useMainSession: boolean;
+}
 
-  // Session state
-  const settings = loadSettings(config.settingsDir);
-  let sessionId: string;
-  let sessionFlag: "--resume" | "--session-id";
-  let sessionResolved = false;
+interface CallResult {
+  response: ClaudeResponse;
+  sessionId: string;
+}
 
-  if (settings.sessionId) {
-    sessionId = settings.sessionId;
-    sessionFlag = "--resume";
-  } else {
-    sessionId = newSessionId();
-    sessionFlag = "--session-id";
-    saveSettings({ sessionId }, config.settingsDir);
-    log.info({ sessionId }, "Created new session");
+export class Orchestrator {
+  #claude: Claude;
+  #settings: ReturnType<typeof loadSettings>;
+  #sessionId: string;
+  #sessionFlag: "--resume" | "--session-id";
+  #sessionResolved = false;
+  #config: OrchestratorConfig;
+
+  constructor(config: OrchestratorConfig) {
+    this.#config = config;
+    this.#claude = config.claude ?? new Claude({ workspace: config.workspace, jsonSchema });
+    this.#settings = loadSettings(config.settingsDir);
+
+    if (this.#settings.sessionId) {
+      this.#sessionId = this.#settings.sessionId;
+      this.#sessionFlag = "--resume";
+    } else {
+      this.#sessionId = newSessionId();
+      this.#sessionFlag = "--session-id";
+      saveSettings({ sessionId: this.#sessionId }, config.settingsDir);
+      log.info({ sessionId: this.#sessionId }, "Created new session");
+    }
   }
 
-  function buildRequest(request: OrchestratorRequest): {
-    prompt: string;
-    model: string | undefined;
-    systemPrompt: string;
-    timeout: number;
-    files?: string[];
-    useMainSession: boolean;
-  } {
+  get sessionId() {
+    return this.#sessionId;
+  }
+
+  async processRequest(request: OrchestratorRequest, options?: { forkSession?: boolean }): Promise<ClaudeResponse | ClaudeDeferredResult> {
+    const built = this.#buildRequest(request);
+    await logPrompt(request);
+
+    if (built.useMainSession) {
+      let result = await this.#callClaude(built, this.#sessionFlag, this.#sessionId, options?.forkSession);
+
+      // Session resolution: if resume failed on first call, create new session
+      if (!isDeferred(result) && !this.#sessionResolved && this.#sessionFlag === "--resume" && result.response.actionReason === "process-error") {
+        this.#sessionId = newSessionId();
+        log.info({ sessionId: this.#sessionId }, "Resume failed, created new session");
+        this.#sessionFlag = "--session-id";
+        saveSettings({ sessionId: this.#sessionId }, this.#config.settingsDir);
+        result = await this.#callClaude(built, this.#sessionFlag, this.#sessionId);
+      }
+
+      if (isDeferred(result)) return result;
+
+      // Update session ID from response (important after fork)
+      if (result.sessionId && result.sessionId !== this.#sessionId) {
+        log.info({ oldSessionId: this.#sessionId, newSessionId: result.sessionId }, "Session forked, updating session ID");
+        this.#sessionId = result.sessionId;
+        saveSettings({ sessionId: this.#sessionId }, this.#config.settingsDir);
+      }
+
+      // Mark resolved on first success
+      if (!this.#sessionResolved && result.response.actionReason !== "process-error") {
+        this.#sessionResolved = true;
+        this.#sessionFlag = "--resume";
+      }
+
+      await logResult(result.response);
+      return result.response;
+    }
+
+    // bg-task: fork from main session for full context
+    log.debug({ name: (request as { name: string }).name }, "Processing bg-task (forked session)");
+    const bgResult = await this.#callClaude(built, "--resume", this.#sessionId, true);
+    if (isDeferred(bgResult)) return bgResult;
+    await logResult(bgResult.response);
+    return bgResult.response;
+  }
+
+  #buildRequest(request: OrchestratorRequest): BuiltRequest {
     switch (request.type) {
       case "user":
         return {
-          prompt: buildPromptWithFiles(request.message, request.files),
-          model: config.model,
+          prompt: this.#buildPromptWithFiles(request.message, request.files),
+          model: this.#config.model,
           systemPrompt: PROMPT_USER_MESSAGE,
           timeout: MAIN_TIMEOUT,
           useMainSession: true,
@@ -94,7 +153,7 @@ export function createOrchestrator(config: OrchestratorConfig) {
       case "cron":
         return {
           prompt: `[Tool: cron/${request.name}] ${request.prompt}`,
-          model: request.model ?? config.model,
+          model: request.model ?? this.#config.model,
           systemPrompt: PROMPT_CRON_EVENT,
           timeout: CRON_TIMEOUT,
           useMainSession: true,
@@ -102,7 +161,7 @@ export function createOrchestrator(config: OrchestratorConfig) {
       case "background":
         return {
           prompt: `[Background: ${request.name}] ${request.result}`,
-          model: config.model,
+          model: this.#config.model,
           systemPrompt: PROMPT_BACKGROUND_RESULT,
           timeout: MAIN_TIMEOUT,
           useMainSession: true,
@@ -110,7 +169,7 @@ export function createOrchestrator(config: OrchestratorConfig) {
       case "button":
         return {
           prompt: `The user clicked MessageButton: "${request.label}"`,
-          model: config.model,
+          model: this.#config.model,
           systemPrompt: PROMPT_BUTTON_CLICK,
           timeout: MAIN_TIMEOUT,
           useMainSession: true,
@@ -118,7 +177,7 @@ export function createOrchestrator(config: OrchestratorConfig) {
       case "bg-task":
         return {
           prompt: request.prompt,
-          model: request.model ?? config.model,
+          model: request.model ?? this.#config.model,
           systemPrompt: promptBackgroundAgent(request.name),
           timeout: BG_TIMEOUT,
           useMainSession: false,
@@ -126,13 +185,13 @@ export function createOrchestrator(config: OrchestratorConfig) {
     }
   }
 
-  function buildPromptWithFiles(message: string, files?: string[]): string {
+  #buildPromptWithFiles(message: string, files?: string[]): string {
     if (!files?.length) return message;
     const prefix = files.map((f) => `[File: ${f}]`).join("\n");
     return message ? `${prefix}\n${message}` : prefix;
   }
 
-  function validateResponse(raw: unknown): ClaudeResponse {
+  #validateResponse(raw: unknown): ClaudeResponse {
     const parsed = claudeResponseSchema.safeParse(raw);
     if (parsed.success) return parsed.data;
     log.warn({ error: parsed.error.message }, "structured_output failed validation");
@@ -141,14 +200,9 @@ export function createOrchestrator(config: OrchestratorConfig) {
     return { action: "send", message: msg, actionReason: "validation-failed" };
   }
 
-  interface CallResult {
-    response: ClaudeResponse;
-    sessionId: string;
-  }
-
-  function resultToCallResult(result: ClaudeResult): CallResult {
+  #resultToCallResult(result: ClaudeResult): CallResult {
     if (result.structuredOutput) {
-      return { response: validateResponse(result.structuredOutput), sessionId: result.sessionId };
+      return { response: this.#validateResponse(result.structuredOutput), sessionId: result.sessionId };
     }
     log.error({ hasResult: !!result.result }, "No structured_output in response");
     const raw = result.result ? escapeHtml(result.result) : "";
@@ -156,23 +210,21 @@ export function createOrchestrator(config: OrchestratorConfig) {
     return { response: { action: "send", message: msg, actionReason: "no-structured-output" }, sessionId: result.sessionId };
   }
 
-  async function callClaude(built: ReturnType<typeof buildRequest>, flag: "--resume" | "--session-id", sid: string, forkSession?: boolean): Promise<CallResult | ClaudeDeferredResult> {
+  async #callClaude(built: BuiltRequest, flag: "--resume" | "--session-id", sid: string, forkSession?: boolean): Promise<CallResult | ClaudeDeferredResult> {
     try {
-      const result = await claude({
+      const result = await this.#claude.run({
         prompt: built.prompt,
         sessionFlag: flag,
         sessionId: sid,
         forkSession,
         model: built.model,
-        workspace: config.workspace,
         systemPrompt: built.systemPrompt,
-        jsonSchema,
         timeoutMs: built.timeout,
       });
 
       if (isDeferred(result)) return result;
 
-      return resultToCallResult(result);
+      return this.#resultToCallResult(result);
     } catch (err) {
       if (err instanceof ClaudeProcessError) {
         return { response: { action: "send", message: `[Error] Claude exited with code ${err.exitCode}:\n${err.stderr}`, actionReason: "process-error" }, sessionId: sid };
@@ -183,53 +235,4 @@ export function createOrchestrator(config: OrchestratorConfig) {
       throw err;
     }
   }
-
-  return {
-    get sessionId() {
-      return sessionId;
-    },
-
-    async processRequest(request: OrchestratorRequest, options?: { forkSession?: boolean }): Promise<ClaudeResponse | ClaudeDeferredResult> {
-      const built = buildRequest(request);
-      await logPrompt(request);
-
-      if (built.useMainSession) {
-        let result = await callClaude(built, sessionFlag, sessionId, options?.forkSession);
-
-        // Session resolution: if resume failed on first call, create new session
-        if (!isDeferred(result) && !sessionResolved && sessionFlag === "--resume" && result.response.actionReason === "process-error") {
-          sessionId = newSessionId();
-          log.info({ sessionId }, "Resume failed, created new session");
-          sessionFlag = "--session-id";
-          saveSettings({ sessionId }, config.settingsDir);
-          result = await callClaude(built, sessionFlag, sessionId);
-        }
-
-        if (isDeferred(result)) return result;
-
-        // Update session ID from response (important after fork)
-        if (result.sessionId && result.sessionId !== sessionId) {
-          log.info({ oldSessionId: sessionId, newSessionId: result.sessionId }, "Session forked, updating session ID");
-          sessionId = result.sessionId;
-          saveSettings({ sessionId }, config.settingsDir);
-        }
-
-        // Mark resolved on first success
-        if (!sessionResolved && result.response.actionReason !== "process-error") {
-          sessionResolved = true;
-          sessionFlag = "--resume";
-        }
-
-        await logResult(result.response);
-        return result.response;
-      }
-
-      // bg-task: fork from main session for full context
-      log.debug({ name: (request as { name: string }).name }, "Processing bg-task (forked session)");
-      const bgResult = await callClaude(built, "--resume", sessionId, true);
-      if (isDeferred(bgResult)) return bgResult;
-      await logResult(bgResult.response);
-      return bgResult.response;
-    },
-  };
 }

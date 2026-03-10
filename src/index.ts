@@ -1,9 +1,9 @@
 
 import { createBackgroundManager } from "./background";
-import { type ClaudeDeferredResult, type ClaudeOptions, type ClaudeResult, isDeferred } from "./claude";
+import { type Claude, isDeferred } from "./claude";
 import { startCron } from "./cron";
 import { createLogger } from "./logger";
-import { type ClaudeResponse, createOrchestrator, type OrchestratorRequest } from "./orchestrator";
+import { type ClaudeResponse, Orchestrator, type OrchestratorRequest } from "./orchestrator";
 import { Queue } from "./queue";
 import { createBot, downloadFile, sendFile, sendResponse } from "./telegram";
 
@@ -15,7 +15,7 @@ export interface AppConfig {
   workspace: string;
   model?: string;
   settingsDir?: string;
-  runClaude?: (options: ClaudeOptions) => Promise<ClaudeResult | ClaudeDeferredResult>;
+  claude?: Claude;
 }
 
 export function requireEnv(name: string): string {
@@ -30,11 +30,11 @@ export function requireEnv(name: string): string {
 export function createApp(config: AppConfig) {
   const bot = createBot(config.botToken);
   const queue = new Queue<OrchestratorRequest>();
-  const orchestrator = createOrchestrator({
+  const orchestrator = new Orchestrator({
     model: config.model,
     workspace: config.workspace,
     settingsDir: config.settingsDir,
-    runClaude: config.runClaude,
+    claude: config.claude,
   });
   const background = createBackgroundManager(orchestrator);
 

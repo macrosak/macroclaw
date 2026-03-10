@@ -134,14 +134,3 @@ export class Claude {
     };
   }
 }
-
-// Deprecated: temporary compatibility shim, will be removed when orchestrator moves to Claude class
-export interface ClaudeOptions extends ClaudeRunOptions {
-  workspace: string;
-  jsonSchema: string;
-}
-
-export async function runClaude(options: ClaudeOptions): Promise<ClaudeResult | ClaudeDeferredResult> {
-  const claude = new Claude({ workspace: options.workspace, jsonSchema: options.jsonSchema });
-  return claude.run(options);
-}
