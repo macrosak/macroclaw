@@ -1,7 +1,7 @@
 
 import { BackgroundManager } from "./background";
 import { type Claude, isDeferred } from "./claude";
-import { startCron } from "./cron";
+import { CronScheduler } from "./cron";
 import { createLogger } from "./logger";
 import { type ClaudeResponse, Orchestrator, type OrchestratorRequest } from "./orchestrator";
 import { Queue } from "./queue";
@@ -182,7 +182,8 @@ export function createApp(config: AppConfig) {
     queue,
     start() {
       log.info("Starting macroclaw...");
-      startCron(config.workspace, queue);
+      const cron = new CronScheduler(config.workspace, queue);
+      cron.start();
       bot.api.setMyCommands([
         { command: "chatid", description: "Show current chat ID" },
         { command: "session", description: "Show current session ID" },

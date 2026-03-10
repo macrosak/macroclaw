@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { startCron } from "./cron";
+import { CronScheduler } from "./cron";
 
 const TEST_DIR = join(import.meta.dir, "..", ".test-workspace-cron");
 const CRON_DIR = join(TEST_DIR, ".macroclaw");
@@ -41,15 +41,16 @@ afterEach(() => {
   rmSync(TEST_DIR, { recursive: true, force: true });
 });
 
-describe("startCron", () => {
+describe("CronScheduler", () => {
   it("pushes matching cron job with name in prefix", () => {
     writeCronConfig({
       jobs: [{ name: "test-job", cron: currentMinuteCron(), prompt: "do something" }],
     });
 
     const queue = makeQueue();
-    const stop = startCron(TEST_DIR, queue);
-    stop();
+    const cron = new CronScheduler(TEST_DIR, queue);
+    cron.start();
+    cron.stop();
 
     expect(queue.push).toHaveBeenCalledWith({
       type: "cron",
@@ -65,8 +66,9 @@ describe("startCron", () => {
     });
 
     const queue = makeQueue();
-    const stop = startCron(TEST_DIR, queue);
-    stop();
+    const cron = new CronScheduler(TEST_DIR, queue);
+    cron.start();
+    cron.stop();
 
     expect(queue.push).not.toHaveBeenCalled();
   });
@@ -75,8 +77,9 @@ describe("startCron", () => {
     rmSync(CRON_FILE, { force: true });
 
     const queue = makeQueue();
-    const stop = startCron(TEST_DIR, queue);
-    stop();
+    const cron = new CronScheduler(TEST_DIR, queue);
+    cron.start();
+    cron.stop();
 
     expect(queue.push).not.toHaveBeenCalled();
   });
@@ -85,8 +88,9 @@ describe("startCron", () => {
     writeFileSync(CRON_FILE, "not json{{{");
 
     const queue = makeQueue();
-    const stop = startCron(TEST_DIR, queue);
-    stop();
+    const cron = new CronScheduler(TEST_DIR, queue);
+    cron.start();
+    cron.stop();
 
     expect(queue.push).not.toHaveBeenCalled();
   });
@@ -95,8 +99,9 @@ describe("startCron", () => {
     writeCronConfig({ jobs: "not-array" });
 
     const queue = makeQueue();
-    const stop = startCron(TEST_DIR, queue);
-    stop();
+    const cron = new CronScheduler(TEST_DIR, queue);
+    cron.start();
+    cron.stop();
 
     expect(queue.push).not.toHaveBeenCalled();
   });
@@ -110,8 +115,9 @@ describe("startCron", () => {
     });
 
     const queue = makeQueue();
-    const stop = startCron(TEST_DIR, queue);
-    stop();
+    const cron = new CronScheduler(TEST_DIR, queue);
+    cron.start();
+    cron.stop();
 
     expect(queue.push).toHaveBeenCalledTimes(1);
     expect(queue.push).toHaveBeenCalledWith({
@@ -122,14 +128,13 @@ describe("startCron", () => {
     });
   });
 
-  it("returns a cleanup function that clears the interval", () => {
+  it("stop clears the interval", () => {
     writeCronConfig({ jobs: [] });
 
     const queue = makeQueue();
-    const stop = startCron(TEST_DIR, queue);
-
-    expect(typeof stop).toBe("function");
-    stop(); // should not throw
+    const cron = new CronScheduler(TEST_DIR, queue);
+    cron.start();
+    cron.stop(); // should not throw
   });
 
   it("only evaluates once per minute", () => {
@@ -138,15 +143,17 @@ describe("startCron", () => {
     });
 
     const queue = makeQueue();
-    const stop = startCron(TEST_DIR, queue);
-    stop();
+    const cron = new CronScheduler(TEST_DIR, queue);
+    cron.start();
+    cron.stop();
 
     expect(queue.push).toHaveBeenCalledTimes(1);
 
     // Start again with a new instance — the lastMinute tracker is per-instance
     const queue2 = makeQueue();
-    const stop2 = startCron(TEST_DIR, queue2);
-    stop2();
+    const cron2 = new CronScheduler(TEST_DIR, queue2);
+    cron2.start();
+    cron2.stop();
 
     expect(queue2.push).toHaveBeenCalledTimes(1);
   });
@@ -160,8 +167,9 @@ describe("startCron", () => {
     });
 
     const queue = makeQueue();
-    const stop = startCron(TEST_DIR, queue);
-    stop();
+    const cron = new CronScheduler(TEST_DIR, queue);
+    cron.start();
+    cron.stop();
 
     expect(queue.push).toHaveBeenCalledTimes(2);
     expect(queue.push).toHaveBeenCalledWith({ type: "cron", name: "first", prompt: "first", model: undefined });
@@ -174,8 +182,9 @@ describe("startCron", () => {
     });
 
     const queue = makeQueue();
-    const stop = startCron(TEST_DIR, queue);
-    stop();
+    const cron = new CronScheduler(TEST_DIR, queue);
+    cron.start();
+    cron.stop();
 
     expect(queue.push).toHaveBeenCalledWith({
       type: "cron",
@@ -194,8 +203,9 @@ describe("startCron", () => {
     });
 
     const queue = makeQueue();
-    const stop = startCron(TEST_DIR, queue);
-    stop();
+    const cron = new CronScheduler(TEST_DIR, queue);
+    cron.start();
+    cron.stop();
 
     expect(queue.push).toHaveBeenCalledTimes(2);
 
@@ -210,8 +220,9 @@ describe("startCron", () => {
     });
 
     const queue = makeQueue();
-    const stop = startCron(TEST_DIR, queue);
-    stop();
+    const cron = new CronScheduler(TEST_DIR, queue);
+    cron.start();
+    cron.stop();
 
     const updated = readCronConfig();
     expect(updated.jobs).toHaveLength(1);
@@ -224,8 +235,9 @@ describe("startCron", () => {
     });
 
     const queue = makeQueue();
-    const stop = startCron(TEST_DIR, queue);
-    stop();
+    const cron = new CronScheduler(TEST_DIR, queue);
+    cron.start();
+    cron.stop();
 
     const updated = readCronConfig();
     expect(updated.jobs).toHaveLength(1);
@@ -242,8 +254,9 @@ describe("startCron", () => {
     chmodSync(CRON_FILE, 0o444);
 
     const queue = makeQueue();
-    const stop = startCron(TEST_DIR, queue);
-    stop();
+    const cron = new CronScheduler(TEST_DIR, queue);
+    cron.start();
+    cron.stop();
 
     chmodSync(CRON_FILE, 0o644);
 
@@ -256,8 +269,9 @@ describe("startCron", () => {
     });
 
     const queue = makeQueue();
-    const stop = startCron(TEST_DIR, queue);
-    stop();
+    const cron = new CronScheduler(TEST_DIR, queue);
+    cron.start();
+    cron.stop();
 
     // File should remain unchanged (job still present since it didn't fire)
     const updated = readCronConfig();

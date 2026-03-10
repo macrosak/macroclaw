@@ -26,21 +26,40 @@ interface Queue {
 
 const TICK_INTERVAL = 10_000; // 10 seconds
 
-export function startCron(workspace: string, queue: Queue): () => void {
-  let lastMinute = -1;
-  const cronPath = join(workspace, ".macroclaw", "cron.json");
+export class CronScheduler {
+  #lastMinute = -1;
+  #cronPath: string;
+  #queue: Queue;
+  #timer: Timer | null = null;
 
-  const tick = () => {
+  constructor(workspace: string, queue: Queue) {
+    this.#cronPath = join(workspace, ".macroclaw", "cron.json");
+    this.#queue = queue;
+  }
+
+  start(): void {
+    this.#tick();
+    this.#timer = setInterval(() => this.#tick(), TICK_INTERVAL);
+  }
+
+  stop(): void {
+    if (this.#timer) {
+      clearInterval(this.#timer);
+      this.#timer = null;
+    }
+  }
+
+  #tick(): void {
     const now = new Date();
     const currentMinute = now.getMinutes() + now.getHours() * 60 + now.getDate() * 1440 + now.getMonth() * 43200;
 
     // Only evaluate once per minute
-    if (currentMinute === lastMinute) return;
-    lastMinute = currentMinute;
+    if (currentMinute === this.#lastMinute) return;
+    this.#lastMinute = currentMinute;
 
     let config: CronConfig;
     try {
-      const raw = readFileSync(cronPath, "utf-8");
+      const raw = readFileSync(this.#cronPath, "utf-8");
       const parsed = cronConfigSchema.safeParse(JSON.parse(raw));
       if (!parsed.success) {
         log.warn("cron.json: 'jobs' is not an array");
@@ -64,7 +83,7 @@ export function startCron(workspace: string, queue: Queue): () => void {
         // Match if the previous occurrence is within the current minute
         if (diff < 60_000) {
           log.debug({ name: job.name, cron: job.cron }, "Cron job triggered");
-          queue.push({
+          this.#queue.push({
             type: "cron",
             name: job.name,
             prompt: job.prompt,
@@ -85,15 +104,10 @@ export function startCron(workspace: string, queue: Queue): () => void {
         config.jobs.splice(firedNonRecurring[i], 1);
       }
       try {
-        writeFileSync(cronPath, `${JSON.stringify(config, null, 2)}\n`);
+        writeFileSync(this.#cronPath, `${JSON.stringify(config, null, 2)}\n`);
       } catch (err) {
         log.warn({ err: err instanceof Error ? err.message : err }, "Failed to write cron.json");
       }
     }
-  };
-
-  tick();
-  const timer = setInterval(tick, TICK_INTERVAL);
-
-  return () => clearInterval(timer);
+  }
 }
