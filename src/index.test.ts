@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { existsSync, rmSync } from "node:fs";
 import type { Claude, ClaudeDeferredResult, ClaudeResult, ClaudeRunOptions } from "./claude";
-import { type AppConfig, createApp, requireEnv } from "./index";
+import { App, type AppConfig, requireEnv } from "./index";
 import { saveSettings } from "./settings";
 
 // Mock Grammy Bot
@@ -78,15 +78,15 @@ function makeConfig(overrides?: Partial<AppConfig>): AppConfig {
   };
 }
 
-describe("createApp", () => {
+describe("App", () => {
   it("creates bot and queue", () => {
-    const app = createApp(makeConfig());
+    const app = new App(makeConfig());
     expect(app.bot).toBeDefined();
     expect(app.queue).toBeDefined();
   });
 
   it("registers message:text, message:photo, message:document, and callback_query:data handlers", () => {
-    const app = createApp(makeConfig());
+    const app = new App(makeConfig());
     const bot = app.bot as any;
     expect(bot.filterHandlers.has("message:text")).toBe(true);
     expect(bot.filterHandlers.has("message:photo")).toBe(true);
@@ -95,7 +95,7 @@ describe("createApp", () => {
   });
 
   it("registers chatid, session, and bg commands", () => {
-    const app = createApp(makeConfig());
+    const app = new App(makeConfig());
     const bot = app.bot as any;
     expect(bot.commandHandlers.has("chatid")).toBe(true);
     expect(bot.commandHandlers.has("session")).toBe(true);
@@ -103,14 +103,14 @@ describe("createApp", () => {
   });
 
   it("registers error handler", () => {
-    const app = createApp(makeConfig());
+    const app = new App(makeConfig());
     const bot = app.bot as any;
     expect(bot.errorHandler).not.toBeNull();
   });
 
   it("generates new session ID when settings is empty", () => {
     if (existsSync(tmpSettingsDir)) rmSync(tmpSettingsDir, { recursive: true });
-    const app = createApp(makeConfig());
+    const app = new App(makeConfig());
     const bot = app.bot as any;
 
     const ctx = { reply: mock(() => {}) };
@@ -122,7 +122,7 @@ describe("createApp", () => {
   describe("message handler", () => {
     it("queues messages from authorized chat", async () => {
       const config = makeConfig();
-      const app = createApp(config);
+      const app = new App(config);
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:text")![0];
 
@@ -136,7 +136,7 @@ describe("createApp", () => {
 
     it("ignores messages from unauthorized chats", async () => {
       const config = makeConfig();
-      const app = createApp(config);
+      const app = new App(config);
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:text")![0];
 
@@ -150,7 +150,7 @@ describe("createApp", () => {
       const config = makeConfig({
         claude: mockClaude(async (): Promise<ClaudeResult> => successResult({ action: "send", message: "", actionReason: "empty" })),
       });
-      const app = createApp(config);
+      const app = new App(config);
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:text")![0];
 
@@ -166,7 +166,7 @@ describe("createApp", () => {
       const config = makeConfig({
         claude: mockClaude(async (): Promise<ClaudeResult> => successResult({ action: "silent", actionReason: "no new results" })),
       });
-      const app = createApp(config);
+      const app = new App(config);
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:text")![0];
 
@@ -192,7 +192,7 @@ describe("createApp", () => {
           return successResult({ action: "send", message: "research result", actionReason: "done" });
         }),
       });
-      const app = createApp(config);
+      const app = new App(config);
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:text")![0];
 
@@ -224,7 +224,7 @@ describe("createApp", () => {
           return successResult({ action: "send", message: "done", actionReason: "ok" });
         }),
       });
-      const app = createApp(config);
+      const app = new App(config);
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:text")![0];
 
@@ -238,7 +238,7 @@ describe("createApp", () => {
 
     it("does not treat bg: prefix as special", async () => {
       const config = makeConfig();
-      const app = createApp(config);
+      const app = new App(config);
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:text")![0];
 
@@ -251,7 +251,7 @@ describe("createApp", () => {
 
     it("passes cron system prompt for cron messages", async () => {
       const config = makeConfig();
-      const app = createApp(config);
+      const app = new App(config);
 
       app.queue.push({ type: "cron", name: "daily-check", prompt: "Check for updates" });
       await new Promise((r) => setTimeout(r, 50));
@@ -264,7 +264,7 @@ describe("createApp", () => {
 
     it("passes background result system prompt for background messages", async () => {
       const config = makeConfig();
-      const app = createApp(config);
+      const app = new App(config);
 
       app.queue.push({ type: "background", name: "research", result: "Here are the results" });
       await new Promise((r) => setTimeout(r, 50));
@@ -283,7 +283,7 @@ describe("createApp", () => {
           ({ deferred: true, sessionId: "test-session", completion }),
         ),
       });
-      const app = createApp(config);
+      const app = new App(config);
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:text")![0];
 
@@ -311,7 +311,7 @@ describe("createApp", () => {
           ({ deferred: true, sessionId: "test-session", completion }),
         ),
       });
-      const app = createApp(config);
+      const app = new App(config);
       const bot = app.bot as any;
 
       app.queue.push({ type: "cron", name: "daily-check", prompt: "Check for updates" });
@@ -330,7 +330,7 @@ describe("createApp", () => {
 
     it("applies background result directly when session IDs match", async () => {
       const config = makeConfig();
-      const app = createApp(config);
+      const app = new App(config);
       const bot = app.bot as any;
 
       // Push a background result with matching sessionId
@@ -346,7 +346,7 @@ describe("createApp", () => {
 
     it("processes background result through orchestrator when session IDs differ", async () => {
       const config = makeConfig();
-      const app = createApp(config);
+      const app = new App(config);
 
       app.queue.push({ type: "background", name: "task", result: "indirect result", sessionId: "different-session" });
       await new Promise((r) => setTimeout(r, 50));
@@ -366,7 +366,7 @@ describe("createApp", () => {
           return successResult({ action: "send", message: "forked response", actionReason: "ok" });
         }),
       });
-      const app = createApp(config);
+      const app = new App(config);
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:text")![0];
 
@@ -392,7 +392,7 @@ describe("createApp", () => {
           throw new ClaudeProcessError(1, "spawn failed");
         }),
       });
-      const app = createApp(config);
+      const app = new App(config);
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:text")![0];
 
@@ -412,7 +412,7 @@ describe("createApp", () => {
       ) as any;
 
       const config = makeConfig();
-      const app = createApp(config);
+      const app = new App(config);
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:photo")![0];
 
@@ -443,7 +443,7 @@ describe("createApp", () => {
       ) as any;
 
       const config = makeConfig();
-      const app = createApp(config);
+      const app = new App(config);
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:document")![0];
 
@@ -466,7 +466,7 @@ describe("createApp", () => {
 
     it("queues error message when photo download fails", async () => {
       const config = makeConfig();
-      const app = createApp(config);
+      const app = new App(config);
       const bot = app.bot as any;
       bot.api.getFile = mock(async () => { throw new Error("too large"); });
       const handler = bot.filterHandlers.get("message:photo")![0];
@@ -484,7 +484,7 @@ describe("createApp", () => {
 
     it("queues error message when document download fails", async () => {
       const config = makeConfig();
-      const app = createApp(config);
+      const app = new App(config);
       const bot = app.bot as any;
       bot.api.getFile = mock(async () => { throw new Error("too large"); });
       const handler = bot.filterHandlers.get("message:document")![0];
@@ -502,7 +502,7 @@ describe("createApp", () => {
 
     it("ignores photo messages from unauthorized chats", async () => {
       const config = makeConfig();
-      const app = createApp(config);
+      const app = new App(config);
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:photo")![0];
 
@@ -529,7 +529,7 @@ describe("createApp", () => {
           }),
         ),
       });
-      const app = createApp(config);
+      const app = new App(config);
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:text")![0];
 
@@ -554,7 +554,7 @@ describe("createApp", () => {
           }),
         ),
       });
-      const app = createApp(config);
+      const app = new App(config);
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:text")![0];
 
@@ -568,7 +568,7 @@ describe("createApp", () => {
 
     it("handles callback_query by pushing button event to queue", async () => {
       const config = makeConfig();
-      const app = createApp(config);
+      const app = new App(config);
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("callback_query:data")![0];
 
@@ -591,7 +591,7 @@ describe("createApp", () => {
 
     it("ignores callback_query from unauthorized chats", async () => {
       const config = makeConfig();
-      const app = createApp(config);
+      const app = new App(config);
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("callback_query:data")![0];
 
@@ -620,7 +620,7 @@ describe("createApp", () => {
           }),
         ),
       });
-      const app = createApp(config);
+      const app = new App(config);
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:text")![0];
 
@@ -634,7 +634,7 @@ describe("createApp", () => {
 
   describe("commands", () => {
     it("/chatid replies with chat ID", () => {
-      const app = createApp(makeConfig());
+      const app = new App(makeConfig());
       const bot = app.bot as any;
       const handler = bot.commandHandlers.get("chatid")!;
       const ctx = { chat: { id: 12345 }, reply: mock(() => {}) };
@@ -644,7 +644,7 @@ describe("createApp", () => {
     });
 
     it("/session replies with session ID", () => {
-      const app = createApp(makeConfig());
+      const app = new App(makeConfig());
       const bot = app.bot as any;
       const handler = bot.commandHandlers.get("session")!;
       const ctx = { reply: mock(() => {}) };
@@ -654,7 +654,7 @@ describe("createApp", () => {
     });
 
     it("/bg shows no agents when none are running", () => {
-      const app = createApp(makeConfig());
+      const app = new App(makeConfig());
       const bot = app.bot as any;
       const handler = bot.commandHandlers.get("bg")!;
       const ctx = { chat: { id: 12345 }, match: "", reply: mock(() => {}) };
@@ -667,7 +667,7 @@ describe("createApp", () => {
       const config = makeConfig({
         claude: mockClaude(() => new Promise<ClaudeResult>(() => {})),
       });
-      const app = createApp(config);
+      const app = new App(config);
       const bot = app.bot as any;
       const handler = bot.commandHandlers.get("bg")!;
       const ctx = { chat: { id: 12345 }, match: "research pricing", reply: mock(() => {}) };
@@ -683,7 +683,7 @@ describe("createApp", () => {
       const config = makeConfig({
         claude: mockClaude(() => new Promise<ClaudeResult>(() => {})),
       });
-      const app = createApp(config);
+      const app = new App(config);
       const bot = app.bot as any;
       const bgHandler = bot.commandHandlers.get("bg")!;
 
@@ -704,7 +704,7 @@ describe("createApp", () => {
 
   describe("error handler", () => {
     it("does not throw on bot errors", () => {
-      const app = createApp(makeConfig());
+      const app = new App(makeConfig());
       const bot = app.bot as any;
 
       expect(() => bot.errorHandler({ message: "connection lost" })).not.toThrow();
@@ -713,12 +713,12 @@ describe("createApp", () => {
 
   describe("start", () => {
     it("starts the bot and logs info", () => {
-      const app = createApp(makeConfig());
+      const app = new App(makeConfig());
       expect(() => app.start()).not.toThrow();
     });
 
     it("registers commands with Telegram on start", () => {
-      const app = createApp(makeConfig());
+      const app = new App(makeConfig());
       const bot = app.bot as any;
 
       app.start();

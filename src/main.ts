@@ -1,6 +1,6 @@
 import { cpSync, existsSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { type AppConfig, createApp, requireEnv } from "./index";
+import { App, type AppConfig, requireEnv } from "./index";
 import { createLogger } from "./logger";
 
 const log = createLogger("main");
@@ -29,4 +29,4 @@ const config: AppConfig = {
   model: process.env.MODEL,
 };
 
-createApp(config).start();
+new App(config).start();
