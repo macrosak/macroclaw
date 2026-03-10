@@ -171,19 +171,7 @@ describe("createOrchestrator", () => {
       expect(result.actionReason).toBe("validation-failed");
     });
 
-    it("falls back to parsing result as JSON when structured_output is null", async () => {
-      const jsonResult = JSON.stringify({ action: "send", message: "parsed", actionReason: "ok" });
-      const claude = mockClaude({ structuredOutput: null, result: jsonResult });
-      const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
-
-      const result = await orch.processRequest({ type: "user", message: "hi" });
-
-      expect(result.action).toBe("send");
-      expect(result.message).toBe("parsed");
-      expect(result.actionReason).toBe("ok");
-    });
-
-    it("forwards raw result text when structured_output is null and result is not JSON", async () => {
+    it("sends result with prefix when structured_output is missing", async () => {
       const claude = mockClaude({ structuredOutput: null, result: "Claude said this" });
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
 
@@ -191,30 +179,16 @@ describe("createOrchestrator", () => {
 
       expect(result.actionReason).toBe("no-structured-output");
       expect(result.action).toBe("send");
-      expect(result.message).toBe("Claude said this");
+      expect(result.message).toBe("[No structured output] Claude said this");
     });
 
-    it("parses <StructuredOutput> XML when structured_output is null and result is XML", async () => {
-      const xml = `<StructuredOutput>\n<parameter name="action">silent</parameter>\n<parameter name="actionReason">No notification needed</parameter>\n</StructuredOutput>`;
-      const claude = mockClaude({ structuredOutput: null, result: xml });
+    it("escapes HTML in fallback result to prevent Telegram parse errors", async () => {
+      const claude = mockClaude({ structuredOutput: null, result: "<b>bold</b> & stuff" });
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
 
       const result = await orch.processRequest({ type: "user", message: "hi" });
 
-      expect(result.action).toBe("silent");
-      expect(result.actionReason).toBe("No notification needed");
-    });
-
-    it("parses <StructuredOutput> XML with JSON array values", async () => {
-      const xml = `<StructuredOutput>\n<parameter name="action">send</parameter>\n<parameter name="actionReason">reply</parameter>\n<parameter name="message">Hello</parameter>\n<parameter name="buttons">[[{"label":"Yes"},{"label":"No"}]]</parameter>\n</StructuredOutput>`;
-      const claude = mockClaude({ structuredOutput: null, result: xml });
-      const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
-
-      const result = await orch.processRequest({ type: "user", message: "hi" });
-
-      expect(result.action).toBe("send");
-      expect(result.message).toBe("Hello");
-      expect(result.buttons).toEqual([[{ label: "Yes" }, { label: "No" }]]);
+      expect(result.message).toBe("[No structured output] &lt;b&gt;bold&lt;/b&gt; &amp; stuff");
     });
 
     it("returns [No output] when both structured_output and result are missing", async () => {

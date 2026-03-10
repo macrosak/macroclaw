@@ -43,25 +43,8 @@ export type OrchestratorRequest =
   | { type: "bg-task"; name: string; prompt: string; model?: string }
   | { type: "button"; label: string };
 
-// --- XML fallback parser ---
-
-function parseStructuredOutputXml(text: string): Record<string, unknown> | null {
-  const match = text.match(/<StructuredOutput>([\s\S]*?)<\/StructuredOutput>/i);
-  if (!match) return null;
-
-  const result: Record<string, unknown> = {};
-  const paramRegex = /<parameter\s+name="([^"]+)">([\s\S]*?)<\/parameter>/gi;
-  for (const paramMatch of match[1].matchAll(paramRegex)) {
-    const [, name, value] = paramMatch;
-    // Try to parse JSON values (arrays, objects, booleans)
-    try {
-      result[name] = JSON.parse(value);
-    } catch {
-      result[name] = value;
-    }
-  }
-
-  return Object.keys(result).length > 0 ? result : null;
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 // --- Orchestrator ---
@@ -184,27 +167,10 @@ export function createOrchestrator(config: OrchestratorConfig) {
         return validateResponse(result.structuredOutput);
       }
 
-      // Fallback: when tools are used, structured_output may be missing.
-      // Try parsing result as JSON, then XML, otherwise wrap raw text as a send response.
-      if (result.result) {
-        try {
-          const parsed = JSON.parse(result.result);
-          log.warn("structured_output missing, parsed result as JSON fallback");
-          return validateResponse(parsed);
-        } catch {
-          // Try parsing <StructuredOutput> XML tags
-          const xmlParsed = parseStructuredOutputXml(result.result);
-          if (xmlParsed) {
-            log.warn("structured_output missing, parsed XML fallback");
-            return validateResponse(xmlParsed);
-          }
-          // Not JSON or XML — treat as plain text response
-          log.warn("structured_output missing, using raw result text");
-          return { action: "send", message: result.result, actionReason: "no-structured-output" };
-        }
-      }
-      log.error("No structured_output and no result in response");
-      return { action: "send", message: "[No output]", actionReason: "no-structured-output" };
+      log.error({ hasResult: !!result.result }, "No structured_output in response");
+      const raw = result.result ? escapeHtml(result.result) : "";
+      const msg = raw ? `[No structured output] ${raw}` : "[No output]";
+      return { action: "send", message: msg, actionReason: "no-structured-output" };
     } catch (err) {
       if (err instanceof ClaudeTimeoutError) {
         return { action: "send", message: `[Error] Claude process timed out after ${Math.round(err.timeoutMs / 1000)}s.`, actionReason: "timeout" };
