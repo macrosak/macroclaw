@@ -119,8 +119,8 @@ export class App {
     this.#bot.on("callback_query:data", async (ctx) => {
       await ctx.answerCallbackQuery();
       const label = ctx.callbackQuery.data;
-      const original = ctx.callbackQuery.message?.text ?? "";
-      await ctx.editMessageText(`${original}\n\n<i>Selected: ${label}</i>`, { parse_mode: "HTML" });
+      if (label === "_noop") return;
+      await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [[{ text: `✓ ${label}`, callback_data: "_noop" }]] } });
       if (ctx.chat?.id.toString() !== this.#config.authorizedChatId) return;
       log.debug({ label }, "Button clicked");
       this.#orchestrator.handleButton(label);

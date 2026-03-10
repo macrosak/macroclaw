@@ -368,14 +368,14 @@ describe("App", () => {
         chat: { id: 12345 },
         callbackQuery: { data: "Yes", message: { text: "Choose one" } },
         answerCallbackQuery: mock(async () => {}),
-        editMessageText: mock(async () => {}),
+        editMessageReplyMarkup: mock(async () => {}),
       };
 
       await handler(ctx);
       await new Promise((r) => setTimeout(r, 50));
 
       expect(ctx.answerCallbackQuery).toHaveBeenCalled();
-      expect(ctx.editMessageText).toHaveBeenCalledWith("Choose one\n\n<i>Selected: Yes</i>", { parse_mode: "HTML" });
+      expect(ctx.editMessageReplyMarkup).toHaveBeenCalledWith({ reply_markup: { inline_keyboard: [[{ text: "✓ Yes", callback_data: "_noop" }]] } });
       expect((config.claude as any).run).toHaveBeenCalled();
       const opts = (config.claude as any).run.mock.calls[0][0] as ClaudeRunOptions;
       expect(opts.prompt).toBe('The user clicked MessageButton: "Yes"');
@@ -391,7 +391,7 @@ describe("App", () => {
         chat: { id: 99999 },
         callbackQuery: { data: "Yes", message: { text: "Choose" } },
         answerCallbackQuery: mock(async () => {}),
-        editMessageText: mock(async () => {}),
+        editMessageReplyMarkup: mock(async () => {}),
       };
 
       await handler(ctx);
