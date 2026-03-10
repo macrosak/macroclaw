@@ -1,14 +1,14 @@
 import { describe, expect, it } from "bun:test";
-import { createQueue } from "./queue";
+import { Queue } from "./queue";
 
 interface TestItem {
   value: string;
   extra?: number;
 }
 
-describe("createQueue", () => {
+describe("Queue", () => {
   it("processes items in FIFO order", async () => {
-    const queue = createQueue<TestItem>();
+    const queue = new Queue<TestItem>();
     const results: string[] = [];
     queue.setHandler(async (item) => {
       results.push(item.value);
@@ -24,7 +24,7 @@ describe("createQueue", () => {
   });
 
   it("processes queued items serially", async () => {
-    const queue = createQueue<TestItem>();
+    const queue = new Queue<TestItem>();
     const order: string[] = [];
     let resolveSecond: (() => void) | null = null;
 
@@ -54,14 +54,14 @@ describe("createQueue", () => {
   });
 
   it("does nothing without a handler", async () => {
-    const queue = createQueue<TestItem>();
+    const queue = new Queue<TestItem>();
     queue.push({ value: "orphan" });
     await new Promise((r) => setTimeout(r, 10));
     expect(queue.length).toBe(1);
   });
 
   it("reports length correctly", () => {
-    const queue = createQueue<TestItem>();
+    const queue = new Queue<TestItem>();
     expect(queue.length).toBe(0);
     // No handler set, so items accumulate
     queue.push({ value: "a" });
@@ -70,7 +70,7 @@ describe("createQueue", () => {
   });
 
   it("reports isProcessing correctly", async () => {
-    const queue = createQueue<TestItem>();
+    const queue = new Queue<TestItem>();
     expect(queue.isProcessing).toBe(false);
 
     let resolve: (() => void) | null = null;
@@ -90,7 +90,7 @@ describe("createQueue", () => {
   });
 
   it("does not re-enter process when already processing", async () => {
-    const queue = createQueue<TestItem>();
+    const queue = new Queue<TestItem>();
     let callCount = 0;
     let resolve: (() => void) | null = null;
 
@@ -117,7 +117,7 @@ describe("createQueue", () => {
   });
 
   it("continues processing after handler throws", async () => {
-    const queue = createQueue<TestItem>();
+    const queue = new Queue<TestItem>();
     const results: string[] = [];
     queue.setHandler(async (item) => {
       if (item.value === "bad") throw new Error("handler failed");
@@ -136,7 +136,7 @@ describe("createQueue", () => {
   });
 
   it("passes all fields through in queue item", async () => {
-    const queue = createQueue<TestItem>();
+    const queue = new Queue<TestItem>();
     let received: TestItem | undefined;
     queue.setHandler(async (item) => {
       received = item;

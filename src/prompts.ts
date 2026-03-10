@@ -19,9 +19,9 @@ ${INTRO_MINIMAL}
 
 ## Message Formatting
 
-Your responses are sent via Telegram using HTML parse mode. \
-Use <b>, <i>, <code>, and <pre> tags for formatting when useful. \
-Escape literal <, >, and & characters as &lt;, &gt;, and &amp; in your output.
+Your message field is sent directly to Telegram with HTML parse mode. \
+Use <b>, <i>, <code>, and <pre> tags for formatting — write them as raw tags, not escaped. \
+Only escape &, <, > that appear in text content (outside tags) as &amp;, &lt;, &gt;.
 
 ## System Architecture
 

@@ -4,13 +4,7 @@
  */
 import { describe, expect, it } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { type ClaudeResult, isDeferred, runClaude } from "./claude";
-
-async function runClaudeSync(...args: Parameters<typeof runClaude>): Promise<ClaudeResult> {
-  const result = await runClaude(...args);
-  if (isDeferred(result)) throw new Error("Expected sync result, got deferred");
-  return result;
-}
+import { Claude, type ClaudeResult, isDeferred } from "./claude";
 
 const WORKSPACE = "/tmp/macroclaw-integration-test";
 const SIMPLE_SCHEMA = JSON.stringify({
@@ -49,15 +43,20 @@ const FULL_SCHEMA = JSON.stringify({
   additionalProperties: false,
 });
 
+async function runSync(claude: Claude, ...args: Parameters<Claude["run"]>): Promise<ClaudeResult> {
+  const result = await claude.run(...args);
+  if (isDeferred(result)) throw new Error("Expected sync result, got deferred");
+  return result;
+}
+
 describe("claude CLI structured output", () => {
   it("simple schema without system prompt", async () => {
-    const result = await runClaudeSync({
+    const claude = new Claude({ workspace: WORKSPACE, jsonSchema: SIMPLE_SCHEMA });
+    const result = await runSync(claude, {
       prompt: "Say hello",
       sessionFlag: "--session-id",
       sessionId: randomUUID(),
       model: "haiku",
-      workspace: WORKSPACE,
-      jsonSchema: SIMPLE_SCHEMA,
     });
 
     console.log("Simple (no sysprompt):", JSON.stringify(result, null, 2));
@@ -65,14 +64,13 @@ describe("claude CLI structured output", () => {
   }, 60_000);
 
   it("simple schema with system prompt", async () => {
-    const result = await runClaudeSync({
+    const claude = new Claude({ workspace: WORKSPACE, jsonSchema: SIMPLE_SCHEMA });
+    const result = await runSync(claude, {
       prompt: "Say hello",
       sessionFlag: "--session-id",
       sessionId: randomUUID(),
       model: "haiku",
-      workspace: WORKSPACE,
       systemPrompt: "You are a helpful assistant. This is a direct message from the user.",
-      jsonSchema: SIMPLE_SCHEMA,
     });
 
     console.log("Simple (with sysprompt):", JSON.stringify(result, null, 2));
@@ -80,14 +78,13 @@ describe("claude CLI structured output", () => {
   }, 60_000);
 
   it("full schema with system prompt", async () => {
-    const result = await runClaudeSync({
+    const claude = new Claude({ workspace: WORKSPACE, jsonSchema: FULL_SCHEMA });
+    const result = await runSync(claude, {
       prompt: "Say hello",
       sessionFlag: "--session-id",
       sessionId: randomUUID(),
       model: "haiku",
-      workspace: WORKSPACE,
       systemPrompt: "You are a helpful assistant. This is a direct message from the user.",
-      jsonSchema: FULL_SCHEMA,
     });
 
     console.log("Full (with sysprompt):", JSON.stringify(result, null, 2));
@@ -95,14 +92,14 @@ describe("claude CLI structured output", () => {
   }, 60_000);
 
   it("full schema with real system prompt and workspace", async () => {
-    const result = await runClaudeSync({
+    const workspace = process.env.MACROCLAW_WORKSPACE ?? WORKSPACE;
+    const claude = new Claude({ workspace, jsonSchema: FULL_SCHEMA });
+    const result = await runSync(claude, {
       prompt: "Say hello",
       sessionFlag: "--session-id",
       sessionId: randomUUID(),
       model: "sonnet",
-      workspace: process.env.MACROCLAW_WORKSPACE ?? WORKSPACE,
       systemPrompt: `You are an AI assistant running inside macroclaw. This is a direct message from the user.`,
-      jsonSchema: FULL_SCHEMA,
     });
 
     console.log("Full (real workspace):", JSON.stringify(result, null, 2));

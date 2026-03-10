@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { startCron } from "./cron";
+import { CronScheduler } from "./cron";
 
 const TEST_DIR = join(import.meta.dir, "..", ".test-workspace-cron");
 const CRON_DIR = join(TEST_DIR, ".macroclaw");
@@ -16,8 +16,8 @@ function readCronConfig() {
   return JSON.parse(readFileSync(CRON_FILE, "utf-8"));
 }
 
-function makeQueue() {
-  return { push: mock(() => {}) };
+function makeOnJob() {
+  return mock((_name: string, _prompt: string, _model?: string) => {});
 }
 
 // Build a cron expression that matches the current minute
@@ -41,64 +41,64 @@ afterEach(() => {
   rmSync(TEST_DIR, { recursive: true, force: true });
 });
 
-describe("startCron", () => {
-  it("pushes matching cron job with name in prefix", () => {
+describe("CronScheduler", () => {
+  it("calls onJob for matching cron job", () => {
     writeCronConfig({
       jobs: [{ name: "test-job", cron: currentMinuteCron(), prompt: "do something" }],
     });
 
-    const queue = makeQueue();
-    const stop = startCron(TEST_DIR, queue);
-    stop();
+    const onJob = makeOnJob();
+    const cron = new CronScheduler(TEST_DIR, { onJob });
+    cron.start();
+    cron.stop();
 
-    expect(queue.push).toHaveBeenCalledWith({
-      type: "cron",
-      name: "test-job",
-      prompt: "do something",
-      model: undefined,
-    });
+    expect(onJob).toHaveBeenCalledWith("test-job", "do something", undefined);
   });
 
-  it("does not push non-matching jobs", () => {
+  it("does not call onJob for non-matching jobs", () => {
     writeCronConfig({
       jobs: [{ name: "later", cron: nonMatchingCron(), prompt: "not now" }],
     });
 
-    const queue = makeQueue();
-    const stop = startCron(TEST_DIR, queue);
-    stop();
+    const onJob = makeOnJob();
+    const cron = new CronScheduler(TEST_DIR, { onJob });
+    cron.start();
+    cron.stop();
 
-    expect(queue.push).not.toHaveBeenCalled();
+    expect(onJob).not.toHaveBeenCalled();
   });
 
   it("silently skips when cron.json does not exist", () => {
     rmSync(CRON_FILE, { force: true });
 
-    const queue = makeQueue();
-    const stop = startCron(TEST_DIR, queue);
-    stop();
+    const onJob = makeOnJob();
+    const cron = new CronScheduler(TEST_DIR, { onJob });
+    cron.start();
+    cron.stop();
 
-    expect(queue.push).not.toHaveBeenCalled();
+    expect(onJob).not.toHaveBeenCalled();
   });
 
-  it("does not push on malformed JSON", () => {
+  it("does not call onJob on malformed JSON", () => {
     writeFileSync(CRON_FILE, "not json{{{");
 
-    const queue = makeQueue();
-    const stop = startCron(TEST_DIR, queue);
-    stop();
+    const onJob = makeOnJob();
+    const cron = new CronScheduler(TEST_DIR, { onJob });
+    cron.start();
+    cron.stop();
 
-    expect(queue.push).not.toHaveBeenCalled();
+    expect(onJob).not.toHaveBeenCalled();
   });
 
-  it("does not push when jobs is not an array", () => {
+  it("does not call onJob when jobs is not an array", () => {
     writeCronConfig({ jobs: "not-array" });
 
-    const queue = makeQueue();
-    const stop = startCron(TEST_DIR, queue);
-    stop();
+    const onJob = makeOnJob();
+    const cron = new CronScheduler(TEST_DIR, { onJob });
+    cron.start();
+    cron.stop();
 
-    expect(queue.push).not.toHaveBeenCalled();
+    expect(onJob).not.toHaveBeenCalled();
   });
 
   it("skips invalid cron expression and processes valid jobs", () => {
@@ -109,27 +109,22 @@ describe("startCron", () => {
       ],
     });
 
-    const queue = makeQueue();
-    const stop = startCron(TEST_DIR, queue);
-    stop();
+    const onJob = makeOnJob();
+    const cron = new CronScheduler(TEST_DIR, { onJob });
+    cron.start();
+    cron.stop();
 
-    expect(queue.push).toHaveBeenCalledTimes(1);
-    expect(queue.push).toHaveBeenCalledWith({
-      type: "cron",
-      name: "good",
-      prompt: "good",
-      model: undefined,
-    });
+    expect(onJob).toHaveBeenCalledTimes(1);
+    expect(onJob).toHaveBeenCalledWith("good", "good", undefined);
   });
 
-  it("returns a cleanup function that clears the interval", () => {
+  it("stop clears the interval", () => {
     writeCronConfig({ jobs: [] });
 
-    const queue = makeQueue();
-    const stop = startCron(TEST_DIR, queue);
-
-    expect(typeof stop).toBe("function");
-    stop(); // should not throw
+    const onJob = makeOnJob();
+    const cron = new CronScheduler(TEST_DIR, { onJob });
+    cron.start();
+    cron.stop(); // should not throw
   });
 
   it("only evaluates once per minute", () => {
@@ -137,18 +132,20 @@ describe("startCron", () => {
       jobs: [{ name: "once", cron: currentMinuteCron(), prompt: "once" }],
     });
 
-    const queue = makeQueue();
-    const stop = startCron(TEST_DIR, queue);
-    stop();
+    const onJob = makeOnJob();
+    const cron = new CronScheduler(TEST_DIR, { onJob });
+    cron.start();
+    cron.stop();
 
-    expect(queue.push).toHaveBeenCalledTimes(1);
+    expect(onJob).toHaveBeenCalledTimes(1);
 
     // Start again with a new instance — the lastMinute tracker is per-instance
-    const queue2 = makeQueue();
-    const stop2 = startCron(TEST_DIR, queue2);
-    stop2();
+    const onJob2 = makeOnJob();
+    const cron2 = new CronScheduler(TEST_DIR, { onJob: onJob2 });
+    cron2.start();
+    cron2.stop();
 
-    expect(queue2.push).toHaveBeenCalledTimes(1);
+    expect(onJob2).toHaveBeenCalledTimes(1);
   });
 
   it("handles multiple matching jobs", () => {
@@ -159,30 +156,27 @@ describe("startCron", () => {
       ],
     });
 
-    const queue = makeQueue();
-    const stop = startCron(TEST_DIR, queue);
-    stop();
+    const onJob = makeOnJob();
+    const cron = new CronScheduler(TEST_DIR, { onJob });
+    cron.start();
+    cron.stop();
 
-    expect(queue.push).toHaveBeenCalledTimes(2);
-    expect(queue.push).toHaveBeenCalledWith({ type: "cron", name: "first", prompt: "first", model: undefined });
-    expect(queue.push).toHaveBeenCalledWith({ type: "cron", name: "second", prompt: "second", model: undefined });
+    expect(onJob).toHaveBeenCalledTimes(2);
+    expect(onJob).toHaveBeenCalledWith("first", "first", undefined);
+    expect(onJob).toHaveBeenCalledWith("second", "second", undefined);
   });
 
-  it("passes model override through queue item", () => {
+  it("passes model override to onJob", () => {
     writeCronConfig({
       jobs: [{ name: "smart", cron: currentMinuteCron(), prompt: "think hard", model: "opus" }],
     });
 
-    const queue = makeQueue();
-    const stop = startCron(TEST_DIR, queue);
-    stop();
+    const onJob = makeOnJob();
+    const cron = new CronScheduler(TEST_DIR, { onJob });
+    cron.start();
+    cron.stop();
 
-    expect(queue.push).toHaveBeenCalledWith({
-      type: "cron",
-      name: "smart",
-      prompt: "think hard",
-      model: "opus",
-    });
+    expect(onJob).toHaveBeenCalledWith("smart", "think hard", "opus");
   });
 
   it("removes non-recurring job after it fires", () => {
@@ -193,11 +187,12 @@ describe("startCron", () => {
       ],
     });
 
-    const queue = makeQueue();
-    const stop = startCron(TEST_DIR, queue);
-    stop();
+    const onJob = makeOnJob();
+    const cron = new CronScheduler(TEST_DIR, { onJob });
+    cron.start();
+    cron.stop();
 
-    expect(queue.push).toHaveBeenCalledTimes(2);
+    expect(onJob).toHaveBeenCalledTimes(2);
 
     const updated = readCronConfig();
     expect(updated.jobs).toHaveLength(1);
@@ -209,9 +204,10 @@ describe("startCron", () => {
       jobs: [{ name: "keeper", cron: currentMinuteCron(), prompt: "stay" }],
     });
 
-    const queue = makeQueue();
-    const stop = startCron(TEST_DIR, queue);
-    stop();
+    const onJob = makeOnJob();
+    const cron = new CronScheduler(TEST_DIR, { onJob });
+    cron.start();
+    cron.stop();
 
     const updated = readCronConfig();
     expect(updated.jobs).toHaveLength(1);
@@ -223,9 +219,10 @@ describe("startCron", () => {
       jobs: [{ name: "explicit", cron: currentMinuteCron(), prompt: "stay", recurring: true }],
     });
 
-    const queue = makeQueue();
-    const stop = startCron(TEST_DIR, queue);
-    stop();
+    const onJob = makeOnJob();
+    const cron = new CronScheduler(TEST_DIR, { onJob });
+    cron.start();
+    cron.stop();
 
     const updated = readCronConfig();
     expect(updated.jobs).toHaveLength(1);
@@ -241,13 +238,14 @@ describe("startCron", () => {
     const { chmodSync } = require("node:fs");
     chmodSync(CRON_FILE, 0o444);
 
-    const queue = makeQueue();
-    const stop = startCron(TEST_DIR, queue);
-    stop();
+    const onJob = makeOnJob();
+    const cron = new CronScheduler(TEST_DIR, { onJob });
+    cron.start();
+    cron.stop();
 
     chmodSync(CRON_FILE, 0o644);
 
-    expect(queue.push).toHaveBeenCalledTimes(1);
+    expect(onJob).toHaveBeenCalledTimes(1);
   });
 
   it("does not write file when no non-recurring jobs fired", () => {
@@ -255,9 +253,10 @@ describe("startCron", () => {
       jobs: [{ name: "recurring", cron: nonMatchingCron(), prompt: "nope", recurring: false }],
     });
 
-    const queue = makeQueue();
-    const stop = startCron(TEST_DIR, queue);
-    stop();
+    const onJob = makeOnJob();
+    const cron = new CronScheduler(TEST_DIR, { onJob });
+    cron.start();
+    cron.stop();
 
     // File should remain unchanged (job still present since it didn't fire)
     const updated = readCronConfig();

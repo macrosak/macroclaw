@@ -1,13 +1,16 @@
 import { appendFile, mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { createLogger } from "./logger";
-import type { ClaudeResponse, OrchestratorRequest } from "./orchestrator";
 
 const log = createLogger("history");
 
+// Minimal types for history logging — intentionally kept broad to avoid coupling
+type HistoryRequest = { type: string; [key: string]: unknown };
+type HistoryResponse = { action: string; actionReason: string; [key: string]: unknown };
+
 type HistoryEntry =
-  | { ts: string; type: "prompt"; request: OrchestratorRequest }
-  | { ts: string; type: "result"; response: ClaudeResponse };
+  | { ts: string; type: "prompt"; request: HistoryRequest }
+  | { ts: string; type: "result"; response: HistoryResponse };
 
 const historyDir = resolve(process.env.HOME || "~", ".macroclaw", "history");
 
@@ -25,10 +28,10 @@ async function append(entry: HistoryEntry): Promise<void> {
   }
 }
 
-export async function logPrompt(request: OrchestratorRequest): Promise<void> {
+export async function logPrompt(request: HistoryRequest): Promise<void> {
   await append({ ts: new Date().toISOString(), type: "prompt", request });
 }
 
-export async function logResult(response: ClaudeResponse): Promise<void> {
+export async function logResult(response: HistoryResponse): Promise<void> {
   await append({ ts: new Date().toISOString(), type: "result", response });
 }

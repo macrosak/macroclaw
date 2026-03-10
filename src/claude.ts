@@ -2,15 +2,13 @@ import { createLogger } from "./logger";
 
 const log = createLogger("claude");
 
-export interface ClaudeOptions {
+export interface ClaudeRunOptions {
   prompt: string;
   sessionFlag: "--resume" | "--session-id";
   sessionId: string;
   forkSession?: boolean;
   model?: string;
-  workspace: string;
   systemPrompt?: string;
-  jsonSchema: string;
   timeoutMs?: number;
 }
 
@@ -77,52 +75,62 @@ async function awaitProcess(proc: { exited: Promise<number>; stdout: ReadableStr
   return parseEnvelope(stdout);
 }
 
-export async function runClaude(options: ClaudeOptions): Promise<ClaudeResult | ClaudeDeferredResult> {
-  // Strip CLAUDECODE env var so nested claude sessions are allowed
-  const env = { ...process.env };
-  delete env.CLAUDECODE;
+export class Claude {
+  #workspace: string;
+  #jsonSchema: string;
 
-  const args = ["claude", "-p", options.sessionFlag, options.sessionId, "--output-format", "json", "--json-schema", options.jsonSchema];
-  if (options.forkSession) args.push("--fork-session");
-  if (options.model) args.push("--model", options.model);
-  if (options.systemPrompt) args.push("--append-system-prompt", options.systemPrompt);
-  args.push(options.prompt);
-
-  log.debug(
-    {
-      model: options.model,
-      sessionFlag: options.sessionFlag,
-      sessionId: options.sessionId,
-      promptLen: options.prompt.length,
-      hasSystemPrompt: !!options.systemPrompt,
-    },
-    "Sending to Claude",
-  );
-
-  const proc = Bun.spawn(args, {
-    cwd: options.workspace,
-    env,
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-
-  const completion = awaitProcess(proc);
-
-  if (!options.timeoutMs) {
-    return completion;
+  constructor(config: { workspace: string; jsonSchema: string }) {
+    this.#workspace = config.workspace;
+    this.#jsonSchema = config.jsonSchema;
   }
 
-  const result = await Promise.race([
-    completion.then((r) => ({ kind: "done" as const, value: r })),
-    new Promise<{ kind: "timeout" }>((resolve) => setTimeout(() => resolve({ kind: "timeout" }), options.timeoutMs)),
-  ]);
+  async run(options: ClaudeRunOptions): Promise<ClaudeResult | ClaudeDeferredResult> {
+    // Strip CLAUDECODE env var so nested claude sessions are allowed
+    const env = { ...process.env };
+    delete env.CLAUDECODE;
 
-  if (result.kind === "done") return result.value;
+    const args = ["claude", "-p", options.sessionFlag, options.sessionId, "--output-format", "json", "--json-schema", this.#jsonSchema];
+    if (options.forkSession) args.push("--fork-session");
+    if (options.model) args.push("--model", options.model);
+    if (options.systemPrompt) args.push("--append-system-prompt", options.systemPrompt);
+    args.push(options.prompt);
 
-  log.info({ timeoutMs: options.timeoutMs, sessionId: options.sessionId }, "Claude process timed out, deferring to background");
-  return {
-    deferred: true,
-    sessionId: options.sessionId,
-    completion,
-  };
+    log.debug(
+      {
+        model: options.model,
+        sessionFlag: options.sessionFlag,
+        sessionId: options.sessionId,
+        promptLen: options.prompt.length,
+        hasSystemPrompt: !!options.systemPrompt,
+      },
+      "Sending to Claude",
+    );
+
+    const proc = Bun.spawn(args, {
+      cwd: this.#workspace,
+      env,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    const completion = awaitProcess(proc);
+
+    if (!options.timeoutMs) {
+      return completion;
+    }
+
+    const result = await Promise.race([
+      completion.then((r) => ({ kind: "done" as const, value: r })),
+      new Promise<{ kind: "timeout" }>((resolve) => setTimeout(() => resolve({ kind: "timeout" }), options.timeoutMs)),
+    ]);
+
+    if (result.kind === "done") return result.value;
+
+    log.info({ timeoutMs: options.timeoutMs, sessionId: options.sessionId }, "Claude process timed out, deferring to background");
+    return {
+      deferred: true,
+      sessionId: options.sessionId,
+      completion,
+    };
+  }
 }

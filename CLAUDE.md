@@ -41,6 +41,41 @@ Use pino via `createLogger` from `src/logger.ts`. Never use `console.log/warn/er
 Every module should create its logger at the top: `const log = createLogger("module-name")`.
 Log messages should be concise. Include relevant IDs/context as structured data, not string interpolation.
 
+## Architecture
+
+Two layers with unidirectional dependency: App → Orchestrator. App knows nothing about Claude, sessions, or queuing. Orchestrator knows nothing about Telegram.
+
+```
+App (app.ts)                        — I/O layer: Telegram + Cron
+├── CronScheduler (cron.ts)         — reads .macroclaw/cron.json, fires onJob callback
+└── Orchestrator (orchestrator.ts)  — processing layer: Claude, queue, sessions, background
+    ├── Queue (queue.ts)            — serial FIFO processing (internal)
+    └── Claude (claude.ts)          — spawns `claude` CLI, handles timeouts/deferred results
+```
+
+### App (I/O Layer)
+
+- Receives Telegram messages, commands, buttons, file uploads
+- Routes to `orchestrator.handleMessage/handleButton/handleCron/handleBackgroundCommand/handleBackgroundList/handleSessionCommand`
+- Delivers `OrchestratorResponse` to Telegram via `onResponse` callback (files, text, buttons)
+- Owns CronScheduler, wires its `onJob` to `orchestrator.handleCron`
+- Only module that imports Grammy/Telegram
+
+### Orchestrator (Processing Layer)
+
+- Owns the internal queue — all `handleX` methods push to it, callers don't know it exists
+- Tracks background agents internally (spawn, adopt, list)
+- Manages sessions (resume, fork, recovery, persistence)
+- Handles deferred/timeout responses — sends "taking longer" notification, adopts the completion
+- Validates Claude's structured output against the response schema
+- Notifies App of all responses via `onResponse` callback; silent responses are filtered internally
+
+### Supporting Modules
+
+- `createBot` (telegram.ts) and `createLogger` (logger.ts) — plain functions, thin wrappers with no state
+- All classes use runtime private fields (`#`) for encapsulation
+- `Claude` holds stable config (workspace, jsonSchema); per-request params go on `run()`
+
 ## Conventions
 
 - Keep everything lean — this is a personal project
