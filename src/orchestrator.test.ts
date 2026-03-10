@@ -353,7 +353,7 @@ describe("createOrchestrator", () => {
 
     it("bg-task forks from main session without affecting it", async () => {
       saveSettings({ sessionId: "main-session" }, tmpSettingsDir);
-      const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }));
+      const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }, "main-session"));
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
 
       await processSync(orch,{ type: "user", message: "hello" });
@@ -365,6 +365,30 @@ describe("createOrchestrator", () => {
       expect(claude.mock.calls[1][0].forkSession).toBe(true);
       expect(claude.mock.calls[2][0].sessionId).toBe("main-session"); // main preserved
       expect(claude.mock.calls[2][0].forkSession).toBeUndefined();
+    });
+
+    it("updates session ID after forked call", async () => {
+      saveSettings({ sessionId: "old-session" }, tmpSettingsDir);
+      const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }, "new-forked-session"));
+      const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
+
+      await processSync(orch, { type: "user", message: "hello" }, { forkSession: true });
+
+      expect(claude.mock.calls[0][0].forkSession).toBe(true);
+      expect(orch.sessionId).toBe("new-forked-session");
+
+      // Next call uses new session ID
+      await processSync(orch, { type: "user", message: "follow up" });
+      expect(claude.mock.calls[1][0].sessionId).toBe("new-forked-session");
+    });
+
+    it("does not update session ID when response session matches", async () => {
+      saveSettings({ sessionId: "same-session" }, tmpSettingsDir);
+      const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }, "same-session"));
+      const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
+
+      await processSync(orch, { type: "user", message: "hello" });
+      expect(orch.sessionId).toBe("same-session");
     });
   });
 });
