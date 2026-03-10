@@ -79,10 +79,9 @@ function makeConfig(overrides?: Partial<AppConfig>): AppConfig {
 }
 
 describe("App", () => {
-  it("creates bot and queue", () => {
+  it("creates bot", () => {
     const app = new App(makeConfig());
     expect(app.bot).toBeDefined();
-    expect(app.queue).toBeDefined();
   });
 
   it("registers message:text, message:photo, message:document, and callback_query:data handlers", () => {
@@ -108,19 +107,8 @@ describe("App", () => {
     expect(bot.errorHandler).not.toBeNull();
   });
 
-  it("generates new session ID when settings is empty", () => {
-    if (existsSync(tmpSettingsDir)) rmSync(tmpSettingsDir, { recursive: true });
-    const app = new App(makeConfig());
-    const bot = app.bot as any;
-
-    const ctx = { chat: { id: 12345 }, reply: mock(() => {}) };
-    bot.commandHandlers.get("session")!(ctx);
-    const reply = (ctx.reply as any).mock.calls[0][0];
-    expect(reply).toMatch(/Session: `[0-9a-f]{8}-/);
-  });
-
   describe("message handler", () => {
-    it("queues messages from authorized chat", async () => {
+    it("routes messages from authorized chat to orchestrator", async () => {
       const config = makeConfig();
       const app = new App(config);
       const bot = app.bot as any;
@@ -176,66 +164,6 @@ describe("App", () => {
       expect(bot.api.sendMessage).not.toHaveBeenCalled();
     });
 
-    it("spawns background agents from send response", async () => {
-      let callCount = 0;
-      const config = makeConfig({
-        claude: mockClaude(async (): Promise<ClaudeResult> => {
-          callCount++;
-          if (callCount === 1) {
-            return successResult({
-              action: "send",
-              message: "Starting research",
-              actionReason: "needs research",
-              backgroundAgents: [{ name: "research", prompt: "research this" }],
-            });
-          }
-          return successResult({ action: "send", message: "research result", actionReason: "done" });
-        }),
-      });
-      const app = new App(config);
-      const bot = app.bot as any;
-      const handler = bot.filterHandlers.get("message:text")![0];
-
-      handler({ chat: { id: 12345 }, message: { text: "hello" } });
-      await new Promise((r) => setTimeout(r, 50));
-
-      const sendCalls = (bot.api.sendMessage as any).mock.calls;
-      const texts = sendCalls.map((c: any) => c[1]);
-      expect(texts).toContain("Starting research");
-      expect(texts).toContain('Background agent "research" started.');
-
-      // Background agent result should be fed back into queue
-      await new Promise((r) => setTimeout(r, 100));
-      expect((config.claude as any).run).toHaveBeenCalledTimes(3); // 1 main + 1 bg agent + 1 bg result fed back
-    });
-
-    it("spawns background agents from silent response", async () => {
-      let callCount = 0;
-      const config = makeConfig({
-        claude: mockClaude(async (): Promise<ClaudeResult> => {
-          callCount++;
-          if (callCount === 1) {
-            return successResult({
-              action: "silent",
-              actionReason: "spawning bg task",
-              backgroundAgents: [{ name: "cleanup", prompt: "tidy up" }],
-            });
-          }
-          return successResult({ action: "send", message: "done", actionReason: "ok" });
-        }),
-      });
-      const app = new App(config);
-      const bot = app.bot as any;
-      const handler = bot.filterHandlers.get("message:text")![0];
-
-      handler({ chat: { id: 12345 }, message: { text: "hello" } });
-      await new Promise((r) => setTimeout(r, 50));
-
-      const sendCalls = (bot.api.sendMessage as any).mock.calls;
-      const texts = sendCalls.map((c: any) => c[1]);
-      expect(texts).toContain('Background agent "cleanup" started.');
-    });
-
     it("does not treat bg: prefix as special", async () => {
       const config = makeConfig();
       const app = new App(config);
@@ -247,142 +175,6 @@ describe("App", () => {
 
       const opts = (config.claude as any).run.mock.calls[0][0] as ClaudeRunOptions;
       expect(opts.prompt).toBe("bg: research pricing");
-    });
-
-    it("passes cron system prompt for cron messages", async () => {
-      const config = makeConfig();
-      const app = new App(config);
-
-      app.queue.push({ type: "cron", name: "daily-check", prompt: "Check for updates" });
-      await new Promise((r) => setTimeout(r, 50));
-
-      const opts = (config.claude as any).run.mock.calls[0][0] as ClaudeRunOptions;
-      expect(opts.prompt).toBe("[Tool: cron/daily-check] Check for updates");
-      expect(opts.systemPrompt).toContain("cron event");
-      expect(opts.timeoutMs).toBe(300_000);
-    });
-
-    it("passes background result system prompt for background messages", async () => {
-      const config = makeConfig();
-      const app = new App(config);
-
-      app.queue.push({ type: "background-agent-result", name: "research", response: { action: "send", message: "Here are the results", actionReason: "ok" } });
-      await new Promise((r) => setTimeout(r, 50));
-
-      const opts = (config.claude as any).run.mock.calls[0][0] as ClaudeRunOptions;
-      expect(opts.prompt).toBe("[Background: research] Here are the results");
-      expect(opts.systemPrompt).toContain("background agent you previously spawned");
-      expect(opts.timeoutMs).toBe(60_000);
-    });
-
-    it("backgrounds deferred requests and sends notification", async () => {
-      let resolveCompletion: (r: ClaudeResult) => void;
-      const completion = new Promise<ClaudeResult>((r) => { resolveCompletion = r; });
-      const config = makeConfig({
-        claude: mockClaude(async (): Promise<ClaudeResult | ClaudeDeferredResult> =>
-          ({ deferred: true, sessionId: "test-session", completion }),
-        ),
-      });
-      const app = new App(config);
-      const bot = app.bot as any;
-      const handler = bot.filterHandlers.get("message:text")![0];
-
-      handler({ chat: { id: 12345 }, message: { text: "do something slow" } });
-      await new Promise((r) => setTimeout(r, 50));
-
-      const sendCalls = (bot.api.sendMessage as any).mock.calls;
-      const texts = sendCalls.map((c: any) => c[1]);
-      expect(texts).toContain("This is taking longer, continuing in the background.");
-
-      // Complete the deferred task
-      resolveCompletion!(successResult({ action: "send", message: "done!", actionReason: "ok" }));
-      await new Promise((r) => setTimeout(r, 100));
-
-      // Background result should be fed back
-      const allTexts = (bot.api.sendMessage as any).mock.calls.map((c: any) => c[1]);
-      expect(allTexts).toContain("done!");
-    });
-
-    it("backgrounds deferred cron requests", async () => {
-      let resolveCompletion: (r: ClaudeResult) => void;
-      const completion = new Promise<ClaudeResult>((r) => { resolveCompletion = r; });
-      const config = makeConfig({
-        claude: mockClaude(async (): Promise<ClaudeResult | ClaudeDeferredResult> =>
-          ({ deferred: true, sessionId: "test-session", completion }),
-        ),
-      });
-      const app = new App(config);
-      const bot = app.bot as any;
-
-      app.queue.push({ type: "cron", name: "daily-check", prompt: "Check for updates" });
-      await new Promise((r) => setTimeout(r, 50));
-
-      const sendCalls = (bot.api.sendMessage as any).mock.calls;
-      const texts = sendCalls.map((c: any) => c[1]);
-      expect(texts).toContain("This is taking longer, continuing in the background.");
-
-      resolveCompletion!(successResult({ action: "send", message: "cron done", actionReason: "ok" }));
-      await new Promise((r) => setTimeout(r, 100));
-
-      const allTexts = (bot.api.sendMessage as any).mock.calls.map((c: any) => c[1]);
-      expect(allTexts).toContain("cron done");
-    });
-
-    it("applies background result directly when session IDs match", async () => {
-      const config = makeConfig();
-      const app = new App(config);
-      const bot = app.bot as any;
-
-      // Push a background result with matching sessionId
-      app.queue.push({ type: "background-agent-result", name: "task", response: { action: "send", message: "direct result", actionReason: "ok" }, sessionId: "test-session" });
-      await new Promise((r) => setTimeout(r, 50));
-
-      const sendCalls = (bot.api.sendMessage as any).mock.calls;
-      const texts = sendCalls.map((c: any) => c[1]);
-      expect(texts).toContain("direct result");
-      // Should NOT have called claude.run for this
-      expect((config.claude as any).run).not.toHaveBeenCalled();
-    });
-
-    it("processes background result through orchestrator when session IDs differ", async () => {
-      const config = makeConfig();
-      const app = new App(config);
-
-      app.queue.push({ type: "background-agent-result", name: "task", response: { action: "send", message: "indirect result", actionReason: "ok" }, sessionId: "different-session" });
-      await new Promise((r) => setTimeout(r, 50));
-
-      // Should have called claude.run to process through orchestrator
-      expect((config.claude as any).run).toHaveBeenCalled();
-    });
-
-    it("forks session when bg task runs on main session", async () => {
-      let resolveCompletion: (r: ClaudeResult) => void;
-      const completion = new Promise<ClaudeResult>((r) => { resolveCompletion = r; });
-      let callCount = 0;
-      const config = makeConfig({
-        claude: mockClaude(async (): Promise<ClaudeResult | ClaudeDeferredResult> => {
-          callCount++;
-          if (callCount === 1) return { deferred: true, sessionId: "test-session", completion };
-          return successResult({ action: "send", message: "forked response", actionReason: "ok" });
-        }),
-      });
-      const app = new App(config);
-      const bot = app.bot as any;
-      const handler = bot.filterHandlers.get("message:text")![0];
-
-      // First message gets deferred (backgrounded on test-session)
-      handler({ chat: { id: 12345 }, message: { text: "slow task" } });
-      await new Promise((r) => setTimeout(r, 50));
-
-      // Second message should trigger a fork
-      handler({ chat: { id: 12345 }, message: { text: "follow up" } });
-      await new Promise((r) => setTimeout(r, 50));
-
-      const opts = (config.claude as any).run.mock.calls[1][0] as ClaudeRunOptions;
-      expect(opts.forkSession).toBe(true);
-
-      resolveCompletion!(successResult({ action: "send", message: "bg done", actionReason: "ok" }));
-      await new Promise((r) => setTimeout(r, 50));
     });
 
     it("sends error wrapped in ClaudeResponse", async () => {
@@ -405,7 +197,7 @@ describe("App", () => {
       expect(lastText).toContain("spawn failed");
     });
 
-    it("handles photo messages by downloading and queuing with files", async () => {
+    it("handles photo messages by downloading and routing with files", async () => {
       const origFetch = globalThis.fetch;
       globalThis.fetch = mock(() =>
         Promise.resolve(new Response("fake-image", { status: 200 })),
@@ -436,7 +228,7 @@ describe("App", () => {
       globalThis.fetch = origFetch;
     });
 
-    it("handles document messages by downloading and queuing with files", async () => {
+    it("handles document messages by downloading and routing with files", async () => {
       const origFetch = globalThis.fetch;
       globalThis.fetch = mock(() =>
         Promise.resolve(new Response("fake-doc", { status: 200 })),
@@ -464,7 +256,7 @@ describe("App", () => {
       globalThis.fetch = origFetch;
     });
 
-    it("queues error message when photo download fails", async () => {
+    it("routes error message when photo download fails", async () => {
       const config = makeConfig();
       const app = new App(config);
       const bot = app.bot as any;
@@ -482,7 +274,7 @@ describe("App", () => {
       expect(opts.prompt).toContain("[File download failed: photo.jpg]");
     });
 
-    it("queues error message when document download fails", async () => {
+    it("routes error message when document download fails", async () => {
       const config = makeConfig();
       const app = new App(config);
       const bot = app.bot as any;
@@ -515,7 +307,7 @@ describe("App", () => {
       expect((config.claude as any).run).not.toHaveBeenCalled();
     });
 
-    it("sends outbound files before text message", async () => {
+    it("sends outbound files before text message (onResponse delivery)", async () => {
       const tmpFile = `/tmp/macroclaw-test-outbound-${Date.now()}.png`;
       await Bun.write(tmpFile, "fake png");
 
@@ -543,7 +335,7 @@ describe("App", () => {
       await rm(tmpFile, { force: true });
     });
 
-    it("passes buttons to sendResponse", async () => {
+    it("passes buttons to sendResponse (onResponse delivery)", async () => {
       const config = makeConfig({
         claude: mockClaude(async (): Promise<ClaudeResult> =>
           successResult({
@@ -566,7 +358,7 @@ describe("App", () => {
       expect(lastCall[2].reply_markup).toBeDefined();
     });
 
-    it("handles callback_query by pushing button event to queue", async () => {
+    it("handles callback_query by routing button event to orchestrator", async () => {
       const config = makeConfig();
       const app = new App(config);
       const bot = app.bot as any;
@@ -643,43 +435,66 @@ describe("App", () => {
       expect(ctx.reply).toHaveBeenCalledWith("Chat ID: `12345`", { parse_mode: "Markdown" });
     });
 
-    it("/session replies with session ID", () => {
+    it("/session sends session ID via sendMessage", async () => {
       const app = new App(makeConfig());
       const bot = app.bot as any;
       const handler = bot.commandHandlers.get("session")!;
-      const ctx = { chat: { id: 12345 }, reply: mock(() => {}) };
+      const ctx = { chat: { id: 12345 } };
 
       handler(ctx);
-      expect(ctx.reply).toHaveBeenCalledWith("Session: `test-session`", { parse_mode: "Markdown" });
+      await new Promise((r) => setTimeout(r, 50));
+
+      const calls = (bot.api.sendMessage as any).mock.calls;
+      expect(calls.length).toBeGreaterThan(0);
+      const text = calls[calls.length - 1][1];
+      expect(text).toContain("test-session");
     });
 
-    it("/bg shows no agents when none are running", () => {
+    it("/session is ignored for unauthorized chats", async () => {
+      const app = new App(makeConfig());
+      const bot = app.bot as any;
+      const handler = bot.commandHandlers.get("session")!;
+      const ctx = { chat: { id: 99999 } };
+
+      handler(ctx);
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect((bot.api.sendMessage as any).mock.calls.length).toBe(0);
+    });
+
+    it("/bg shows no agents via sendMessage when none are running", async () => {
       const app = new App(makeConfig());
       const bot = app.bot as any;
       const handler = bot.commandHandlers.get("bg")!;
-      const ctx = { chat: { id: 12345 }, match: "", reply: mock(() => {}) };
+      const ctx = { chat: { id: 12345 }, match: "" };
 
       handler(ctx);
-      expect(ctx.reply).toHaveBeenCalledWith("No background agents running.");
+      await new Promise((r) => setTimeout(r, 50));
+
+      const calls = (bot.api.sendMessage as any).mock.calls;
+      const text = calls[calls.length - 1][1];
+      expect(text).toBe("No background agents running.");
     });
 
-    it("/bg with prompt spawns a background agent", async () => {
+    it("/bg with prompt spawns a background agent via sendMessage", async () => {
       const config = makeConfig({
         claude: mockClaude(() => new Promise<ClaudeResult>(() => {})),
       });
       const app = new App(config);
       const bot = app.bot as any;
       const handler = bot.commandHandlers.get("bg")!;
-      const ctx = { chat: { id: 12345 }, match: "research pricing", reply: mock(() => {}) };
+      const ctx = { chat: { id: 12345 }, match: "research pricing" };
 
       handler(ctx);
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(ctx.reply).toHaveBeenCalledWith('Background agent "research-pricing" started.');
+      const calls = (bot.api.sendMessage as any).mock.calls;
+      const text = calls[calls.length - 1][1];
+      expect(text).toBe('Background agent "research-pricing" started.');
       expect((config.claude as any).run).toHaveBeenCalledTimes(1);
     });
 
-    it("/bg lists active background agents", async () => {
+    it("/bg lists active background agents via sendMessage", async () => {
       const config = makeConfig({
         claude: mockClaude(() => new Promise<ClaudeResult>(() => {})),
       });
@@ -688,17 +503,34 @@ describe("App", () => {
       const bgHandler = bot.commandHandlers.get("bg")!;
 
       // Spawn via /bg command
-      const spawnCtx = { chat: { id: 12345 }, match: "long task", reply: mock(() => {}) };
+      const spawnCtx = { chat: { id: 12345 }, match: "long task" };
       bgHandler(spawnCtx);
       await new Promise((r) => setTimeout(r, 10));
 
       // List via /bg with no args
-      const listCtx = { chat: { id: 12345 }, match: "", reply: mock(() => {}) };
+      const listCtx = { chat: { id: 12345 }, match: "" };
       bgHandler(listCtx);
+      await new Promise((r) => setTimeout(r, 10));
 
-      const reply = (listCtx.reply as any).mock.calls[0][0];
-      expect(reply).toContain("long-task");
-      expect(reply).toMatch(/\d+s/);
+      const calls = (bot.api.sendMessage as any).mock.calls;
+      const lastText = calls[calls.length - 1][1];
+      expect(lastText).toContain("long-task");
+      expect(lastText).toMatch(/\d+s/);
+    });
+
+    it("generates new session ID when settings is empty", async () => {
+      if (existsSync(tmpSettingsDir)) rmSync(tmpSettingsDir, { recursive: true });
+      const app = new App(makeConfig());
+      const bot = app.bot as any;
+      const handler = bot.commandHandlers.get("session")!;
+      const ctx = { chat: { id: 12345 } };
+
+      handler(ctx);
+      await new Promise((r) => setTimeout(r, 50));
+
+      const calls = (bot.api.sendMessage as any).mock.calls;
+      const text = calls[calls.length - 1][1];
+      expect(text).toMatch(/Session: `[0-9a-f]{8}-/);
     });
   });
 
@@ -730,4 +562,3 @@ describe("App", () => {
     });
   });
 });
-

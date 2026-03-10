@@ -3,6 +3,7 @@ import { Claude, type ClaudeDeferredResult, ClaudeParseError, ClaudeProcessError
 import { logPrompt, logResult } from "./history";
 import { createLogger } from "./logger";
 import { BG_TIMEOUT, CRON_TIMEOUT, MAIN_TIMEOUT, PROMPT_BACKGROUND_RESULT, PROMPT_BUTTON_CLICK, PROMPT_CRON_EVENT, PROMPT_USER_MESSAGE, promptBackgroundAgent } from "./prompts";
+import { Queue } from "./queue";
 import { loadSettings, newSessionId, type Settings, saveSettings } from "./settings";
 
 const log = createLogger("orchestrator");
@@ -29,16 +30,24 @@ const claudeResponseSchema = z.object({
   backgroundAgents: z.array(backgroundAgentSchema).describe("Background agents to spawn alongside this response").optional(),
 });
 
-type ClaudeResponse = z.infer<typeof claudeResponseSchema>;
+type ClaudeResponseInternal = z.infer<typeof claudeResponseSchema>;
 
 const jsonSchema = JSON.stringify(z.toJSONSchema(claudeResponseSchema, { target: "jsonSchema7" }));
 
-// --- Request types ---
+// --- Public response type ---
 
-export type OrchestratorRequest =
+export interface OrchestratorResponse {
+  message: string;
+  files?: string[];
+  buttons?: Array<Array<{ label: string }>>;
+}
+
+// --- Internal request types ---
+
+type OrchestratorRequest =
   | { type: "user"; message: string; files?: string[] }
   | { type: "cron"; name: string; prompt: string; model?: string }
-  | { type: "background-agent-result"; name: string; response: ClaudeResponse; sessionId?: string }
+  | { type: "background-agent-result"; name: string; response: ClaudeResponseInternal; sessionId?: string }
   | { type: "background-agent"; name: string; prompt: string; model?: string }
   | { type: "button"; label: string };
 
@@ -54,16 +63,13 @@ interface BackgroundInfo {
   startTime: Date;
 }
 
-interface QueueLike {
-  push(item: { type: "background-agent-result"; name: string; response: ClaudeResponse; sessionId?: string }): void;
-}
-
 // --- Orchestrator ---
 
 export interface OrchestratorConfig {
   model?: string;
   workspace: string;
   settingsDir?: string;
+  onResponse: (response: OrchestratorResponse) => Promise<void>;
   claude?: Claude;
 }
 
@@ -77,7 +83,7 @@ interface BuiltRequest {
 }
 
 interface CallResult {
-  response: ClaudeResponse;
+  response: ClaudeResponseInternal;
   sessionId: string;
 }
 
@@ -89,11 +95,14 @@ export class Orchestrator {
   #sessionResolved = false;
   #config: OrchestratorConfig;
   #active = new Map<string, BackgroundInfo>();
+  #queue: Queue<OrchestratorRequest>;
 
   constructor(config: OrchestratorConfig) {
     this.#config = config;
     this.#claude = config.claude ?? new Claude({ workspace: config.workspace, jsonSchema });
     this.#settings = loadSettings(config.settingsDir);
+    this.#queue = new Queue<OrchestratorRequest>();
+    this.#queue.setHandler((request) => this.#handleRequest(request));
 
     if (this.#settings.sessionId) {
       this.#sessionId = this.#settings.sessionId;
@@ -106,20 +115,117 @@ export class Orchestrator {
     }
   }
 
-  get sessionId() {
-    return this.#sessionId;
+  // --- Public handle methods ---
+
+  handleMessage(message: string, files?: string[]): void {
+    this.#queue.push({ type: "user", message, files });
   }
 
-  spawnBackground(name: string, prompt: string, model: string | undefined, queue: QueueLike) {
+  handleButton(label: string): void {
+    this.#queue.push({ type: "button", label });
+  }
+
+  handleCron(name: string, prompt: string, model?: string): void {
+    this.#queue.push({ type: "cron", name, prompt, model });
+  }
+
+  handleBackgroundCommand(prompt: string): void {
+    const name = prompt.slice(0, 30).replace(/\s+/g, "-");
+    this.#spawnBackground(name, prompt, this.#config.model);
+    this.#callOnResponse({ message: `Background agent "${name}" started.` });
+  }
+
+  handleBackgroundList(): void {
+    const agents = [...this.#active.values()];
+    if (agents.length === 0) {
+      this.#callOnResponse({ message: "No background agents running." });
+      return;
+    }
+    const lines = agents.map((a) => {
+      const elapsed = Math.round((Date.now() - a.startTime.getTime()) / 1000);
+      return `- ${a.name} (${elapsed}s)`;
+    });
+    this.#callOnResponse({ message: lines.join("\n") });
+  }
+
+  handleSessionCommand(): void {
+    this.#callOnResponse({ message: `Session: \`${this.#sessionId}\`` });
+  }
+
+  // --- Internal queue handler ---
+
+  async #handleRequest(request: OrchestratorRequest): Promise<void> {
+    log.debug({ type: request.type }, "Incoming request");
+
+    // Background result with matching session ID: deliver directly without Claude round-trip
+    if (request.type === "background-agent-result" && "sessionId" in request && request.sessionId === this.#sessionId) {
+      log.debug({ name: request.name }, "Background result on current session, applying directly");
+      await this.#deliverClaudeResponse(request.response);
+      return;
+    }
+
+    // Fork session if a backgrounded task is running on the main session
+    const needsFork = (request.type === "user" || request.type === "button") && this.#active.has(this.#sessionId);
+
+    const rawResponse = await this.#processRequest(request, needsFork ? { forkSession: true } : undefined);
+    if (isDeferred(rawResponse)) {
+      const name = request.type === "user" ? request.message.slice(0, 30).replace(/\s+/g, "-")
+        : request.type === "cron" ? `cron-${request.name}`
+        : "task";
+      log.info({ name, sessionId: rawResponse.sessionId }, "Request backgrounded due to timeout");
+      this.#callOnResponse({ message: "This is taking longer, continuing in the background." });
+      this.#adoptBackground(name, rawResponse.sessionId, rawResponse.completion.then(
+        (r) => {
+          const msg = r.structuredOutput ? String((r.structuredOutput as Record<string, unknown>).message ?? "") : (r.result ?? "");
+          return { action: "send" as const, message: msg, actionReason: "deferred-completed" };
+        },
+        (err) => ({ action: "send" as const, message: `[Error] ${err}`, actionReason: "deferred-failed" }),
+      ));
+      return;
+    }
+
+    log.debug({ action: rawResponse.action, actionReason: rawResponse.actionReason }, "Response");
+    await this.#deliverClaudeResponse(rawResponse);
+  }
+
+  async #deliverClaudeResponse(response: ClaudeResponseInternal): Promise<void> {
+    if (response.action === "send") {
+      await this.#config.onResponse({
+        message: response.message || "[No output]",
+        files: response.files,
+        buttons: response.buttons,
+      });
+    } else {
+      log.debug("Silent response");
+    }
+
+    if (response.backgroundAgents?.length) {
+      for (const agent of response.backgroundAgents) {
+        const agentModel = agent.model ?? this.#config.model;
+        this.#spawnBackground(agent.name, agent.prompt, agentModel);
+        this.#callOnResponse({ message: `Background agent "${agent.name}" started.` });
+      }
+    }
+  }
+
+  #callOnResponse(response: OrchestratorResponse): void {
+    this.#config.onResponse(response).catch((err) => {
+      log.error({ err }, "onResponse callback failed");
+    });
+  }
+
+  // --- Internal background management ---
+
+  #spawnBackground(name: string, prompt: string, model: string | undefined) {
     const sessionId = newSessionId();
     const info: BackgroundInfo = { name, sessionId, startTime: new Date() };
     this.#active.set(sessionId, info);
 
     log.debug({ name, sessionId }, "Starting background agent");
 
-    this.processRequest({ type: "background-agent", name, prompt, model }).then(
+    this.#processRequest({ type: "background-agent", name, prompt, model }).then(
       async (rawResponse) => {
-        let response: ClaudeResponse;
+        let response: ClaudeResponseInternal;
         if (isDeferred(rawResponse)) {
           try {
             const r = await rawResponse.completion;
@@ -132,17 +238,17 @@ export class Orchestrator {
         }
         this.#active.delete(sessionId);
         log.debug({ name, message: response.message }, "Background agent finished");
-        queue.push({ type: "background-agent-result", name, response });
+        this.#queue.push({ type: "background-agent-result", name, response });
       },
       (err) => {
         this.#active.delete(sessionId);
         log.error({ name, err }, "Background agent failed");
-        queue.push({ type: "background-agent-result", name, response: { action: "send", message: `[Error] ${err}`, actionReason: "bg-agent-failed" } });
+        this.#queue.push({ type: "background-agent-result", name, response: { action: "send", message: `[Error] ${err}`, actionReason: "bg-agent-failed" } });
       },
     );
   }
 
-  adoptBackground(name: string, sessionId: string, completion: Promise<ClaudeResponse>, queue: QueueLike) {
+  #adoptBackground(name: string, sessionId: string, completion: Promise<ClaudeResponseInternal>) {
     const info: BackgroundInfo = { name, sessionId, startTime: new Date() };
     this.#active.set(sessionId, info);
 
@@ -152,25 +258,19 @@ export class Orchestrator {
       (response) => {
         this.#active.delete(sessionId);
         log.debug({ name, message: response.message }, "Adopted task finished");
-        queue.push({ type: "background-agent-result", name, response, sessionId });
+        this.#queue.push({ type: "background-agent-result", name, response, sessionId });
       },
       (err) => {
         this.#active.delete(sessionId);
         log.error({ name, err }, "Adopted task failed");
-        queue.push({ type: "background-agent-result", name, response: { action: "send", message: `[Error] ${err}`, actionReason: "adopted-task-failed" }, sessionId });
+        this.#queue.push({ type: "background-agent-result", name, response: { action: "send", message: `[Error] ${err}`, actionReason: "adopted-task-failed" }, sessionId });
       },
     );
   }
 
-  hasBackgroundSessionId(sessionId: string): boolean {
-    return this.#active.has(sessionId);
-  }
+  // --- Core Claude processing ---
 
-  listBackground(): { name: string; sessionId: string; startTime: Date }[] {
-    return [...this.#active.values()];
-  }
-
-  async processRequest(request: OrchestratorRequest, options?: { forkSession?: boolean }): Promise<ClaudeResponse | ClaudeDeferredResult> {
+  async #processRequest(request: OrchestratorRequest, options?: { forkSession?: boolean }): Promise<ClaudeResponseInternal | ClaudeDeferredResult> {
     const built = this.#buildRequest(request);
     await logPrompt(request);
 
@@ -264,7 +364,7 @@ export class Orchestrator {
     return message ? `${prefix}\n${message}` : prefix;
   }
 
-  #validateResponse(raw: unknown): ClaudeResponse {
+  #validateResponse(raw: unknown): ClaudeResponseInternal {
     const parsed = claudeResponseSchema.safeParse(raw);
     if (parsed.success) return parsed.data;
     log.warn({ error: parsed.error.message }, "structured_output failed validation");
