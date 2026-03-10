@@ -56,8 +56,8 @@ afterEach(() => {
   if (existsSync(tmpSettingsDir)) rmSync(tmpSettingsDir, { recursive: true });
 });
 
-function successResult(output: unknown): ClaudeResult {
-  return { structuredOutput: output, duration: "1.0s", cost: "$0.05" };
+function successResult(output: unknown, sessionId = "test-session-id"): ClaudeResult {
+  return { structuredOutput: output, sessionId, duration: "1.0s", cost: "$0.05" };
 }
 
 function makeConfig(overrides?: Partial<AppConfig>): AppConfig {

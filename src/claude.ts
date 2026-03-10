@@ -16,6 +16,7 @@ export interface ClaudeOptions {
 
 export interface ClaudeResult {
   structuredOutput: unknown;
+  sessionId: string;
   result?: string;
   duration?: string;
   cost?: string;
@@ -102,9 +103,10 @@ export async function runClaude(options: ClaudeOptions): Promise<ClaudeResult> {
     if (!structuredOutput) {
       log.debug({ envelope }, "No structured_output in envelope");
     }
+    const sid = typeof envelope.session_id === "string" ? envelope.session_id : "";
     const result = typeof envelope.result === "string" ? envelope.result : undefined;
-    log.debug({ duration, cost }, "Claude response received");
-    return { structuredOutput, result, duration, cost };
+    log.debug({ duration, cost, sessionId: sid }, "Claude response received");
+    return { structuredOutput, sessionId: sid, result, duration, cost };
   } catch {
     log.warn({ stdout: stdout.slice(0, 200) }, "Failed to parse Claude stdout as JSON");
     throw new ClaudeParseError(stdout);

@@ -22,8 +22,8 @@ function mockClaude(response: ClaudeResult | ((opts: ClaudeOptions) => Promise<C
   return mock(async () => response);
 }
 
-function successResult(structuredOutput: unknown): ClaudeResult {
-  return { structuredOutput, duration: "1.0s", cost: "$0.05" };
+function successResult(structuredOutput: unknown, sessionId = "test-session-id"): ClaudeResult {
+  return { structuredOutput, sessionId, duration: "1.0s", cost: "$0.05" };
 }
 
 describe("createOrchestrator", () => {
@@ -173,7 +173,7 @@ describe("createOrchestrator", () => {
     });
 
     it("sends result with prefix when structured_output is missing", async () => {
-      const claude = mockClaude({ structuredOutput: null, result: "Claude said this" });
+      const claude = mockClaude({ structuredOutput: null, sessionId: "s1", result: "Claude said this" });
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
 
       const result = await orch.processRequest({ type: "user", message: "hi" });
@@ -184,7 +184,7 @@ describe("createOrchestrator", () => {
     });
 
     it("escapes HTML in fallback result to prevent Telegram parse errors", async () => {
-      const claude = mockClaude({ structuredOutput: null, result: "<b>bold</b> & stuff" });
+      const claude = mockClaude({ structuredOutput: null, sessionId: "s1", result: "<b>bold</b> & stuff" });
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
 
       const result = await orch.processRequest({ type: "user", message: "hi" });
@@ -193,7 +193,7 @@ describe("createOrchestrator", () => {
     });
 
     it("returns [No output] when both structured_output and result are missing", async () => {
-      const claude = mockClaude({ structuredOutput: null });
+      const claude = mockClaude({ structuredOutput: null, sessionId: "s1" });
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
 
       const result = await orch.processRequest({ type: "user", message: "hi" });

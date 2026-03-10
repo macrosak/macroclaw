@@ -1,13 +1,14 @@
 import { afterEach, describe, expect, it, mock } from "bun:test";
 import { ClaudeParseError, ClaudeProcessError, ClaudeTimeoutError, runClaude } from "./claude";
 
-function jsonResult(structuredOutput: unknown): string {
+function jsonResult(structuredOutput: unknown, sessionId = "test-session-id"): string {
   return JSON.stringify({
     type: "result",
     subtype: "success",
     duration_ms: 1234,
     total_cost_usd: 0.05,
     result: "",
+    session_id: sessionId,
     structured_output: structuredOutput,
   });
 }
@@ -159,14 +160,23 @@ describe("runClaude", () => {
     mockSpawn({ stdout: jsonResult({ action: "silent", actionReason: "no new results" }), exitCode: 0 });
     const result = await runClaude(opts({ sessionFlag: "--resume", sessionId: "sid-8" }));
     expect(result.structuredOutput).toEqual({ action: "silent", actionReason: "no new results" });
+    expect(result.sessionId).toBe("test-session-id");
   });
 
   it("returns null structuredOutput and result text when structured_output is missing", async () => {
-    const envelope = JSON.stringify({ type: "result", result: "plain text", duration_ms: 100, total_cost_usd: 0.01 });
+    const envelope = JSON.stringify({ type: "result", result: "plain text", duration_ms: 100, total_cost_usd: 0.01, session_id: "sid-abc" });
     mockSpawn({ stdout: envelope, exitCode: 0 });
     const result = await runClaude(opts({ sessionFlag: "--resume", sessionId: "sid-9" }));
     expect(result.structuredOutput).toBeNull();
     expect(result.result).toBe("plain text");
+    expect(result.sessionId).toBe("sid-abc");
+  });
+
+  it("returns empty sessionId when session_id is missing from envelope", async () => {
+    const envelope = JSON.stringify({ type: "result", result: "text", duration_ms: 100, total_cost_usd: 0.01 });
+    mockSpawn({ stdout: envelope, exitCode: 0 });
+    const result = await runClaude(opts({ sessionFlag: "--resume", sessionId: "sid-9c" }));
+    expect(result.sessionId).toBe("");
   });
 
   it("returns result from envelope", async () => {
