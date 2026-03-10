@@ -1,9 +1,8 @@
 import type { Bot } from "grammy";
-import { BackgroundManager } from "./background";
 import { type Claude, isDeferred } from "./claude";
 import { CronScheduler } from "./cron";
 import { createLogger } from "./logger";
-import { type ClaudeResponse, Orchestrator, type OrchestratorRequest } from "./orchestrator";
+import { Orchestrator, type OrchestratorRequest } from "./orchestrator";
 import { Queue } from "./queue";
 import { createBot, downloadFile, sendFile, sendResponse } from "./telegram";
 
@@ -22,7 +21,6 @@ export class App {
   #bot: Bot;
   #queue: Queue<OrchestratorRequest>;
   #orchestrator: Orchestrator;
-  #background: BackgroundManager;
   #config: AppConfig;
 
   constructor(config: AppConfig) {
@@ -35,7 +33,6 @@ export class App {
       settingsDir: config.settingsDir,
       claude: config.claude,
     });
-    this.#background = new BackgroundManager(this.#orchestrator);
 
     this.#setupHandlers();
   }
@@ -66,7 +63,7 @@ export class App {
     });
   }
 
-  async #handleResponse(response: ClaudeResponse) {
+  async #handleResponse(response: Exclude<Awaited<ReturnType<Orchestrator["processRequest"]>>, { deferred: true }>) {
     if (response.action === "send") {
       if (response.files?.length) {
         for (const filePath of response.files) {
@@ -81,7 +78,7 @@ export class App {
     if (response.backgroundAgents?.length) {
       for (const agent of response.backgroundAgents) {
         const agentModel = agent.model ?? this.#config.model;
-        this.#background.spawn(agent.name, agent.prompt, agentModel, this.#queue);
+        this.#orchestrator.spawnBackground(agent.name, agent.prompt, agentModel, this.#queue);
         await sendResponse(this.#bot, this.#config.authorizedChatId, `Background agent "${agent.name}" started.`);
       }
     }
@@ -100,7 +97,7 @@ export class App {
       }
 
       // Fork session if a backgrounded task is running on the main session
-      const needsFork = (request.type === "user" || request.type === "button") && this.#background.hasSessionId(this.#orchestrator.sessionId);
+      const needsFork = (request.type === "user" || request.type === "button") && this.#orchestrator.hasBackgroundSessionId(this.#orchestrator.sessionId);
 
       const rawResponse = await this.#orchestrator.processRequest(request, needsFork ? { forkSession: true } : undefined);
       if (isDeferred(rawResponse)) {
@@ -109,7 +106,7 @@ export class App {
           : "task";
         log.info({ name, sessionId: rawResponse.sessionId }, "Request backgrounded due to timeout");
         await sendResponse(this.#bot, this.#config.authorizedChatId, "This is taking longer, continuing in the background.");
-        this.#background.adopt(name, rawResponse.sessionId, rawResponse.completion.then(
+        this.#orchestrator.adoptBackground(name, rawResponse.sessionId, rawResponse.completion.then(
           (r) => {
             const msg = r.structuredOutput ? String((r.structuredOutput as Record<string, unknown>).message ?? "") : (r.result ?? "");
             return { action: "send" as const, message: msg, actionReason: "deferred-completed" };
@@ -141,12 +138,12 @@ export class App {
       if (prompt) {
         log.debug({ prompt }, "Command /bg spawn");
         const name = prompt.slice(0, 30).replace(/\s+/g, "-");
-        this.#background.spawn(name, prompt, this.#config.model, this.#queue);
+        this.#orchestrator.spawnBackground(name, prompt, this.#config.model, this.#queue);
         ctx.reply(`Background agent "${name}" started.`);
         return;
       }
       log.debug("Command /bg list");
-      const agents = this.#background.list();
+      const agents = this.#orchestrator.listBackground();
       if (agents.length === 0) {
         ctx.reply("No background agents running.");
         return;

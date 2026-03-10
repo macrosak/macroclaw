@@ -1,7 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import * as fs from "node:fs/promises";
 import { logPrompt, logResult } from "./history";
-import type { ClaudeResponse, OrchestratorRequest } from "./orchestrator";
 
 const mockMkdir = spyOn(fs, "mkdir").mockResolvedValue(undefined);
 const mockAppendFile = spyOn(fs, "appendFile").mockResolvedValue(undefined);
@@ -18,7 +17,7 @@ afterAll(() => {
 
 describe("logPrompt", () => {
   it("writes a prompt entry as JSONL", async () => {
-    const request: OrchestratorRequest = { type: "user", message: "hello" };
+    const request = { type: "user", message: "hello" };
     await logPrompt(request);
 
     expect(mockMkdir).toHaveBeenCalledTimes(1);
@@ -33,7 +32,7 @@ describe("logPrompt", () => {
   });
 
   it("writes cron request", async () => {
-    const request: OrchestratorRequest = { type: "cron", name: "daily", prompt: "check" };
+    const request = { type: "cron", name: "daily", prompt: "check" };
     await logPrompt(request);
 
     const parsed = JSON.parse(mockAppendFile.mock.calls[0][1] as string);
@@ -43,7 +42,7 @@ describe("logPrompt", () => {
 
 describe("logResult", () => {
   it("writes a result entry as JSONL", async () => {
-    const response: ClaudeResponse = { action: "send", message: "hi", actionReason: "ok" };
+    const response = { action: "send", message: "hi", actionReason: "ok" };
     await logResult(response);
 
     expect(mockAppendFile).toHaveBeenCalledTimes(1);
@@ -55,7 +54,7 @@ describe("logResult", () => {
   });
 
   it("writes silent response", async () => {
-    const response: ClaudeResponse = { action: "silent", actionReason: "nothing new" };
+    const response = { action: "silent", actionReason: "nothing new" };
     await logResult(response);
 
     const parsed = JSON.parse(mockAppendFile.mock.calls[0][1] as string);

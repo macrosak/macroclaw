@@ -1,13 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { existsSync, rmSync } from "node:fs";
 import { type Claude, ClaudeParseError, ClaudeProcessError, type ClaudeResult, type ClaudeRunOptions, isDeferred } from "./claude";
-import { type ClaudeResponse, Orchestrator } from "./orchestrator";
+import { Orchestrator } from "./orchestrator";
 import { saveSettings } from "./settings";
 
-async function processSync(orch: Orchestrator, ...args: Parameters<Orchestrator["processRequest"]>): Promise<ClaudeResponse> {
+type SyncResponse = Exclude<Awaited<ReturnType<Orchestrator["processRequest"]>>, { deferred: true }>;
+
+async function processSync(orch: Orchestrator, ...args: Parameters<Orchestrator["processRequest"]>): Promise<SyncResponse> {
   const result = await orch.processRequest(...args);
   if (isDeferred(result)) throw new Error("Expected sync result, got deferred");
-  return result;
+  return result as SyncResponse;
 }
 
 const tmpSettingsDir = "/tmp/macroclaw-test-orchestrator-settings";

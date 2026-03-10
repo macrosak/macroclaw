@@ -29,7 +29,7 @@ const claudeResponseSchema = z.object({
   backgroundAgents: z.array(backgroundAgentSchema).describe("Background agents to spawn alongside this response").optional(),
 });
 
-export type ClaudeResponse = z.infer<typeof claudeResponseSchema>;
+type ClaudeResponse = z.infer<typeof claudeResponseSchema>;
 
 const jsonSchema = JSON.stringify(z.toJSONSchema(claudeResponseSchema, { target: "jsonSchema7" }));
 
@@ -44,6 +44,18 @@ export type OrchestratorRequest =
 
 function escapeHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// --- Background tracking ---
+
+interface BackgroundInfo {
+  name: string;
+  sessionId: string;
+  startTime: Date;
+}
+
+interface QueueLike {
+  push(item: { type: "background-agent-result"; name: string; response: ClaudeResponse; sessionId?: string }): void;
 }
 
 // --- Orchestrator ---
@@ -76,6 +88,7 @@ export class Orchestrator {
   #sessionFlag: "--resume" | "--session-id";
   #sessionResolved = false;
   #config: OrchestratorConfig;
+  #active = new Map<string, BackgroundInfo>();
 
   constructor(config: OrchestratorConfig) {
     this.#config = config;
@@ -95,6 +108,66 @@ export class Orchestrator {
 
   get sessionId() {
     return this.#sessionId;
+  }
+
+  spawnBackground(name: string, prompt: string, model: string | undefined, queue: QueueLike) {
+    const sessionId = newSessionId();
+    const info: BackgroundInfo = { name, sessionId, startTime: new Date() };
+    this.#active.set(sessionId, info);
+
+    log.debug({ name, sessionId }, "Starting background agent");
+
+    this.processRequest({ type: "background-agent", name, prompt, model }).then(
+      async (rawResponse) => {
+        let response: ClaudeResponse;
+        if (isDeferred(rawResponse)) {
+          try {
+            const r = await rawResponse.completion;
+            response = { action: "send", message: String(r.structuredOutput ?? r.result ?? ""), actionReason: "deferred-completed" };
+          } catch (err) {
+            response = { action: "send", message: `[Error] ${err}`, actionReason: "deferred-failed" };
+          }
+        } else {
+          response = rawResponse;
+        }
+        this.#active.delete(sessionId);
+        log.debug({ name, message: response.message }, "Background agent finished");
+        queue.push({ type: "background-agent-result", name, response });
+      },
+      (err) => {
+        this.#active.delete(sessionId);
+        log.error({ name, err }, "Background agent failed");
+        queue.push({ type: "background-agent-result", name, response: { action: "send", message: `[Error] ${err}`, actionReason: "bg-agent-failed" } });
+      },
+    );
+  }
+
+  adoptBackground(name: string, sessionId: string, completion: Promise<ClaudeResponse>, queue: QueueLike) {
+    const info: BackgroundInfo = { name, sessionId, startTime: new Date() };
+    this.#active.set(sessionId, info);
+
+    log.debug({ name, sessionId }, "Adopting backgrounded task");
+
+    completion.then(
+      (response) => {
+        this.#active.delete(sessionId);
+        log.debug({ name, message: response.message }, "Adopted task finished");
+        queue.push({ type: "background-agent-result", name, response, sessionId });
+      },
+      (err) => {
+        this.#active.delete(sessionId);
+        log.error({ name, err }, "Adopted task failed");
+        queue.push({ type: "background-agent-result", name, response: { action: "send", message: `[Error] ${err}`, actionReason: "adopted-task-failed" }, sessionId });
+      },
+    );
+  }
+
+  hasBackgroundSessionId(sessionId: string): boolean {
+    return this.#active.has(sessionId);
+  }
+
+  listBackground(): { name: string; sessionId: string; startTime: Date }[] {
+    return [...this.#active.values()];
   }
 
   async processRequest(request: OrchestratorRequest, options?: { forkSession?: boolean }): Promise<ClaudeResponse | ClaudeDeferredResult> {
