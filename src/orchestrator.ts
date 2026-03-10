@@ -167,6 +167,7 @@ export class Orchestrator {
     // Fork session if a backgrounded task is running on the main session
     const needsFork = (request.type === "user" || request.type === "button") && this.#active.has(this.#sessionId);
 
+    const startTime = new Date();
     const rawResponse = await this.#processRequest(request, needsFork ? { forkSession: true } : undefined);
     if (isDeferred(rawResponse)) {
       const name = request.type === "user" ? request.message.slice(0, 30).replace(/\s+/g, "-")
@@ -174,7 +175,7 @@ export class Orchestrator {
         : "task";
       log.info({ name, sessionId: rawResponse.sessionId }, "Request backgrounded due to timeout");
       this.#callOnResponse({ message: "This is taking longer, continuing in the background." });
-      this.#adoptBackground(name, rawResponse.sessionId, rawResponse.completion.then(
+      this.#adoptBackground(name, rawResponse.sessionId, startTime, rawResponse.completion.then(
         (r) => {
           const msg = r.structuredOutput ? String((r.structuredOutput as Record<string, unknown>).message ?? "") : (r.result ?? "");
           return { action: "send" as const, message: msg, actionReason: "deferred-completed" };
@@ -248,8 +249,8 @@ export class Orchestrator {
     );
   }
 
-  #adoptBackground(name: string, sessionId: string, completion: Promise<ClaudeResponseInternal>) {
-    const info: BackgroundInfo = { name, sessionId, startTime: new Date() };
+  #adoptBackground(name: string, sessionId: string, startTime: Date, completion: Promise<ClaudeResponseInternal>) {
+    const info: BackgroundInfo = { name, sessionId, startTime };
     this.#active.set(sessionId, info);
 
     log.debug({ name, sessionId }, "Adopting backgrounded task");
