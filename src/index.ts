@@ -1,5 +1,5 @@
 
-import { createBackgroundManager } from "./background";
+import { BackgroundManager } from "./background";
 import { type Claude, isDeferred } from "./claude";
 import { startCron } from "./cron";
 import { createLogger } from "./logger";
@@ -36,7 +36,7 @@ export function createApp(config: AppConfig) {
     settingsDir: config.settingsDir,
     claude: config.claude,
   });
-  const background = createBackgroundManager(orchestrator);
+  const background = new BackgroundManager(orchestrator);
 
   async function handleResponse(response: ClaudeResponse) {
     if (response.action === "send") {

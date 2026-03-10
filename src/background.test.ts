@@ -1,6 +1,5 @@
 import { describe, expect, it, mock } from "bun:test";
-import type { BackgroundQueueItem } from "./background";
-import { createBackgroundManager } from "./background";
+import { BackgroundManager, type BackgroundQueueItem } from "./background";
 import type { ClaudeResponse, OrchestratorRequest } from "./orchestrator";
 
 function mockOrchestrator(handler: (request: OrchestratorRequest) => Promise<ClaudeResponse>) {
@@ -17,7 +16,7 @@ function mockQueue() {
   };
 }
 
-describe("createBackgroundManager", () => {
+describe("BackgroundManager", () => {
   it("spawns a background agent and feeds result back to queue", async () => {
     let resolvePromise: (r: ClaudeResponse) => void;
     const claudePromise = new Promise<ClaudeResponse>((r) => {
@@ -25,7 +24,7 @@ describe("createBackgroundManager", () => {
     });
     const orchestrator = mockOrchestrator(() => claudePromise);
     const queue = mockQueue();
-    const mgr = createBackgroundManager(orchestrator);
+    const mgr = new BackgroundManager(orchestrator);
 
     mgr.spawn("test-task", "do something", "haiku", "/workspace", queue);
 
@@ -61,7 +60,7 @@ describe("createBackgroundManager", () => {
     });
     const orchestrator = mockOrchestrator(() => claudePromise);
     const queue = mockQueue();
-    const mgr = createBackgroundManager(orchestrator);
+    const mgr = new BackgroundManager(orchestrator);
 
     mgr.spawn("failing-task", "do something", undefined, "/workspace", queue);
     expect(mgr.size).toBe(1);
@@ -85,7 +84,7 @@ describe("createBackgroundManager", () => {
       actionReason: "empty",
     }));
     const queue = mockQueue();
-    const mgr = createBackgroundManager(orchestrator);
+    const mgr = new BackgroundManager(orchestrator);
 
     mgr.spawn("empty-task", "do something", undefined, "/workspace", queue);
     await new Promise((r) => setTimeout(r, 0));
@@ -104,7 +103,7 @@ describe("createBackgroundManager", () => {
         }),
     );
     const queue = mockQueue();
-    const mgr = createBackgroundManager(orchestrator);
+    const mgr = new BackgroundManager(orchestrator);
 
     mgr.spawn("task-a", "prompt a", undefined, "/workspace", queue);
     mgr.spawn("task-b", "prompt b", undefined, "/workspace", queue);
@@ -136,7 +135,7 @@ describe("createBackgroundManager", () => {
     });
     const orchestrator = mockOrchestrator(async () => ({ action: "send" as const, message: "", actionReason: "" }));
     const queue = mockQueue();
-    const mgr = createBackgroundManager(orchestrator);
+    const mgr = new BackgroundManager(orchestrator);
 
     mgr.adopt("timeout-task", "session-123", completion, queue);
 
@@ -161,7 +160,7 @@ describe("createBackgroundManager", () => {
     });
     const orchestrator = mockOrchestrator(async () => ({ action: "send" as const, message: "", actionReason: "" }));
     const queue = mockQueue();
-    const mgr = createBackgroundManager(orchestrator);
+    const mgr = new BackgroundManager(orchestrator);
 
     mgr.adopt("fail-task", "session-456", completion, queue);
     expect(mgr.size).toBe(1);
@@ -177,7 +176,7 @@ describe("createBackgroundManager", () => {
 
   it("list returns empty array when no agents are running", () => {
     const orchestrator = mockOrchestrator(async () => ({ action: "send" as const, message: "", actionReason: "" }));
-    const mgr = createBackgroundManager(orchestrator);
+    const mgr = new BackgroundManager(orchestrator);
     expect(mgr.list()).toEqual([]);
     expect(mgr.size).toBe(0);
   });
