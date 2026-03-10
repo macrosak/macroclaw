@@ -50,7 +50,9 @@ export class App {
 
   start() {
     log.info("Starting macroclaw...");
-    const cron = new CronScheduler(this.#config.workspace, this.#queue);
+    const cron = new CronScheduler(this.#config.workspace, {
+      onJob: (name, prompt, model) => this.#queue.push({ type: "cron", name, prompt, model }),
+    });
     cron.start();
     this.#bot.api.setMyCommands([
       { command: "chatid", description: "Show current chat ID" },

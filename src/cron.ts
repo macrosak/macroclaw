@@ -20,8 +20,8 @@ const cronConfigSchema = z.object({
 
 type CronConfig = z.infer<typeof cronConfigSchema>;
 
-interface Queue {
-  push(item: { type: "cron"; name: string; prompt: string; model?: string }): void;
+export interface CronSchedulerConfig {
+  onJob: (name: string, prompt: string, model?: string) => void;
 }
 
 const TICK_INTERVAL = 10_000; // 10 seconds
@@ -29,12 +29,12 @@ const TICK_INTERVAL = 10_000; // 10 seconds
 export class CronScheduler {
   #lastMinute = -1;
   #cronPath: string;
-  #queue: Queue;
+  #config: CronSchedulerConfig;
   #timer: Timer | null = null;
 
-  constructor(workspace: string, queue: Queue) {
+  constructor(workspace: string, config: CronSchedulerConfig) {
     this.#cronPath = join(workspace, ".macroclaw", "cron.json");
-    this.#queue = queue;
+    this.#config = config;
   }
 
   start(): void {
@@ -83,12 +83,7 @@ export class CronScheduler {
         // Match if the previous occurrence is within the current minute
         if (diff < 60_000) {
           log.debug({ name: job.name, cron: job.cron }, "Cron job triggered");
-          this.#queue.push({
-            type: "cron",
-            name: job.name,
-            prompt: job.prompt,
-            model: job.model,
-          });
+          this.#config.onJob(job.name, job.prompt, job.model);
           if (job.recurring === false) {
             firedNonRecurring.push(i);
           }
