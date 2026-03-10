@@ -55,6 +55,27 @@ function escapeHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+// --- XML fallback parser ---
+
+function parseStructuredOutputXml(text: string): Record<string, unknown> | null {
+  const match = text.match(/<StructuredOutput>([\s\S]*?)<\/StructuredOutput>/i);
+  if (!match) return null;
+
+  const result: Record<string, unknown> = {};
+  const paramRegex = /<parameter\s+name="([^"]+)">([\s\S]*?)<\/parameter>/gi;
+  for (const paramMatch of match[1].matchAll(paramRegex)) {
+    const [, name, value] = paramMatch;
+    // Try to parse JSON values (arrays, objects, booleans)
+    try {
+      result[name] = JSON.parse(value);
+    } catch {
+      result[name] = value;
+    }
+  }
+
+  return Object.keys(result).length > 0 ? result : null;
+}
+
 // --- Background tracking ---
 
 interface BackgroundInfo {
@@ -62,7 +83,6 @@ interface BackgroundInfo {
   sessionId: string;
   startTime: Date;
 }
-
 // --- Orchestrator ---
 
 export interface OrchestratorConfig {
@@ -378,10 +398,25 @@ export class Orchestrator {
     if (result.structuredOutput) {
       return { response: this.#validateResponse(result.structuredOutput), sessionId: result.sessionId };
     }
-    log.error({ hasResult: !!result.result }, "No structured_output in response");
-    const raw = result.result ? escapeHtml(result.result) : "";
-    const msg = raw ? `[No structured output] ${raw}` : "[No output]";
-    return { response: { action: "send", message: msg, actionReason: "no-structured-output" }, sessionId: result.sessionId };
+    // Fallback: when tools are used, structured_output may be missing.
+    // Try parsing result as JSON, then XML, otherwise wrap raw text.
+    if (result.result) {
+      try {
+        const parsed = JSON.parse(result.result);
+        log.warn("structured_output missing, parsed result as JSON fallback");
+        return { response: this.#validateResponse(parsed), sessionId: result.sessionId };
+      } catch {
+        const xmlParsed = parseStructuredOutputXml(result.result);
+        if (xmlParsed) {
+          log.warn("structured_output missing, parsed XML fallback");
+          return { response: this.#validateResponse(xmlParsed), sessionId: result.sessionId };
+        }
+        log.warn("structured_output missing, using raw result text");
+        return { response: { action: "send", message: escapeHtml(result.result), actionReason: "no-structured-output" }, sessionId: result.sessionId };
+      }
+    }
+    log.error("No structured_output and no result in response");
+    return { response: { action: "send", message: "[No output]", actionReason: "no-structured-output" }, sessionId: result.sessionId };
   }
 
   async #callClaude(built: BuiltRequest, flag: "--resume" | "--session-id", sid: string, forkSession?: boolean): Promise<CallResult | ClaudeDeferredResult> {
