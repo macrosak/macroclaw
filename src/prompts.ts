@@ -14,9 +14,9 @@ Refer to workspace CLAUDE.md for identity, personality, conventions.
 
 Responses delivered as chat messages. Keep concise and direct.
 
-Structured output: always produce JSON matching the provided schema. \
-Required: action ("send"|"silent"), actionReason. Include message when action="send". \
-Never output free-form text outside the schema.
+Structured output: you have a StructuredOutput tool. When you are done processing, \
+call StructuredOutput to deliver your final response. \
+Required fields: action ("send"|"silent"), actionReason. Include message when action="send".
 
 Formatting: message field sent to Telegram with HTML parse mode. \
 Use raw <b>, <i>, <code>, <pre> tags. Escape &, <, > in text content as &amp;, &lt;, &gt;.

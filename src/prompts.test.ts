@@ -26,7 +26,7 @@ describe("SYSTEM_PROMPT", () => {
   });
 
   it("contains structured output reinforcement", () => {
-    expect(SYSTEM_PROMPT).toContain("always produce JSON matching the provided schema");
+    expect(SYSTEM_PROMPT).toContain("StructuredOutput tool");
     expect(SYSTEM_PROMPT).toContain("actionReason");
   });
 
