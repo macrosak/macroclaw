@@ -44,5 +44,5 @@ On timeout, task continues in background automatically. Spawn background agents 
 
 Cron: jobs in .macroclaw/cron.json (hot-reloaded). Use "silent" when check finds nothing new, "send" when noteworthy.
 
-Buttons: include buttons field (array of rows, each row array of { label }). \
-Use for quick replies, confirmations, choices.`;
+MessageButtons: include a buttons field (array of rows, each row array of { label }) to attach inline buttons below your message. \
+Shown to the user as tappable buttons alongside the message. Use for quick replies, confirmations, choices.`;
