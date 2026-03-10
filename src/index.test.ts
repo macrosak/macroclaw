@@ -269,90 +269,114 @@ describe("createApp", () => {
       expect(opts.timeoutMs).toBe(60_000);
     });
 
-    it("re-queues user message with [Timeout] prefix on timeout", async () => {
-      const { ClaudeTimeoutError } = await import("./claude");
-      let callCount = 0;
+    it("backgrounds deferred requests and sends notification", async () => {
+      let resolveCompletion: (r: ClaudeResult) => void;
+      const completion = new Promise<ClaudeResult>((r) => { resolveCompletion = r; });
       const config = makeConfig({
-        runClaude: mock(async (): Promise<ClaudeResult> => {
-          callCount++;
-          if (callCount === 1) throw new ClaudeTimeoutError(60_000);
-          return successResult({ action: "send", message: "handled via retry", actionReason: "ok" });
-        }),
+        runClaude: mock(async (): Promise<ClaudeResult | import("./claude").ClaudeDeferredResult> =>
+          ({ deferred: true, sessionId: "test-session", completion }),
+        ),
       });
       const app = createApp(config);
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:text")![0];
 
       handler({ chat: { id: 12345 }, message: { text: "do something slow" } });
-      await new Promise((r) => setTimeout(r, 100));
-
-      expect(callCount).toBe(2);
-      const secondOpts = (config.runClaude as any).mock.calls[1][0] as ClaudeOptions;
-      expect(secondOpts.prompt).toStartWith("[Timeout]");
-      expect(secondOpts.prompt).toContain("do something slow");
-
-      const sendCalls = (bot.api.sendMessage as any).mock.calls;
-      const texts = sendCalls.map((c: any) => c[1]);
-      expect(texts).toContain("Request timed out. Retrying as a background task...");
-    });
-
-    it("does not re-queue timeout messages that also time out", async () => {
-      const { ClaudeTimeoutError } = await import("./claude");
-      const config = makeConfig({
-        runClaude: mock(async (): Promise<ClaudeResult> => {
-          throw new ClaudeTimeoutError(60_000);
-        }),
-      });
-      const app = createApp(config);
-
-      app.queue.push({ type: "timeout", originalMessage: "previously timed out" });
       await new Promise((r) => setTimeout(r, 50));
 
-      // Should NOT re-queue — only one call
-      expect(config.runClaude).toHaveBeenCalledTimes(1);
-      const bot = app.bot as any;
       const sendCalls = (bot.api.sendMessage as any).mock.calls;
       const texts = sendCalls.map((c: any) => c[1]);
-      expect(texts.some((t: string) => t.includes("timed out") || t.includes("[Error]"))).toBe(true);
+      expect(texts).toContain("This is taking longer, continuing in the background.");
+
+      // Complete the deferred task
+      resolveCompletion!(successResult({ action: "send", message: "done!", actionReason: "ok" }));
+      await new Promise((r) => setTimeout(r, 100));
+
+      // Background result should be fed back
+      const allTexts = (bot.api.sendMessage as any).mock.calls.map((c: any) => c[1]);
+      expect(allTexts).toContain("done!");
     });
 
-    it("sends cron timeout notification on cron timeout", async () => {
-      const { ClaudeTimeoutError } = await import("./claude");
+    it("backgrounds deferred cron requests", async () => {
+      let resolveCompletion: (r: ClaudeResult) => void;
+      const completion = new Promise<ClaudeResult>((r) => { resolveCompletion = r; });
       const config = makeConfig({
-        runClaude: mock(async (): Promise<ClaudeResult> => {
-          throw new ClaudeTimeoutError(300_000);
-        }),
+        runClaude: mock(async (): Promise<ClaudeResult | import("./claude").ClaudeDeferredResult> =>
+          ({ deferred: true, sessionId: "test-session", completion }),
+        ),
       });
       const app = createApp(config);
+      const bot = app.bot as any;
 
       app.queue.push({ type: "cron", name: "daily-check", prompt: "Check for updates" });
       await new Promise((r) => setTimeout(r, 50));
 
-      const bot = app.bot as any;
       const sendCalls = (bot.api.sendMessage as any).mock.calls;
       const texts = sendCalls.map((c: any) => c[1]);
-      expect(texts).toContain('Cron job "daily-check" timed out after 300 seconds.');
+      expect(texts).toContain("This is taking longer, continuing in the background.");
+
+      resolveCompletion!(successResult({ action: "send", message: "cron done", actionReason: "ok" }));
+      await new Promise((r) => setTimeout(r, 100));
+
+      const allTexts = (bot.api.sendMessage as any).mock.calls.map((c: any) => c[1]);
+      expect(allTexts).toContain("cron done");
     });
 
-    it("handles background result timeout like user message timeout", async () => {
-      const { ClaudeTimeoutError } = await import("./claude");
+    it("applies background result directly when session IDs match", async () => {
+      const config = makeConfig();
+      const app = createApp(config);
+      const bot = app.bot as any;
+
+      // Push a background result with matching sessionId
+      app.queue.push({ type: "background", name: "task", result: "direct result", sessionId: "test-session" });
+      await new Promise((r) => setTimeout(r, 50));
+
+      const sendCalls = (bot.api.sendMessage as any).mock.calls;
+      const texts = sendCalls.map((c: any) => c[1]);
+      expect(texts).toContain("direct result");
+      // Should NOT have called runClaude for this
+      expect(config.runClaude).not.toHaveBeenCalled();
+    });
+
+    it("processes background result through orchestrator when session IDs differ", async () => {
+      const config = makeConfig();
+      const app = createApp(config);
+
+      app.queue.push({ type: "background", name: "task", result: "indirect result", sessionId: "different-session" });
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Should have called runClaude to process through orchestrator
+      expect(config.runClaude).toHaveBeenCalled();
+    });
+
+    it("forks session when bg task runs on main session", async () => {
+      let resolveCompletion: (r: ClaudeResult) => void;
+      const completion = new Promise<ClaudeResult>((r) => { resolveCompletion = r; });
       let callCount = 0;
       const config = makeConfig({
-        runClaude: mock(async (): Promise<ClaudeResult> => {
+        runClaude: mock(async (): Promise<ClaudeResult | import("./claude").ClaudeDeferredResult> => {
           callCount++;
-          if (callCount === 1) throw new ClaudeTimeoutError(60_000);
-          return successResult({ action: "send", message: "ok", actionReason: "ok" });
+          if (callCount === 1) return { deferred: true, sessionId: "test-session", completion };
+          return successResult({ action: "send", message: "forked response", actionReason: "ok" });
         }),
       });
       const app = createApp(config);
+      const bot = app.bot as any;
+      const handler = bot.filterHandlers.get("message:text")![0];
 
-      app.queue.push({ type: "background", name: "research", result: "long result" });
-      await new Promise((r) => setTimeout(r, 100));
+      // First message gets deferred (backgrounded on test-session)
+      handler({ chat: { id: 12345 }, message: { text: "slow task" } });
+      await new Promise((r) => setTimeout(r, 50));
 
-      expect(callCount).toBe(2);
-      const secondOpts = (config.runClaude as any).mock.calls[1][0] as ClaudeOptions;
-      expect(secondOpts.prompt).toStartWith("[Timeout]");
-      expect(secondOpts.prompt).toContain("[Background: research] long result");
+      // Second message should trigger a fork
+      handler({ chat: { id: 12345 }, message: { text: "follow up" } });
+      await new Promise((r) => setTimeout(r, 50));
+
+      const opts = (config.runClaude as any).mock.calls[1][0] as ClaudeOptions;
+      expect(opts.forkSession).toBe(true);
+
+      resolveCompletion!(successResult({ action: "send", message: "bg done", actionReason: "ok" }));
+      await new Promise((r) => setTimeout(r, 50));
     });
 
     it("sends error wrapped in ClaudeResponse", async () => {

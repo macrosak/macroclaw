@@ -38,7 +38,7 @@ const jsonSchema = JSON.stringify(z.toJSONSchema(claudeResponseSchema, { target:
 export type OrchestratorRequest =
   | { type: "user"; message: string; files?: string[] }
   | { type: "cron"; name: string; prompt: string; model?: string }
-  | { type: "background"; name: string; result: string }
+  | { type: "background"; name: string; result: string; sessionId?: string }
   | { type: "timeout"; originalMessage: string }
   | { type: "bg-task"; name: string; prompt: string; model?: string }
   | { type: "button"; label: string };

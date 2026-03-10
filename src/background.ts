@@ -23,7 +23,7 @@ interface Queue {
 }
 
 interface Orchestrator {
-  processRequest(request: OrchestratorRequest): Promise<ClaudeResponse | ClaudeDeferredResult>;
+  processRequest(request: OrchestratorRequest, options?: { forkSession?: boolean }): Promise<ClaudeResponse | ClaudeDeferredResult>;
 }
 
 export function createBackgroundManager(orchestrator: Orchestrator) {
