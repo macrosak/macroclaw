@@ -190,7 +190,7 @@ export class Orchestrator {
 
   async #deliverClaudeResponse(response: ClaudeResponseInternal): Promise<void> {
     if (response.action === "send") {
-      await this.#config.onResponse({
+      this.#callOnResponse({
         message: response.message || "[No output]",
         files: response.files,
         buttons: response.buttons,
