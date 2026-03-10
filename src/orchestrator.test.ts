@@ -194,6 +194,29 @@ describe("createOrchestrator", () => {
       expect(result.message).toBe("Claude said this");
     });
 
+    it("parses <StructuredOutput> XML when structured_output is null and result is XML", async () => {
+      const xml = `<StructuredOutput>\n<parameter name="action">silent</parameter>\n<parameter name="actionReason">No notification needed</parameter>\n</StructuredOutput>`;
+      const claude = mockClaude({ structuredOutput: null, result: xml });
+      const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
+
+      const result = await orch.processRequest({ type: "user", message: "hi" });
+
+      expect(result.action).toBe("silent");
+      expect(result.actionReason).toBe("No notification needed");
+    });
+
+    it("parses <StructuredOutput> XML with JSON array values", async () => {
+      const xml = `<StructuredOutput>\n<parameter name="action">send</parameter>\n<parameter name="actionReason">reply</parameter>\n<parameter name="message">Hello</parameter>\n<parameter name="buttons">[[{"label":"Yes"},{"label":"No"}]]</parameter>\n</StructuredOutput>`;
+      const claude = mockClaude({ structuredOutput: null, result: xml });
+      const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
+
+      const result = await orch.processRequest({ type: "user", message: "hi" });
+
+      expect(result.action).toBe("send");
+      expect(result.message).toBe("Hello");
+      expect(result.buttons).toEqual([[{ label: "Yes" }, { label: "No" }]]);
+    });
+
     it("returns [No output] when both structured_output and result are missing", async () => {
       const claude = mockClaude({ structuredOutput: null });
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
