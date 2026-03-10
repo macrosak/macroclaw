@@ -8,11 +8,13 @@ const prettyStream = pretty({
 	messageFormat: "[{module}] {msg}",
 });
 
-const streams: pino.StreamEntry[] = [{ stream: prettyStream }];
+const level = (process.env.LOG_LEVEL || "debug") as pino.Level;
+
+const streams: pino.StreamEntry[] = [{ level, stream: prettyStream }];
 
 if (pinoramaUrl) {
 	const { default: pinoramaTransport } = await import("pinorama-transport");
-	streams.push({ stream: pinoramaTransport({ url: pinoramaUrl }) });
+	streams.push({ level, stream: pinoramaTransport({ url: pinoramaUrl }) });
 }
 
 const logger = pino(
