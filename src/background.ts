@@ -14,7 +14,7 @@ interface BackgroundInfo {
 export interface BackgroundQueueItem {
   type: "background-agent-result";
   name: string;
-  result: string;
+  response: ClaudeResponse;
   sessionId?: string;
 }
 
@@ -60,14 +60,13 @@ export class BackgroundManager {
           response = rawResponse;
         }
         this.#active.delete(sessionId);
-        const result = (response.action === "send" ? response.message : "") || "[No output]";
-        log.debug({ name, result }, "Background agent finished");
-        queue.push({ type: "background-agent-result", name, result });
+        log.debug({ name, message: response.message }, "Background agent finished");
+        queue.push({ type: "background-agent-result", name, response });
       },
       (err) => {
         this.#active.delete(sessionId);
         log.error({ name, err }, "Background agent failed");
-        queue.push({ type: "background-agent-result", name, result: `[Error] ${err}` });
+        queue.push({ type: "background-agent-result", name, response: { action: "send", message: `[Error] ${err}`, actionReason: "bg-agent-failed" } });
       },
     );
   }
@@ -86,14 +85,13 @@ export class BackgroundManager {
     completion.then(
       (response) => {
         this.#active.delete(sessionId);
-        const result = (response.action === "send" ? response.message : "") || "[No output]";
-        log.debug({ name, result }, "Adopted task finished");
-        queue.push({ type: "background-agent-result", name, result, sessionId });
+        log.debug({ name, message: response.message }, "Adopted task finished");
+        queue.push({ type: "background-agent-result", name, response, sessionId });
       },
       (err) => {
         this.#active.delete(sessionId);
         log.error({ name, err }, "Adopted task failed");
-        queue.push({ type: "background-agent-result", name, result: `[Error] ${err}`, sessionId });
+        queue.push({ type: "background-agent-result", name, response: { action: "send", message: `[Error] ${err}`, actionReason: "adopted-task-failed" }, sessionId });
       },
     );
   }

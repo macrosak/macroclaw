@@ -50,7 +50,7 @@ describe("BackgroundManager", () => {
 
     expect(mgr.size).toBe(0);
     expect(queue.items).toHaveLength(1);
-    expect(queue.items[0]).toEqual({ type: "background-agent-result", name: "test-task", result: "done!" });
+    expect(queue.items[0]).toEqual({ type: "background-agent-result", name: "test-task", response: { action: "send", message: "done!", actionReason: "completed" } });
   });
 
   it("feeds error back to queue on failure", async () => {
@@ -74,7 +74,7 @@ describe("BackgroundManager", () => {
     expect(mgr.size).toBe(0);
     expect(queue.items).toHaveLength(1);
     expect(queue.items[0].name).toBe("failing-task");
-    expect(queue.items[0].result).toContain("[Error]");
+    expect(queue.items[0].response.message).toContain("[Error]");
   });
 
   it("sends [No output] when message is empty", async () => {
@@ -89,7 +89,7 @@ describe("BackgroundManager", () => {
     mgr.spawn("empty-task", "do something", undefined, queue);
     await new Promise((r) => setTimeout(r, 0));
 
-    expect(queue.items[0]).toEqual({ type: "background-agent-result", name: "empty-task", result: "[No output]" });
+    expect(queue.items[0]).toEqual({ type: "background-agent-result", name: "empty-task", response: { action: "send", message: "", actionReason: "empty" } });
   });
 
   it("tracks multiple concurrent agents", async () => {
@@ -125,7 +125,7 @@ describe("BackgroundManager", () => {
 
     expect(mgr.size).toBe(2);
     expect(queue.items).toHaveLength(1);
-    expect(queue.items[0]).toEqual({ type: "background-agent-result", name: "task-b", result: "b done" });
+    expect(queue.items[0]).toEqual({ type: "background-agent-result", name: "task-b", response: { action: "send", message: "b done", actionReason: "ok" } });
   });
 
   it("adopt registers an already-running process and feeds result back", async () => {
@@ -150,7 +150,7 @@ describe("BackgroundManager", () => {
 
     expect(mgr.size).toBe(0);
     expect(queue.items).toHaveLength(1);
-    expect(queue.items[0]).toEqual({ type: "background-agent-result", name: "timeout-task", result: "completed!", sessionId: "session-123" });
+    expect(queue.items[0]).toEqual({ type: "background-agent-result", name: "timeout-task", response: { action: "send", message: "completed!", actionReason: "ok" }, sessionId: "session-123" });
   });
 
   it("adopt feeds error back on failure", async () => {
@@ -170,7 +170,7 @@ describe("BackgroundManager", () => {
     await new Promise((r) => setTimeout(r, 0));
 
     expect(mgr.size).toBe(0);
-    expect(queue.items[0].result).toContain("[Error]");
+    expect(queue.items[0].response.message).toContain("[Error]");
     expect(queue.items[0].sessionId).toBe("session-456");
   });
 

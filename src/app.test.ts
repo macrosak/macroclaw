@@ -113,7 +113,7 @@ describe("App", () => {
     const app = new App(makeConfig());
     const bot = app.bot as any;
 
-    const ctx = { reply: mock(() => {}) };
+    const ctx = { chat: { id: 12345 }, reply: mock(() => {}) };
     bot.commandHandlers.get("session")!(ctx);
     const reply = (ctx.reply as any).mock.calls[0][0];
     expect(reply).toMatch(/Session: `[0-9a-f]{8}-/);
@@ -266,7 +266,7 @@ describe("App", () => {
       const config = makeConfig();
       const app = new App(config);
 
-      app.queue.push({ type: "background-agent-result", name: "research", result: "Here are the results" });
+      app.queue.push({ type: "background-agent-result", name: "research", response: { action: "send", message: "Here are the results", actionReason: "ok" } });
       await new Promise((r) => setTimeout(r, 50));
 
       const opts = (config.claude as any).run.mock.calls[0][0] as ClaudeRunOptions;
@@ -334,7 +334,7 @@ describe("App", () => {
       const bot = app.bot as any;
 
       // Push a background result with matching sessionId
-      app.queue.push({ type: "background-agent-result", name: "task", result: "direct result", sessionId: "test-session" });
+      app.queue.push({ type: "background-agent-result", name: "task", response: { action: "send", message: "direct result", actionReason: "ok" }, sessionId: "test-session" });
       await new Promise((r) => setTimeout(r, 50));
 
       const sendCalls = (bot.api.sendMessage as any).mock.calls;
@@ -348,7 +348,7 @@ describe("App", () => {
       const config = makeConfig();
       const app = new App(config);
 
-      app.queue.push({ type: "background-agent-result", name: "task", result: "indirect result", sessionId: "different-session" });
+      app.queue.push({ type: "background-agent-result", name: "task", response: { action: "send", message: "indirect result", actionReason: "ok" }, sessionId: "different-session" });
       await new Promise((r) => setTimeout(r, 50));
 
       // Should have called claude.run to process through orchestrator
@@ -647,7 +647,7 @@ describe("App", () => {
       const app = new App(makeConfig());
       const bot = app.bot as any;
       const handler = bot.commandHandlers.get("session")!;
-      const ctx = { reply: mock(() => {}) };
+      const ctx = { chat: { id: 12345 }, reply: mock(() => {}) };
 
       handler(ctx);
       expect(ctx.reply).toHaveBeenCalledWith("Session: `test-session`", { parse_mode: "Markdown" });

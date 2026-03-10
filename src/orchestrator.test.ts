@@ -99,7 +99,7 @@ describe("Orchestrator", () => {
       const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }));
       const orch = new Orchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, claude });
 
-      await processSync(orch, { type: "background-agent-result", name: "research", result: "found it" });
+      await processSync(orch, { type: "background-agent-result", name: "research", response: { action: "send", message: "found it", actionReason: "ok" } });
 
       const opts = claude.run.mock.calls[0][0];
       expect(opts.prompt).toBe("[Background: research] found it");

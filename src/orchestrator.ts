@@ -38,7 +38,7 @@ const jsonSchema = JSON.stringify(z.toJSONSchema(claudeResponseSchema, { target:
 export type OrchestratorRequest =
   | { type: "user"; message: string; files?: string[] }
   | { type: "cron"; name: string; prompt: string; model?: string }
-  | { type: "background-agent-result"; name: string; result: string; sessionId?: string }
+  | { type: "background-agent-result"; name: string; response: ClaudeResponse; sessionId?: string }
   | { type: "background-agent"; name: string; prompt: string; model?: string }
   | { type: "button"; label: string };
 
@@ -160,7 +160,7 @@ export class Orchestrator {
         };
       case "background-agent-result":
         return {
-          prompt: `[Background: ${request.name}] ${request.result}`,
+          prompt: `[Background: ${request.name}] ${request.response.message || "[No output]"}`,
           model: this.#config.model,
           systemPrompt: PROMPT_BACKGROUND_RESULT,
           timeout: MAIN_TIMEOUT,
