@@ -6,6 +6,7 @@ export interface ClaudeOptions {
   prompt: string;
   sessionFlag: "--resume" | "--session-id";
   sessionId: string;
+  forkSession?: boolean;
   model?: string;
   workspace: string;
   systemPrompt?: string;
@@ -15,15 +16,20 @@ export interface ClaudeOptions {
 
 export interface ClaudeResult {
   structuredOutput: unknown;
+  sessionId: string;
   result?: string;
   duration?: string;
   cost?: string;
 }
 
-export class ClaudeTimeoutError extends Error {
-  constructor(public timeoutMs: number) {
-    super(`Claude process timed out after ${Math.round(timeoutMs / 1000)}s`);
-  }
+export interface ClaudeDeferredResult {
+  deferred: true;
+  sessionId: string;
+  completion: Promise<ClaudeResult>;
+}
+
+export function isDeferred<T>(result: T | ClaudeDeferredResult): result is ClaudeDeferredResult {
+  return result != null && typeof result === "object" && "deferred" in result && (result as ClaudeDeferredResult).deferred === true;
 }
 
 export class ClaudeProcessError extends Error {
@@ -41,12 +47,43 @@ export class ClaudeParseError extends Error {
   }
 }
 
-export async function runClaude(options: ClaudeOptions): Promise<ClaudeResult> {
+function parseEnvelope(stdout: string): ClaudeResult {
+  try {
+    const envelope = JSON.parse(stdout);
+    const duration = envelope.duration_ms ? `${(envelope.duration_ms / 1000).toFixed(1)}s` : undefined;
+    const cost = envelope.total_cost_usd ? `$${envelope.total_cost_usd.toFixed(4)}` : undefined;
+    const structuredOutput = envelope.structured_output ?? null;
+    if (!structuredOutput) {
+      log.debug({ envelope }, "No structured_output in envelope");
+    }
+    const sid = typeof envelope.session_id === "string" ? envelope.session_id : "";
+    const result = typeof envelope.result === "string" ? envelope.result : undefined;
+    log.debug({ duration, cost, sessionId: sid }, "Claude response received");
+    return { structuredOutput, sessionId: sid, result, duration, cost };
+  } catch {
+    log.warn({ stdout: stdout.slice(0, 200) }, "Failed to parse Claude stdout as JSON");
+    throw new ClaudeParseError(stdout);
+  }
+}
+
+async function awaitProcess(proc: { exited: Promise<number>; stdout: ReadableStream<Uint8Array> | null; stderr: ReadableStream<Uint8Array> | null }): Promise<ClaudeResult> {
+  const exitCode = await proc.exited;
+  if (exitCode !== 0) {
+    const stderr = await new Response(proc.stderr).text();
+    log.error({ exitCode, stderr: stderr.slice(0, 200) }, "Claude process failed");
+    throw new ClaudeProcessError(exitCode, stderr);
+  }
+  const stdout = await new Response(proc.stdout).text();
+  return parseEnvelope(stdout);
+}
+
+export async function runClaude(options: ClaudeOptions): Promise<ClaudeResult | ClaudeDeferredResult> {
   // Strip CLAUDECODE env var so nested claude sessions are allowed
   const env = { ...process.env };
   delete env.CLAUDECODE;
 
   const args = ["claude", "-p", options.sessionFlag, options.sessionId, "--output-format", "json", "--json-schema", options.jsonSchema];
+  if (options.forkSession) args.push("--fork-session");
   if (options.model) args.push("--model", options.model);
   if (options.systemPrompt) args.push("--append-system-prompt", options.systemPrompt);
   args.push(options.prompt);
@@ -69,42 +106,23 @@ export async function runClaude(options: ClaudeOptions): Promise<ClaudeResult> {
     stderr: "pipe",
   });
 
-  let timedOut = false;
-  const timeout = options.timeoutMs
-    ? setTimeout(() => {
-        timedOut = true;
-        proc.kill();
-      }, options.timeoutMs)
-    : undefined;
+  const completion = awaitProcess(proc);
 
-  const exitCode = await proc.exited;
-  if (timeout) clearTimeout(timeout);
-
-  if (timedOut) {
-    log.warn({ timeoutMs: options.timeoutMs }, "Claude process timed out");
-    throw new ClaudeTimeoutError(options.timeoutMs as number);
+  if (!options.timeoutMs) {
+    return completion;
   }
 
-  if (exitCode !== 0) {
-    const stderr = await new Response(proc.stderr).text();
-    log.error({ exitCode, stderr: stderr.slice(0, 200) }, "Claude process failed");
-    throw new ClaudeProcessError(exitCode, stderr);
-  }
+  const result = await Promise.race([
+    completion.then((r) => ({ kind: "done" as const, value: r })),
+    new Promise<{ kind: "timeout" }>((resolve) => setTimeout(() => resolve({ kind: "timeout" }), options.timeoutMs)),
+  ]);
 
-  const stdout = await new Response(proc.stdout).text();
-  try {
-    const envelope = JSON.parse(stdout);
-    const duration = envelope.duration_ms ? `${(envelope.duration_ms / 1000).toFixed(1)}s` : undefined;
-    const cost = envelope.total_cost_usd ? `$${envelope.total_cost_usd.toFixed(4)}` : undefined;
-    const structuredOutput = envelope.structured_output ?? null;
-    if (!structuredOutput) {
-      log.debug({ envelope }, "No structured_output in envelope");
-    }
-    const result = typeof envelope.result === "string" ? envelope.result : undefined;
-    log.debug({ duration, cost }, "Claude response received");
-    return { structuredOutput, result, duration, cost };
-  } catch {
-    log.warn({ stdout: stdout.slice(0, 200) }, "Failed to parse Claude stdout as JSON");
-    throw new ClaudeParseError(stdout);
-  }
+  if (result.kind === "done") return result.value;
+
+  log.info({ timeoutMs: options.timeoutMs, sessionId: options.sessionId }, "Claude process timed out, deferring to background");
+  return {
+    deferred: true,
+    sessionId: options.sessionId,
+    completion,
+  };
 }

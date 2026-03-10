@@ -66,7 +66,8 @@ Responses must complete within the timeout for the current context:
 - Cron events: ${fmtMin(CRON_TIMEOUT)}
 - Background agents: ${fmtMin(BG_TIMEOUT)}
 
-If a user message times out, it is automatically retried with instructions to spawn a background agent. \
+If a response times out, the task automatically continues in the background. \
+The user is notified and the result is delivered when it completes. \
 For tasks that need more time, proactively spawn a background agent rather than risk a timeout.
 
 ## Cron System

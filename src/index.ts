@@ -1,9 +1,9 @@
+
 import { createBackgroundManager } from "./background";
-import type { ClaudeOptions, ClaudeResult } from "./claude";
+import { type ClaudeDeferredResult, type ClaudeOptions, type ClaudeResult, isDeferred } from "./claude";
 import { startCron } from "./cron";
 import { createLogger } from "./logger";
-import { createOrchestrator, type OrchestratorRequest } from "./orchestrator";
-import { CRON_TIMEOUT } from "./prompts";
+import { type ClaudeResponse, createOrchestrator, type OrchestratorRequest } from "./orchestrator";
 import { createQueue } from "./queue";
 import { createBot, downloadFile, sendFile, sendResponse } from "./telegram";
 
@@ -15,7 +15,7 @@ export interface AppConfig {
   workspace: string;
   model?: string;
   settingsDir?: string;
-  runClaude?: (options: ClaudeOptions) => Promise<ClaudeResult>;
+  runClaude?: (options: ClaudeOptions) => Promise<ClaudeResult | ClaudeDeferredResult>;
 }
 
 export function requireEnv(name: string): string {
@@ -38,29 +38,7 @@ export function createApp(config: AppConfig) {
   });
   const background = createBackgroundManager(orchestrator);
 
-  queue.setHandler(async (request) => {
-    log.debug({ type: request.type }, "Incoming request");
-    await bot.api.sendChatAction(config.authorizedChatId, "typing");
-
-    const response = await orchestrator.processRequest(request);
-    log.debug({ action: response.action, actionReason: response.actionReason }, "Response");
-
-    if (response.actionReason === "timeout") {
-      if (request.type === "cron") {
-        await sendResponse(bot, config.authorizedChatId, `Cron job "${request.name}" timed out after ${CRON_TIMEOUT / 1000} seconds.`);
-      } else if (request.type !== "timeout") {
-        await sendResponse(bot, config.authorizedChatId, "Request timed out. Retrying as a background task...");
-        const prompt = request.type === "user" ? request.message
-          : request.type === "background" ? `[Background: ${request.name}] ${request.result}`
-          : "";
-        queue.push({ type: "timeout", originalMessage: prompt });
-      } else {
-        const msg = response.action === "send" ? response.message : "";
-        await sendResponse(bot, config.authorizedChatId, msg || "[Error] Retry also timed out.");
-      }
-      return;
-    }
-
+  async function handleResponse(response: ClaudeResponse) {
     if (response.action === "send") {
       if (response.files?.length) {
         for (const filePath of response.files) {
@@ -72,7 +50,6 @@ export function createApp(config: AppConfig) {
       log.debug("Silent response");
     }
 
-    // Spawn background agents if any
     if (response.backgroundAgents?.length) {
       for (const agent of response.backgroundAgents) {
         const agentModel = agent.model ?? config.model;
@@ -80,6 +57,42 @@ export function createApp(config: AppConfig) {
         await sendResponse(bot, config.authorizedChatId, `Background agent "${agent.name}" started.`);
       }
     }
+  }
+
+  queue.setHandler(async (request) => {
+    log.debug({ type: request.type }, "Incoming request");
+    await bot.api.sendChatAction(config.authorizedChatId, "typing");
+
+    // Background result with matching session ID: apply directly without Claude round-trip
+    if (request.type === "background" && "sessionId" in request && request.sessionId === orchestrator.sessionId) {
+      log.debug({ name: request.name }, "Background result on current session, applying directly");
+      await sendResponse(bot, config.authorizedChatId, request.result || "[No output]");
+      return;
+    }
+
+    // Fork session if a backgrounded task is running on the main session
+    const needsFork = (request.type === "user" || request.type === "button") && background.hasSessionId(orchestrator.sessionId);
+
+    const rawResponse = await orchestrator.processRequest(request, needsFork ? { forkSession: true } : undefined);
+    if (isDeferred(rawResponse)) {
+      const name = request.type === "user" ? request.message.slice(0, 30).replace(/\s+/g, "-")
+        : request.type === "cron" ? `cron-${request.name}`
+        : "task";
+      log.info({ name, sessionId: rawResponse.sessionId }, "Request backgrounded due to timeout");
+      await sendResponse(bot, config.authorizedChatId, "This is taking longer, continuing in the background.");
+      background.adopt(name, rawResponse.sessionId, rawResponse.completion.then(
+        (r) => {
+          const msg = r.structuredOutput ? String((r.structuredOutput as Record<string, unknown>).message ?? "") : (r.result ?? "");
+          return { action: "send" as const, message: msg, actionReason: "deferred-completed" };
+        },
+        (err) => ({ action: "send" as const, message: `[Error] ${err}`, actionReason: "deferred-failed" }),
+      ), queue);
+      return;
+    }
+    const response = rawResponse;
+    log.debug({ action: response.action, actionReason: response.actionReason }, "Response");
+
+    await handleResponse(response);
   });
 
   bot.command("chatid", (ctx) => {
@@ -93,7 +106,16 @@ export function createApp(config: AppConfig) {
   });
 
   bot.command("bg", (ctx) => {
-    log.debug("Command /bg");
+    if (ctx.chat.id.toString() !== config.authorizedChatId) return;
+    const prompt = ctx.match?.trim();
+    if (prompt) {
+      log.debug({ prompt }, "Command /bg spawn");
+      const name = prompt.slice(0, 30).replace(/\s+/g, "-");
+      background.spawn(name, prompt, config.model, config.workspace, queue);
+      ctx.reply(`Background agent "${name}" started.`);
+      return;
+    }
+    log.debug("Command /bg list");
     const agents = background.list();
     if (agents.length === 0) {
       ctx.reply("No background agents running.");
@@ -148,15 +170,6 @@ export function createApp(config: AppConfig) {
       return;
     }
 
-    const bgMatch = ctx.message.text.match(/^bg:\s*(.+)/s);
-    if (bgMatch) {
-      const prompt = bgMatch[1].trim();
-      const name = prompt.slice(0, 30).replace(/\s+/g, "-");
-      background.spawn(name, prompt, config.model, config.workspace, queue);
-      ctx.reply(`Background agent "${name}" started.`);
-      return;
-    }
-
     queue.push({ type: "user", message: ctx.message.text });
   });
 
@@ -173,7 +186,7 @@ export function createApp(config: AppConfig) {
       bot.api.setMyCommands([
         { command: "chatid", description: "Show current chat ID" },
         { command: "session", description: "Show current session ID" },
-        { command: "bg", description: "List background agents" },
+        { command: "bg", description: "List or spawn background agents" },
       ]).catch((err) => log.error({ err }, "Failed to set commands"));
       bot.start({
         onStart: (botInfo) => {

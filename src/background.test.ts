@@ -1,4 +1,5 @@
 import { describe, expect, it, mock } from "bun:test";
+import type { BackgroundQueueItem } from "./background";
 import { createBackgroundManager } from "./background";
 import type { ClaudeResponse, OrchestratorRequest } from "./orchestrator";
 
@@ -7,9 +8,9 @@ function mockOrchestrator(handler: (request: OrchestratorRequest) => Promise<Cla
 }
 
 function mockQueue() {
-  const items: { type: "background"; name: string; result: string }[] = [];
+  const items: BackgroundQueueItem[] = [];
   return {
-    push(item: { type: "background"; name: string; result: string }) {
+    push(item: BackgroundQueueItem) {
       items.push(item);
     },
     items,
@@ -126,6 +127,52 @@ describe("createBackgroundManager", () => {
     expect(mgr.size).toBe(2);
     expect(queue.items).toHaveLength(1);
     expect(queue.items[0]).toEqual({ type: "background", name: "task-b", result: "b done" });
+  });
+
+  it("adopt registers an already-running process and feeds result back", async () => {
+    let resolvePromise: (r: ClaudeResponse) => void;
+    const completion = new Promise<ClaudeResponse>((r) => {
+      resolvePromise = r;
+    });
+    const orchestrator = mockOrchestrator(async () => ({ action: "send" as const, message: "", actionReason: "" }));
+    const queue = mockQueue();
+    const mgr = createBackgroundManager(orchestrator);
+
+    mgr.adopt("timeout-task", "session-123", completion, queue);
+
+    expect(mgr.size).toBe(1);
+    expect(mgr.list()[0].name).toBe("timeout-task");
+    expect(mgr.hasSessionId("session-123")).toBe(true);
+    expect(mgr.hasSessionId("other")).toBe(false);
+
+    resolvePromise!({ action: "send", message: "completed!", actionReason: "ok" });
+    await completion;
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(mgr.size).toBe(0);
+    expect(queue.items).toHaveLength(1);
+    expect(queue.items[0]).toEqual({ type: "background", name: "timeout-task", result: "completed!", sessionId: "session-123" });
+  });
+
+  it("adopt feeds error back on failure", async () => {
+    let rejectPromise: (e: Error) => void;
+    const completion = new Promise<ClaudeResponse>((_, r) => {
+      rejectPromise = r;
+    });
+    const orchestrator = mockOrchestrator(async () => ({ action: "send" as const, message: "", actionReason: "" }));
+    const queue = mockQueue();
+    const mgr = createBackgroundManager(orchestrator);
+
+    mgr.adopt("fail-task", "session-456", completion, queue);
+    expect(mgr.size).toBe(1);
+
+    rejectPromise!(new Error("crash"));
+    try { await completion; } catch {}
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(mgr.size).toBe(0);
+    expect(queue.items[0].result).toContain("[Error]");
+    expect(queue.items[0].sessionId).toBe("session-456");
   });
 
   it("list returns empty array when no agents are running", () => {

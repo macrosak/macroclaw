@@ -1,5 +1,5 @@
 import { z } from "zod/v4";
-import { type ClaudeOptions, ClaudeParseError, ClaudeProcessError, type ClaudeResult, ClaudeTimeoutError, runClaude } from "./claude";
+import { type ClaudeDeferredResult, type ClaudeOptions, ClaudeParseError, ClaudeProcessError, type ClaudeResult, isDeferred, runClaude } from "./claude";
 import { logPrompt, logResult } from "./history";
 import { createLogger } from "./logger";
 import { BG_TIMEOUT, CRON_TIMEOUT, MAIN_TIMEOUT, PROMPT_BACKGROUND_RESULT, PROMPT_BUTTON_CLICK, PROMPT_CRON_EVENT, PROMPT_USER_MESSAGE, promptBackgroundAgent } from "./prompts";
@@ -38,10 +38,13 @@ const jsonSchema = JSON.stringify(z.toJSONSchema(claudeResponseSchema, { target:
 export type OrchestratorRequest =
   | { type: "user"; message: string; files?: string[] }
   | { type: "cron"; name: string; prompt: string; model?: string }
-  | { type: "background"; name: string; result: string }
-  | { type: "timeout"; originalMessage: string }
+  | { type: "background"; name: string; result: string; sessionId?: string }
   | { type: "bg-task"; name: string; prompt: string; model?: string }
   | { type: "button"; label: string };
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
 
 // --- Orchestrator ---
 
@@ -49,7 +52,7 @@ export interface OrchestratorConfig {
   model?: string;
   workspace: string;
   settingsDir?: string;
-  runClaude?: (options: ClaudeOptions) => Promise<ClaudeResult>;
+  runClaude?: (options: ClaudeOptions) => Promise<ClaudeResult | ClaudeDeferredResult>;
 }
 
 export function createOrchestrator(config: OrchestratorConfig) {
@@ -104,14 +107,6 @@ export function createOrchestrator(config: OrchestratorConfig) {
           timeout: MAIN_TIMEOUT,
           useMainSession: true,
         };
-      case "timeout":
-        return {
-          prompt: `[Timeout] The previous request timed out after ${MAIN_TIMEOUT / 1000} seconds. The user asked: "${request.originalMessage}". This task needs more time — spawn a background agent to handle it.`,
-          model: config.model,
-          systemPrompt: PROMPT_USER_MESSAGE,
-          timeout: MAIN_TIMEOUT,
-          useMainSession: true,
-        };
       case "button":
         return {
           prompt: `The user clicked MessageButton: "${request.label}"`,
@@ -146,12 +141,28 @@ export function createOrchestrator(config: OrchestratorConfig) {
     return { action: "send", message: msg, actionReason: "validation-failed" };
   }
 
-  async function callClaude(built: ReturnType<typeof buildRequest>, flag: "--resume" | "--session-id", sid: string): Promise<ClaudeResponse> {
+  interface CallResult {
+    response: ClaudeResponse;
+    sessionId: string;
+  }
+
+  function resultToCallResult(result: ClaudeResult): CallResult {
+    if (result.structuredOutput) {
+      return { response: validateResponse(result.structuredOutput), sessionId: result.sessionId };
+    }
+    log.error({ hasResult: !!result.result }, "No structured_output in response");
+    const raw = result.result ? escapeHtml(result.result) : "";
+    const msg = raw ? `[No structured output] ${raw}` : "[No output]";
+    return { response: { action: "send", message: msg, actionReason: "no-structured-output" }, sessionId: result.sessionId };
+  }
+
+  async function callClaude(built: ReturnType<typeof buildRequest>, flag: "--resume" | "--session-id", sid: string, forkSession?: boolean): Promise<CallResult | ClaudeDeferredResult> {
     try {
       const result = await claude({
         prompt: built.prompt,
         sessionFlag: flag,
         sessionId: sid,
+        forkSession,
         model: built.model,
         workspace: config.workspace,
         systemPrompt: built.systemPrompt,
@@ -159,34 +170,15 @@ export function createOrchestrator(config: OrchestratorConfig) {
         timeoutMs: built.timeout,
       });
 
-      if (result.structuredOutput) {
-        return validateResponse(result.structuredOutput);
-      }
+      if (isDeferred(result)) return result;
 
-      // Fallback: when tools are used, structured_output may be missing.
-      // Try parsing result as JSON, otherwise wrap raw text as a send response.
-      if (result.result) {
-        try {
-          const parsed = JSON.parse(result.result);
-          log.warn("structured_output missing, parsed result as JSON fallback");
-          return validateResponse(parsed);
-        } catch {
-          // Not JSON — treat as plain text response
-          log.warn("structured_output missing, using raw result text");
-          return { action: "send", message: result.result, actionReason: "no-structured-output" };
-        }
-      }
-      log.error("No structured_output and no result in response");
-      return { action: "send", message: "[No output]", actionReason: "no-structured-output" };
+      return resultToCallResult(result);
     } catch (err) {
-      if (err instanceof ClaudeTimeoutError) {
-        return { action: "send", message: `[Error] Claude process timed out after ${Math.round(err.timeoutMs / 1000)}s.`, actionReason: "timeout" };
-      }
       if (err instanceof ClaudeProcessError) {
-        return { action: "send", message: `[Error] Claude exited with code ${err.exitCode}:\n${err.stderr}`, actionReason: "process-error" };
+        return { response: { action: "send", message: `[Error] Claude exited with code ${err.exitCode}:\n${err.stderr}`, actionReason: "process-error" }, sessionId: sid };
       }
       if (err instanceof ClaudeParseError) {
-        return { action: "send", message: `[JSON Error] ${err.raw}`, actionReason: "json-parse-failed" };
+        return { response: { action: "send", message: `[JSON Error] ${err.raw}`, actionReason: "json-parse-failed" }, sessionId: sid };
       }
       throw err;
     }
@@ -197,38 +189,47 @@ export function createOrchestrator(config: OrchestratorConfig) {
       return sessionId;
     },
 
-    async processRequest(request: OrchestratorRequest): Promise<ClaudeResponse> {
+    async processRequest(request: OrchestratorRequest, options?: { forkSession?: boolean }): Promise<ClaudeResponse | ClaudeDeferredResult> {
       const built = buildRequest(request);
       await logPrompt(request);
 
       if (built.useMainSession) {
-        let response = await callClaude(built, sessionFlag, sessionId);
+        let result = await callClaude(built, sessionFlag, sessionId, options?.forkSession);
 
         // Session resolution: if resume failed on first call, create new session
-        if (!sessionResolved && sessionFlag === "--resume" && response.actionReason === "process-error") {
+        if (!isDeferred(result) && !sessionResolved && sessionFlag === "--resume" && result.response.actionReason === "process-error") {
           sessionId = newSessionId();
           log.info({ sessionId }, "Resume failed, created new session");
           sessionFlag = "--session-id";
           saveSettings({ sessionId }, config.settingsDir);
-          response = await callClaude(built, sessionFlag, sessionId);
+          result = await callClaude(built, sessionFlag, sessionId);
+        }
+
+        if (isDeferred(result)) return result;
+
+        // Update session ID from response (important after fork)
+        if (result.sessionId && result.sessionId !== sessionId) {
+          log.info({ oldSessionId: sessionId, newSessionId: result.sessionId }, "Session forked, updating session ID");
+          sessionId = result.sessionId;
+          saveSettings({ sessionId }, config.settingsDir);
         }
 
         // Mark resolved on first success
-        if (!sessionResolved && response.actionReason !== "process-error" && response.actionReason !== "timeout") {
+        if (!sessionResolved && result.response.actionReason !== "process-error") {
           sessionResolved = true;
           sessionFlag = "--resume";
         }
 
-        await logResult(response);
-        return response;
+        await logResult(result.response);
+        return result.response;
       }
 
-      // bg-task: fresh session, no session resolution
-      const bgSessionId = newSessionId();
-      log.debug({ name: (request as { name: string }).name, sessionId: bgSessionId }, "Processing bg-task");
-      const bgResponse = await callClaude(built, "--session-id", bgSessionId);
-      await logResult(bgResponse);
-      return bgResponse;
+      // bg-task: fork from main session for full context
+      log.debug({ name: (request as { name: string }).name }, "Processing bg-task (forked session)");
+      const bgResult = await callClaude(built, "--resume", sessionId, true);
+      if (isDeferred(bgResult)) return bgResult;
+      await logResult(bgResult.response);
+      return bgResult.response;
     },
   };
 }
