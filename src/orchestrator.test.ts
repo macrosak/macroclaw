@@ -294,7 +294,7 @@ describe("Orchestrator", () => {
       await waitForProcessing();
 
       expect(responses).toHaveLength(1);
-      expect(responses[0].message).toContain("test-id");
+      expect(responses[0].message).toBe("Session: <code>test-id</code>");
     });
 
     it("background-agent forks from main session without affecting it", async () => {

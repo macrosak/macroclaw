@@ -132,7 +132,7 @@ export class Orchestrator {
   handleBackgroundCommand(prompt: string): void {
     const name = prompt.slice(0, 30).replace(/\s+/g, "-");
     this.#spawnBackground(name, prompt, this.#config.model);
-    this.#callOnResponse({ message: `Background agent "${name}" started.` });
+    this.#callOnResponse({ message: `Background agent "${escapeHtml(name)}" started.` });
   }
 
   handleBackgroundList(): void {
@@ -143,13 +143,13 @@ export class Orchestrator {
     }
     const lines = agents.map((a) => {
       const elapsed = Math.round((Date.now() - a.startTime.getTime()) / 1000);
-      return `- ${a.name} (${elapsed}s)`;
+      return `- ${escapeHtml(a.name)} (${elapsed}s)`;
     });
     this.#callOnResponse({ message: lines.join("\n") });
   }
 
   handleSessionCommand(): void {
-    this.#callOnResponse({ message: `Session: \`${this.#sessionId}\`` });
+    this.#callOnResponse({ message: `Session: <code>${this.#sessionId}</code>` });
   }
 
   // --- Internal queue handler ---
@@ -203,7 +203,7 @@ export class Orchestrator {
       for (const agent of response.backgroundAgents) {
         const agentModel = agent.model ?? this.#config.model;
         this.#spawnBackground(agent.name, agent.prompt, agentModel);
-        this.#callOnResponse({ message: `Background agent "${agent.name}" started.` });
+        this.#callOnResponse({ message: `Background agent "${escapeHtml(agent.name)}" started.` });
       }
     }
   }

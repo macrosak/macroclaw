@@ -447,7 +447,7 @@ describe("App", () => {
       const calls = (bot.api.sendMessage as any).mock.calls;
       expect(calls.length).toBeGreaterThan(0);
       const text = calls[calls.length - 1][1];
-      expect(text).toContain("test-session");
+      expect(text).toBe("Session: <code>test-session</code>");
     });
 
     it("/session is ignored for unauthorized chats", async () => {
@@ -530,7 +530,7 @@ describe("App", () => {
 
       const calls = (bot.api.sendMessage as any).mock.calls;
       const text = calls[calls.length - 1][1];
-      expect(text).toMatch(/Session: `[0-9a-f]{8}-/);
+      expect(text).toMatch(/Session: <code>[0-9a-f]{8}-/);
     });
   });
 
