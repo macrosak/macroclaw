@@ -3,7 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { App, type AppConfig } from "./app";
 import { createLogger } from "./logger";
 
-const log = createLogger("main");
+const log = createLogger("index");
 
 function requireEnv(name: string): string {
   const value = process.env[name];

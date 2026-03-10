@@ -7,7 +7,7 @@ import { type ClaudeResponse, Orchestrator, type OrchestratorRequest } from "./o
 import { Queue } from "./queue";
 import { createBot, downloadFile, sendFile, sendResponse } from "./telegram";
 
-const log = createLogger("bot");
+const log = createLogger("app");
 
 export interface AppConfig {
   botToken: string;
