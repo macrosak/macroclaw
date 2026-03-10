@@ -3,7 +3,7 @@ import { Claude, type ClaudeDeferredResult, ClaudeParseError, ClaudeProcessError
 import { logPrompt, logResult } from "./history";
 import { createLogger } from "./logger";
 import { BG_TIMEOUT, CRON_TIMEOUT, MAIN_TIMEOUT, PROMPT_BACKGROUND_RESULT, PROMPT_BUTTON_CLICK, PROMPT_CRON_EVENT, PROMPT_USER_MESSAGE, promptBackgroundAgent } from "./prompts";
-import { loadSettings, newSessionId, saveSettings } from "./settings";
+import { loadSettings, newSessionId, type Settings, saveSettings } from "./settings";
 
 const log = createLogger("orchestrator");
 
@@ -71,7 +71,7 @@ interface CallResult {
 
 export class Orchestrator {
   #claude: Claude;
-  #settings: ReturnType<typeof loadSettings>;
+  #settings: Settings;
   #sessionId: string;
   #sessionFlag: "--resume" | "--session-id";
   #sessionResolved = false;
