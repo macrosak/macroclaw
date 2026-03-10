@@ -6,6 +6,7 @@ export interface ClaudeOptions {
   prompt: string;
   sessionFlag: "--resume" | "--session-id";
   sessionId: string;
+  forkSession?: boolean;
   model?: string;
   workspace: string;
   systemPrompt?: string;
@@ -47,6 +48,7 @@ export async function runClaude(options: ClaudeOptions): Promise<ClaudeResult> {
   delete env.CLAUDECODE;
 
   const args = ["claude", "-p", options.sessionFlag, options.sessionId, "--output-format", "json", "--json-schema", options.jsonSchema];
+  if (options.forkSession) args.push("--fork-session");
   if (options.model) args.push("--model", options.model);
   if (options.systemPrompt) args.push("--append-system-prompt", options.systemPrompt);
   args.push(options.prompt);

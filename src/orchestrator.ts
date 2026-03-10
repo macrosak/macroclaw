@@ -150,12 +150,13 @@ export function createOrchestrator(config: OrchestratorConfig) {
     return { action: "send", message: msg, actionReason: "validation-failed" };
   }
 
-  async function callClaude(built: ReturnType<typeof buildRequest>, flag: "--resume" | "--session-id", sid: string): Promise<ClaudeResponse> {
+  async function callClaude(built: ReturnType<typeof buildRequest>, flag: "--resume" | "--session-id", sid: string, forkSession?: boolean): Promise<ClaudeResponse> {
     try {
       const result = await claude({
         prompt: built.prompt,
         sessionFlag: flag,
         sessionId: sid,
+        forkSession,
         model: built.model,
         workspace: config.workspace,
         systemPrompt: built.systemPrompt,
@@ -216,10 +217,9 @@ export function createOrchestrator(config: OrchestratorConfig) {
         return response;
       }
 
-      // bg-task: fresh session, no session resolution
-      const bgSessionId = newSessionId();
-      log.debug({ name: (request as { name: string }).name, sessionId: bgSessionId }, "Processing bg-task");
-      const bgResponse = await callClaude(built, "--session-id", bgSessionId);
+      // bg-task: fork from main session for full context
+      log.debug({ name: (request as { name: string }).name }, "Processing bg-task (forked session)");
+      const bgResponse = await callClaude(built, "--resume", sessionId, true);
       await logResult(bgResponse);
       return bgResponse;
     },

@@ -93,7 +93,16 @@ export function createApp(config: AppConfig) {
   });
 
   bot.command("bg", (ctx) => {
-    log.debug("Command /bg");
+    if (ctx.chat.id.toString() !== config.authorizedChatId) return;
+    const prompt = ctx.match?.trim();
+    if (prompt) {
+      log.debug({ prompt }, "Command /bg spawn");
+      const name = prompt.slice(0, 30).replace(/\s+/g, "-");
+      background.spawn(name, prompt, config.model, config.workspace, queue);
+      ctx.reply(`Background agent "${name}" started.`);
+      return;
+    }
+    log.debug("Command /bg list");
     const agents = background.list();
     if (agents.length === 0) {
       ctx.reply("No background agents running.");
@@ -148,15 +157,6 @@ export function createApp(config: AppConfig) {
       return;
     }
 
-    const bgMatch = ctx.message.text.match(/^bg:\s*(.+)/s);
-    if (bgMatch) {
-      const prompt = bgMatch[1].trim();
-      const name = prompt.slice(0, 30).replace(/\s+/g, "-");
-      background.spawn(name, prompt, config.model, config.workspace, queue);
-      ctx.reply(`Background agent "${name}" started.`);
-      return;
-    }
-
     queue.push({ type: "user", message: ctx.message.text });
   });
 
@@ -173,7 +173,7 @@ export function createApp(config: AppConfig) {
       bot.api.setMyCommands([
         { command: "chatid", description: "Show current chat ID" },
         { command: "session", description: "Show current session ID" },
-        { command: "bg", description: "List background agents" },
+        { command: "bg", description: "List or spawn background agents" },
       ]).catch((err) => log.error({ err }, "Failed to set commands"));
       bot.start({
         onStart: (botInfo) => {

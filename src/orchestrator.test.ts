@@ -113,7 +113,7 @@ describe("createOrchestrator", () => {
       expect(opts.timeoutMs).toBe(60_000);
     });
 
-    it("builds bg-task with fresh session and bg timeout", async () => {
+    it("builds bg-task with forked session and bg timeout", async () => {
       saveSettings({ sessionId: "main-session" }, tmpSettingsDir);
       const claude = mockClaude(successResult({ action: "send", message: "done", actionReason: "ok" }));
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
@@ -122,8 +122,9 @@ describe("createOrchestrator", () => {
 
       const opts = claude.mock.calls[0][0];
       expect(opts.prompt).toBe("do work");
-      expect(opts.sessionFlag).toBe("--session-id");
-      expect(opts.sessionId).not.toBe("main-session"); // fresh session
+      expect(opts.sessionFlag).toBe("--resume");
+      expect(opts.sessionId).toBe("main-session");
+      expect(opts.forkSession).toBe(true);
       expect(opts.systemPrompt).toContain('background agent named "worker"');
       expect(opts.timeoutMs).toBe(1_800_000);
     });
@@ -344,21 +345,20 @@ describe("createOrchestrator", () => {
       expect(orch.sessionId).toBe("test-id");
     });
 
-    it("bg-task does not affect main session", async () => {
+    it("bg-task forks from main session without affecting it", async () => {
       saveSettings({ sessionId: "main-session" }, tmpSettingsDir);
       const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }));
       const orch = createOrchestrator({ workspace: TEST_WORKSPACE, settingsDir: tmpSettingsDir, runClaude: claude });
 
-      // First call: main session
       await orch.processRequest({ type: "user", message: "hello" });
-      // bg-task: separate session
       await orch.processRequest({ type: "bg-task", name: "worker", prompt: "work" });
-      // Third call: should still use main session
       await orch.processRequest({ type: "user", message: "again" });
 
       expect(claude.mock.calls[0][0].sessionId).toBe("main-session");
-      expect(claude.mock.calls[1][0].sessionId).not.toBe("main-session"); // bg-task
-      expect(claude.mock.calls[2][0].sessionId).toBe("main-session"); // main session preserved
+      expect(claude.mock.calls[1][0].sessionId).toBe("main-session"); // forked from main
+      expect(claude.mock.calls[1][0].forkSession).toBe(true);
+      expect(claude.mock.calls[2][0].sessionId).toBe("main-session"); // main preserved
+      expect(claude.mock.calls[2][0].forkSession).toBeUndefined();
     });
   });
 });

@@ -87,6 +87,22 @@ describe("runClaude", () => {
     );
   });
 
+  it("passes --fork-session when forkSession is true", async () => {
+    mockSpawn({ stdout: jsonResult({ action: "send" }), exitCode: 0 });
+    await runClaude(opts({ sessionFlag: "--resume", sessionId: "sid-fork", forkSession: true, prompt: "bg task" }));
+    expect(Bun.spawn).toHaveBeenCalledWith(
+      expect.arrayContaining(["--resume", "sid-fork", "--fork-session"]),
+      expect.objectContaining({ cwd: TEST_WORKSPACE }),
+    );
+  });
+
+  it("omits --fork-session when not specified", async () => {
+    mockSpawn({ stdout: jsonResult({ action: "send" }), exitCode: 0 });
+    await runClaude(opts({ sessionId: "sid-nofork" }));
+    const args = (Bun.spawn as any).mock.calls[0][0] as string[];
+    expect(args).not.toContain("--fork-session");
+  });
+
   it("omits --append-system-prompt when undefined", async () => {
     mockSpawn({ stdout: jsonResult({ action: "send" }), exitCode: 0 });
     await runClaude(opts({ sessionId: "sid-5" }));

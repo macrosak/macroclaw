@@ -230,24 +230,17 @@ describe("createApp", () => {
       expect(texts).toContain('Background agent "cleanup" started.');
     });
 
-    it("handles bg: prefix from Telegram", async () => {
-      const config = makeConfig({
-        runClaude: mock(() => new Promise<ClaudeResult>(() => {})),
-      });
+    it("does not treat bg: prefix as special", async () => {
+      const config = makeConfig();
       const app = createApp(config);
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:text")![0];
-      const ctx = {
-        chat: { id: 12345 },
-        message: { text: "bg: research pricing" },
-        reply: mock(() => {}),
-      };
 
-      handler(ctx);
+      handler({ chat: { id: 12345 }, message: { text: "bg: research pricing" } });
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(config.runClaude).toHaveBeenCalledTimes(1);
-      expect(ctx.reply).toHaveBeenCalledWith('Background agent "research-pricing" started.');
+      const opts = (config.runClaude as any).mock.calls[0][0] as ClaudeOptions;
+      expect(opts.prompt).toBe("bg: research pricing");
     });
 
     it("passes cron system prompt for cron messages", async () => {
@@ -634,10 +627,26 @@ describe("createApp", () => {
       const app = createApp(makeConfig());
       const bot = app.bot as any;
       const handler = bot.commandHandlers.get("bg")!;
-      const ctx = { reply: mock(() => {}) };
+      const ctx = { chat: { id: 12345 }, match: "", reply: mock(() => {}) };
 
       handler(ctx);
       expect(ctx.reply).toHaveBeenCalledWith("No background agents running.");
+    });
+
+    it("/bg with prompt spawns a background agent", async () => {
+      const config = makeConfig({
+        runClaude: mock(() => new Promise<ClaudeResult>(() => {})),
+      });
+      const app = createApp(config);
+      const bot = app.bot as any;
+      const handler = bot.commandHandlers.get("bg")!;
+      const ctx = { chat: { id: 12345 }, match: "research pricing", reply: mock(() => {}) };
+
+      handler(ctx);
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(ctx.reply).toHaveBeenCalledWith('Background agent "research-pricing" started.');
+      expect(config.runClaude).toHaveBeenCalledTimes(1);
     });
 
     it("/bg lists active background agents", async () => {
@@ -646,21 +655,18 @@ describe("createApp", () => {
       });
       const app = createApp(config);
       const bot = app.bot as any;
-      const msgHandler = bot.filterHandlers.get("message:text")![0];
+      const bgHandler = bot.commandHandlers.get("bg")!;
 
-      const ctx = {
-        chat: { id: 12345 },
-        message: { text: "bg: long task" },
-        reply: mock(() => {}),
-      };
-      msgHandler(ctx);
+      // Spawn via /bg command
+      const spawnCtx = { chat: { id: 12345 }, match: "long task", reply: mock(() => {}) };
+      bgHandler(spawnCtx);
       await new Promise((r) => setTimeout(r, 10));
 
-      const bgHandler = bot.commandHandlers.get("bg")!;
-      const bgCtx = { reply: mock(() => {}) };
-      bgHandler(bgCtx);
+      // List via /bg with no args
+      const listCtx = { chat: { id: 12345 }, match: "", reply: mock(() => {}) };
+      bgHandler(listCtx);
 
-      const reply = (bgCtx.reply as any).mock.calls[0][0];
+      const reply = (listCtx.reply as any).mock.calls[0][0];
       expect(reply).toContain("long-task");
       expect(reply).toMatch(/\d+s/);
     });
@@ -689,7 +695,7 @@ describe("createApp", () => {
       expect(bot.api.setMyCommands).toHaveBeenCalledWith([
         { command: "chatid", description: "Show current chat ID" },
         { command: "session", description: "Show current session ID" },
-        { command: "bg", description: "List background agents" },
+        { command: "bg", description: "List or spawn background agents" },
       ]);
     });
   });
