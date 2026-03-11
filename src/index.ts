@@ -1,9 +1,11 @@
 import { cpSync, existsSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { createInterface } from "node:readline";
 import { App, type AppConfig } from "./app";
 import { createLogger, initLogger } from "./logger";
 import { migrateSessionFromSettings } from "./sessions";
-import { applyEnvOverrides, loadSettings, printSettings } from "./settings";
+import { applyEnvOverrides, loadSettings, printSettings, saveSettings } from "./settings";
+import { runSetupWizard } from "./setup";
 
 await initLogger();
 const log = createLogger("index");
@@ -16,9 +18,17 @@ migrateSessionFromSettings(defaultDir);
 let settings = loadSettings(defaultDir);
 
 if (!settings) {
-  // TODO: setup wizard (commit 4)
-  log.error("No settings.json found. Run the setup wizard first.");
-  process.exit(1);
+  log.info("No settings.json found, starting setup wizard");
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const io = {
+    ask: (question: string): Promise<string> =>
+      new Promise((resolve) => rl.question(question, (answer) => resolve(answer.trim()))),
+    write: (msg: string) => process.stdout.write(msg),
+  };
+  settings = await runSetupWizard(io);
+  rl.close();
+  saveSettings(settings, defaultDir);
+  log.info("Settings saved");
 }
 
 const { settings: resolved, overrides } = applyEnvOverrides(settings);
