@@ -63,14 +63,21 @@ the bot.
 - [Bun](https://bun.sh/) runtime
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and logged in
 
-## Setup
+## Install
 
 ```bash
-git clone git@github.com:macrosak/macroclaw.git
-cd macroclaw
-cp .env.example .env  # fill in real values
-bun install --frozen-lockfile
+# Run directly (no install needed)
+TELEGRAM_BOT_TOKEN=xxx AUTHORIZED_CHAT_ID=123 bunx macroclaw
+
+# Or install globally
+bun install -g macroclaw
+export TELEGRAM_BOT_TOKEN=xxx
+export AUTHORIZED_CHAT_ID=123
+macroclaw
 ```
+
+On first run, a workspace is created at `~/.macroclaw-workspace` with default config.
+Set `WORKSPACE` to use a different path. Set `MODEL` to override the Claude model.
 
 ## Usage
 
@@ -78,11 +85,20 @@ Run inside a tmux session so it survives SSH disconnects:
 
 ```bash
 tmux new -s macroclaw       # start session
-bun run start               # run the bot
+macroclaw                   # run the bot
 
 # Ctrl+B, D              — detach (bot keeps running)
 # tmux attach -t macroclaw — reattach later
 # tmux kill-session -t macroclaw — stop everything
+```
+
+## Development
+
+```bash
+git clone git@github.com:macrosak/macroclaw.git
+cd macroclaw
+cp .env.example .env  # fill in real values
+bun install --frozen-lockfile
 ```
 
 ## Development
