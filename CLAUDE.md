@@ -16,14 +16,7 @@ bun run check      # Typecheck + lint + tests (run before committing)
 bun test           # Run tests (100% coverage enforced)
 bun run lint       # Run biome linter
 bun run lint:fix   # Auto-fix lint issues
-bun run sync-skills # Deploy system skills to workspace
 ```
-
-## Skills
-
-- **System skills** live in `skills/` in this repo — they document macroclaw features (e.g. cron management)
-- Run `bun run sync-skills` after changing system skills to deploy them to the workspace
-- **User skills** are created directly in the workspace's `.claude/skills/` — the sync script never touches them
 
 ## Debugging
 

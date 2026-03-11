@@ -2,6 +2,7 @@
   "name": "macroclaw",
   "version": "0.1.0",
   "description": "Telegram-to-Claude-Code bridge",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "start": "bun run src/index.ts",
@@ -12,7 +13,6 @@
     "lint:fix": "biome check --fix --unsafe",
     "test": "bun test",
     "test:integration": "bun test src/*.integration-test.ts --timeout 120000",
-    "sync-skills": "bun run scripts/sync-skills.ts",
     "claude": "set -a && . ./.env && set +a && cd ${WORKSPACE:-~/.macroclaw-workspace} && claude --resume $(node -p \"require('$HOME/.macroclaw/settings.json').sessionId\") --model ${MODEL:-sonnet}"
   },
   "dependencies": {
