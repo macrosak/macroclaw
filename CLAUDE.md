@@ -81,6 +81,7 @@ App (app.ts)                        — I/O layer: Telegram + Cron
 
 - Design docs live in `docs.local/` (gitignored)
 - Once all commits in a design doc are done, move it to `docs.local/archive/` and do not modify it further
+- When creating a GitHub issue from a design doc: H1 becomes the issue title, the rest of the doc becomes the issue body (so someone else can implement it without extra context)
 
 ## Workflow
 
