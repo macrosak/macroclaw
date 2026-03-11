@@ -63,21 +63,41 @@ the bot.
 - [Bun](https://bun.sh/) runtime
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and logged in
 
-## Install
+## Setup
 
 ```bash
-# Run directly (no install needed)
-TELEGRAM_BOT_TOKEN=xxx AUTHORIZED_CHAT_ID=123 bunx macroclaw
-
-# Or install globally
+# Install globally
 bun install -g macroclaw
-export TELEGRAM_BOT_TOKEN=xxx
-export AUTHORIZED_CHAT_ID=123
+
+# Run — on first launch, an interactive setup wizard guides you through configuration
 macroclaw
 ```
 
-On first run, a workspace is created at `~/.macroclaw-workspace` with default config.
-Set `WORKSPACE` to use a different path. Set `MODEL` to override the Claude model.
+The setup wizard will:
+1. Ask for your **Telegram bot token** (from [@BotFather](https://t.me/BotFather))
+2. Start the bot temporarily so you can send `/chatid` to discover your chat ID
+3. Ask for your **chat ID**, **model** preference, **workspace path**, and optional **OpenAI API key**
+4. Save settings to `~/.macroclaw/settings.json`
+
+On subsequent runs, settings are loaded from the file. Environment variables override file settings (see `.env.example`).
+
+### Configuration
+
+Settings are stored in `~/.macroclaw/settings.json` and validated on startup.
+
+| Setting        | Env var override       | Default                    | Required |
+|----------------|------------------------|----------------------------|----------|
+| `botToken`     | `TELEGRAM_BOT_TOKEN`   | —                          | Yes      |
+| `chatId`       | `AUTHORIZED_CHAT_ID`   | —                          | Yes      |
+| `model`        | `MODEL`                | `sonnet`                   | No       |
+| `workspace`    | `WORKSPACE`            | `~/.macroclaw-workspace`   | No       |
+| `openaiApiKey` | `OPENAI_API_KEY`       | —                          | No       |
+| `logLevel`     | `LOG_LEVEL`            | `debug`                    | No       |
+| `pinoramaUrl`  | `PINORAMA_URL`         | —                          | No       |
+
+Env vars take precedence over settings file values. On startup, a masked settings summary is printed showing which values were overridden by env vars.
+
+Session state (Claude session IDs) is stored separately in `~/.macroclaw/sessions.json`.
 
 ## Usage
 
@@ -100,8 +120,6 @@ cd macroclaw
 cp .env.example .env  # fill in real values
 bun install --frozen-lockfile
 ```
-
-## Development
 
 ```bash
 bun run dev    # start with watch mode
