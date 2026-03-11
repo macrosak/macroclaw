@@ -82,6 +82,7 @@ App (app.ts)                        — I/O layer: Telegram + Cron
 - No database, no containers, no agent SDK
 - Single authorized chat only
 - Messages are processed serially (FIFO queue)
+- When adding a new environment variable, document it in `.env.example` with a one-line comment
 
 ## Design Docs
 
