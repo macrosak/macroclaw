@@ -17,16 +17,12 @@ const backgroundAgentSchema = z.object({
   model: z.enum(["haiku", "sonnet", "opus"]).describe("Model to use for the background agent").optional(),
 });
 
-const buttonSchema = z.object({
-  label: z.string().describe("Button text shown to the user"),
-});
-
 const claudeResponseSchema = z.object({
   action: z.enum(["send", "silent"]).describe("'send' to reply to the user, 'silent' to do nothing"),
   actionReason: z.string().describe("Why the agent chose this action (logged, not sent)"),
   message: z.string().describe("The message to send to Telegram (required when action is 'send')").optional(),
   files: z.array(z.string()).describe("Absolute paths to files to send to Telegram").optional(),
-  buttons: z.array(z.array(buttonSchema)).describe("Inline keyboard rows; each row is an array of buttons").optional(),
+  buttons: z.array(z.string()).describe("Button labels to show below the message").optional(),
   backgroundAgents: z.array(backgroundAgentSchema).describe("Background agents to spawn alongside this response").optional(),
 });
 
@@ -39,7 +35,7 @@ const jsonSchema = JSON.stringify(z.toJSONSchema(claudeResponseSchema, { target:
 export interface OrchestratorResponse {
   message: string;
   files?: string[];
-  buttons?: Array<Array<{ label: string }>>;
+  buttons?: string[];
 }
 
 // --- Internal request types ---

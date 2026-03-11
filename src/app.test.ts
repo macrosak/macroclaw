@@ -477,7 +477,7 @@ describe("App", () => {
             action: "send",
             message: "Choose one",
             actionReason: "ok",
-            buttons: [[{ label: "Yes" }, { label: "No" }]],
+            buttons: ["Yes", "No"],
           }),
         ),
       });

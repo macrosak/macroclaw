@@ -96,7 +96,7 @@ describe("sendResponse", () => {
 
   it("attaches buttons to a single message", async () => {
     const bot = mockBot();
-    const buttons = [[{ label: "Yes" }, { label: "No" }]];
+    const buttons = ["Yes", "No"];
     await sendResponse(bot, "123", "Choose:", buttons);
     expect(bot.api.sendMessage).toHaveBeenCalledTimes(1);
     expect(bot.calls[0].opts.reply_markup).toBeDefined();
@@ -106,7 +106,7 @@ describe("sendResponse", () => {
     const bot = mockBot();
     const line = "a".repeat(2000);
     const text = `${line}\n${line}\n${line}`;
-    const buttons = [[{ label: "Ok" }]];
+    const buttons = ["Ok"];
     await sendResponse(bot, "123", text, buttons);
     expect(bot.api.sendMessage).toHaveBeenCalledTimes(2);
     // First chunk: no buttons
@@ -125,16 +125,16 @@ describe("sendResponse", () => {
 
 describe("buildInlineKeyboard", () => {
   it("builds keyboard with rows and buttons", () => {
-    const kb = buildInlineKeyboard([[{ label: "A" }, { label: "B" }], [{ label: "C" }]]);
+    const kb = buildInlineKeyboard(["A", "B", "C"]);
     expect(kb).toBeDefined();
     // InlineKeyboard from grammy — verify it's an object with inline_keyboard
     expect(kb.inline_keyboard).toBeDefined();
-    expect(kb.inline_keyboard.length).toBe(2);
-    expect(kb.inline_keyboard[0].length).toBe(2);
+    expect(kb.inline_keyboard.length).toBe(3);
+    expect(kb.inline_keyboard[0].length).toBe(1);
     const btn = kb.inline_keyboard[0][0] as any;
     expect(btn.text).toBe("A");
     expect(btn.callback_data).toBe("A");
-    expect((kb.inline_keyboard[1][0] as any).text).toBe("C");
+    expect((kb.inline_keyboard[2][0] as any).text).toBe("C");
   });
 });
 
