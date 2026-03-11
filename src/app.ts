@@ -3,6 +3,7 @@ import type { Claude } from "./claude";
 import { CronScheduler } from "./cron";
 import { createLogger } from "./logger";
 import { Orchestrator, type OrchestratorResponse } from "./orchestrator";
+import { transcribe } from "./stt";
 import { createBot, downloadFile, sendFile, sendResponse } from "./telegram";
 
 const log = createLogger("app");
@@ -113,6 +114,23 @@ export class App {
       } catch (err) {
         log.error({ err }, "Document download failed");
         this.#orchestrator.handleMessage(`[File download failed: ${name}]\n${ctx.message.caption ?? ""}`);
+      }
+    });
+
+    this.#bot.on("message:voice", async (ctx) => {
+      if (ctx.chat.id.toString() !== this.#config.authorizedChatId) return;
+      try {
+        const path = await downloadFile(this.#bot, ctx.message.voice.file_id, this.#config.botToken, "voice.ogg");
+        const text = await transcribe(path);
+        if (!text.trim()) {
+          await sendResponse(this.#bot, this.#config.authorizedChatId, "[Could not understand audio]");
+          return;
+        }
+        await sendResponse(this.#bot, this.#config.authorizedChatId, `[Received audio]: ${text}`);
+        this.#orchestrator.handleMessage(text);
+      } catch (err) {
+        log.error({ err }, "Voice transcription failed");
+        await sendResponse(this.#bot, this.#config.authorizedChatId, "[Failed to transcribe audio]");
       }
     });
 
