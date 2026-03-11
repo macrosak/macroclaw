@@ -1,6 +1,6 @@
 import { Bot } from "grammy";
 import { createLogger } from "./logger";
-import { type Settings, settingsSchema } from "./settings";
+import { type Settings, maskValue, settingsSchema } from "./settings";
 
 const log = createLogger("setup");
 
@@ -19,6 +19,7 @@ async function startSetupBot(token: string): Promise<Bot> {
   });
 
   await bot.init();
+  await bot.api.setMyCommands([{ command: "chatid", description: "Get your chat ID" }]);
   log.info({ username: bot.botInfo.username }, "Setup bot started");
 
   bot.start();
@@ -32,7 +33,7 @@ export async function runSetupWizard(io: SetupIO): Promise<Settings> {
 
   // Bot token
   const defaultToken = process.env.TELEGRAM_BOT_TOKEN || "";
-  const tokenPrompt = defaultToken ? `Bot token [${defaultToken.slice(0, 4)}...]: ` : "Bot token: ";
+  const tokenPrompt = defaultToken ? `Bot token [${maskValue("botToken", defaultToken)}]: ` : "Bot token: ";
   let botToken = await ask(tokenPrompt) || defaultToken;
 
   // Validate token by starting a temporary bot
@@ -75,7 +76,7 @@ export async function runSetupWizard(io: SetupIO): Promise<Settings> {
 
   // OpenAI API key
   const defaultOpenai = process.env.OPENAI_API_KEY || "";
-  const openaiPrompt = defaultOpenai ? `OpenAI API key [${defaultOpenai.slice(0, 4)}...] (optional): ` : "OpenAI API key (optional): ";
+  const openaiPrompt = defaultOpenai ? `OpenAI API key [${maskValue("openaiApiKey", defaultOpenai)}] (optional): ` : "OpenAI API key (optional): ";
   const openaiApiKey = await ask(openaiPrompt) || defaultOpenai || undefined;
 
   const settings: Settings = settingsSchema.parse({

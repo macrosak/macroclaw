@@ -66,12 +66,15 @@ the bot.
 ## Setup
 
 ```bash
-# Install globally
-bun install -g macroclaw
+# Run directly (no install needed)
+bunx macroclaw
 
-# Run — on first launch, an interactive setup wizard guides you through configuration
+# Or install globally
+bun install -g macroclaw
 macroclaw
 ```
+
+On first launch, an interactive setup wizard guides you through configuration.
 
 The setup wizard will:
 1. Ask for your **Telegram bot token** (from [@BotFather](https://t.me/BotFather))
@@ -120,6 +123,8 @@ cd macroclaw
 cp .env.example .env  # fill in real values
 bun install --frozen-lockfile
 ```
+
+## Development
 
 ```bash
 bun run dev    # start with watch mode
