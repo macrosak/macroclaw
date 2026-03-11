@@ -12,6 +12,10 @@
     "src/",
     "workspace-template/"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/macrosak/macroclaw"
+  },
   "scripts": {
     "start": "bun run src/index.ts",
     "dev": "bun run --watch src/index.ts",
