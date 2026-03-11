@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { existsSync, rmSync } from "node:fs";
 import { type Claude, type ClaudeDeferredResult, ClaudeParseError, ClaudeProcessError, type ClaudeResult, type ClaudeRunOptions } from "./claude";
 import { Orchestrator, type OrchestratorConfig, type OrchestratorResponse } from "./orchestrator";
-import { saveSettings } from "./settings";
+import { saveSessions } from "./sessions";
 
 const tmpSettingsDir = "/tmp/macroclaw-test-orchestrator-settings";
 const TEST_WORKSPACE = "/tmp/macroclaw-test-workspace";
@@ -231,7 +231,7 @@ describe("Orchestrator", () => {
 
   describe("session management", () => {
     it("uses --resume for existing session", async () => {
-      saveSettings({ sessionId: "existing-session" }, tmpSettingsDir);
+      saveSessions({ mainSessionId: "existing-session" }, tmpSettingsDir);
       const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }));
       const { orch } = makeOrchestrator(claude);
 
@@ -254,7 +254,7 @@ describe("Orchestrator", () => {
     });
 
     it("creates new session when resume fails", async () => {
-      saveSettings({ sessionId: "old-session" }, tmpSettingsDir);
+      saveSessions({ mainSessionId: "old-session" }, tmpSettingsDir);
       let callCount = 0;
       const claude = mockClaude(async (_opts: ClaudeRunOptions): Promise<ClaudeResult> => {
         callCount++;
@@ -286,7 +286,7 @@ describe("Orchestrator", () => {
     });
 
     it("handleSessionCommand sends session via onResponse", async () => {
-      saveSettings({ sessionId: "test-id" }, tmpSettingsDir);
+      saveSessions({ mainSessionId: "test-id" }, tmpSettingsDir);
       const claude = mockClaude(successResult({ action: "send", message: "", actionReason: "" }));
       const { orch, responses } = makeOrchestrator(claude);
 
@@ -298,7 +298,7 @@ describe("Orchestrator", () => {
     });
 
     it("background-agent forks from main session without affecting it", async () => {
-      saveSettings({ sessionId: "main-session" }, tmpSettingsDir);
+      saveSessions({ mainSessionId: "main-session" }, tmpSettingsDir);
       const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }, "main-session"));
       const { orch } = makeOrchestrator(claude);
 
@@ -319,7 +319,7 @@ describe("Orchestrator", () => {
     });
 
     it("updates session ID after forked call", async () => {
-      saveSettings({ sessionId: "old-session" }, tmpSettingsDir);
+      saveSessions({ mainSessionId: "old-session" }, tmpSettingsDir);
       const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }, "new-forked-session"));
       const { orch } = makeOrchestrator(claude);
 
@@ -436,7 +436,7 @@ describe("Orchestrator", () => {
     });
 
     it("deferred → sends 'taking longer' via onResponse, feeds result back when resolved", async () => {
-      saveSettings({ sessionId: "test-session" }, tmpSettingsDir);
+      saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
       let resolveCompletion: (r: ClaudeResult) => void;
       const completion = new Promise<ClaudeResult>((r) => { resolveCompletion = r; });
       const claude = mockClaude(async (): Promise<ClaudeResult | ClaudeDeferredResult> =>
@@ -458,7 +458,7 @@ describe("Orchestrator", () => {
     });
 
     it("session fork when background agent running on main session", async () => {
-      saveSettings({ sessionId: "test-session" }, tmpSettingsDir);
+      saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
       let resolveCompletion: (r: ClaudeResult) => void;
       const completion = new Promise<ClaudeResult>((r) => { resolveCompletion = r; });
       let callCount = 0;
@@ -485,7 +485,7 @@ describe("Orchestrator", () => {
     });
 
     it("background result with matching session: applied directly (no extra Claude call)", async () => {
-      saveSettings({ sessionId: "test-session" }, tmpSettingsDir);
+      saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
       // Use a deferred claude to simulate the scenario where a task is backgrounded
       let resolveCompletion: (r: ClaudeResult) => void;
       const completion = new Promise<ClaudeResult>((r) => { resolveCompletion = r; });
@@ -587,7 +587,7 @@ describe("Orchestrator", () => {
     });
 
     it("adopt feeds result back when deferred resolves", async () => {
-      saveSettings({ sessionId: "adopted-session" }, tmpSettingsDir);
+      saveSessions({ mainSessionId: "adopted-session" }, tmpSettingsDir);
       let resolveCompletion: (r: ClaudeResult) => void;
       const completion = new Promise<ClaudeResult>((r) => { resolveCompletion = r; });
       const claude = mockClaude(async (): Promise<ClaudeResult | ClaudeDeferredResult> =>

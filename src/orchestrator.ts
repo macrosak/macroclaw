@@ -4,7 +4,7 @@ import { logPrompt, logResult } from "./history";
 import { createLogger } from "./logger";
 import { BG_TIMEOUT, CRON_TIMEOUT, MAIN_TIMEOUT, SYSTEM_PROMPT } from "./prompts";
 import { Queue } from "./queue";
-import { loadSettings, newSessionId, type Settings, saveSettings } from "./settings";
+import { loadSessions, newSessionId, type Sessions, saveSessions } from "./sessions";
 
 const log = createLogger("orchestrator");
 
@@ -84,7 +84,7 @@ interface CallResult {
 
 export class Orchestrator {
   #claude: Claude;
-  #settings: Settings;
+  #sessions: Sessions;
   #sessionId: string;
   #sessionFlag: "--resume" | "--session-id";
   #sessionResolved = false;
@@ -95,17 +95,17 @@ export class Orchestrator {
   constructor(config: OrchestratorConfig) {
     this.#config = config;
     this.#claude = config.claude ?? new Claude({ workspace: config.workspace, jsonSchema });
-    this.#settings = loadSettings(config.settingsDir);
+    this.#sessions = loadSessions(config.settingsDir);
     this.#queue = new Queue<OrchestratorRequest>();
     this.#queue.setHandler((request) => this.#handleRequest(request));
 
-    if (this.#settings.sessionId) {
-      this.#sessionId = this.#settings.sessionId;
+    if (this.#sessions.mainSessionId) {
+      this.#sessionId = this.#sessions.mainSessionId;
       this.#sessionFlag = "--resume";
     } else {
       this.#sessionId = newSessionId();
       this.#sessionFlag = "--session-id";
-      saveSettings({ sessionId: this.#sessionId }, config.settingsDir);
+      saveSessions({ mainSessionId: this.#sessionId }, config.settingsDir);
       log.info({ sessionId: this.#sessionId }, "Created new session");
     }
   }
@@ -272,7 +272,7 @@ export class Orchestrator {
         this.#sessionId = newSessionId();
         log.info({ sessionId: this.#sessionId }, "Resume failed, created new session");
         this.#sessionFlag = "--session-id";
-        saveSettings({ sessionId: this.#sessionId }, this.#config.settingsDir);
+        saveSessions({ mainSessionId: this.#sessionId }, this.#config.settingsDir);
         result = await this.#callClaude(built, this.#sessionFlag, this.#sessionId);
       }
 
@@ -282,7 +282,7 @@ export class Orchestrator {
       if (result.sessionId && result.sessionId !== this.#sessionId) {
         log.info({ oldSessionId: this.#sessionId, newSessionId: result.sessionId }, "Session forked, updating session ID");
         this.#sessionId = result.sessionId;
-        saveSettings({ sessionId: this.#sessionId }, this.#config.settingsDir);
+        saveSessions({ mainSessionId: this.#sessionId }, this.#config.settingsDir);
       }
 
       // Mark resolved on first success

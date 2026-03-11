@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { existsSync, rmSync } from "node:fs";
 import { App, type AppConfig } from "./app";
 import type { Claude, ClaudeDeferredResult, ClaudeResult, ClaudeRunOptions } from "./claude";
-import { saveSettings } from "./settings";
+import { saveSessions } from "./sessions";
 
 const mockOpenAICreate = mock(async () => ({ text: "transcribed text" }));
 
@@ -64,7 +64,7 @@ const savedOpenAIKey = process.env.OPENAI_API_KEY;
 beforeEach(() => {
   process.env.OPENAI_API_KEY = "test-key";
   if (existsSync(tmpSettingsDir)) rmSync(tmpSettingsDir, { recursive: true });
-  saveSettings({ sessionId: "test-session" }, tmpSettingsDir);
+  saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
 });
 
 afterEach(() => {
