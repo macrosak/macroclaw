@@ -11,7 +11,7 @@ export const settingsSchema = z.object({
   model: z.string().default("sonnet"),
   workspace: z.string().default("~/.macroclaw-workspace"),
   openaiApiKey: z.string().optional(),
-  logLevel: z.enum(["debug", "info", "warn", "error"]).default("debug"),
+  logLevel: z.enum(["debug", "info", "warn", "error"]).default("info"),
   pinoramaUrl: z.string().optional(),
 });
 

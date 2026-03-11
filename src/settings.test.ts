@@ -34,7 +34,7 @@ describe("loadSettings", () => {
       chatId: "12345678",
       model: "sonnet",
       workspace: "~/.macroclaw-workspace",
-      logLevel: "debug",
+      logLevel: "info",
     });
   });
 
