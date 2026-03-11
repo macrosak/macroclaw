@@ -1,5 +1,5 @@
 [test]
 coverage = true
-# Per-file; capped at 0.8 due to bun/JSC phantom function coverage gaps
-coverageThreshold = 0.8
+# Functions capped at 0.8 due to bun/JSC phantom function coverage gaps
+coverageThreshold = { functions = 0.8, lines = 1.0 }
 preload = ["./src/test-setup.ts"]
