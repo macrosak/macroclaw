@@ -1,3 +1,4 @@
+#!/usr/bin/env bun
 import { cpSync, existsSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { App, type AppConfig } from "./app";

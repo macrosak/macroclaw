@@ -1,9 +1,16 @@
 {
   "name": "macroclaw",
-  "version": "0.1.0",
+  "version": "0.0.0-dev",
   "description": "Telegram-to-Claude-Code bridge",
   "license": "MIT",
   "type": "module",
+  "bin": {
+    "macroclaw": "./src/index.ts"
+  },
+  "files": [
+    "src/",
+    "workspace-template/"
+  ],
   "scripts": {
     "start": "bun run src/index.ts",
     "dev": "bun run --watch src/index.ts",
