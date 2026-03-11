@@ -19,6 +19,9 @@ jobs:
 
       - run: bun install --frozen-lockfile
 
+      - name: Typecheck, lint, and test
+        run: bun run check
+
       - name: Compute next version
         id: version
         run: |
