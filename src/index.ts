@@ -1,8 +1,9 @@
 import { cpSync, existsSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { App, type AppConfig } from "./app";
-import { createLogger } from "./logger";
+import { createLogger, initLogger } from "./logger";
 
+await initLogger();
 const log = createLogger("index");
 
 function requireEnv(name: string): string {
