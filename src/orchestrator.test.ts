@@ -183,7 +183,7 @@ describe("Orchestrator", () => {
         action: "send",
         message: "Choose",
         actionReason: "ok",
-        buttons: [[{ label: "Yes" }, { label: "No" }], [{ label: "Maybe" }]],
+        buttons: ["Yes", "No", "Maybe"],
       };
       const claude = mockClaude(successResult(output));
       const { orch, responses } = makeOrchestrator(claude);
@@ -191,7 +191,7 @@ describe("Orchestrator", () => {
       orch.handleMessage("hi");
       await waitForProcessing();
 
-      expect(responses[0].buttons).toEqual([[{ label: "Yes" }, { label: "No" }], [{ label: "Maybe" }]]);
+      expect(responses[0].buttons).toEqual(["Yes", "No", "Maybe"]);
     });
 
     it("passes files through onResponse", async () => {

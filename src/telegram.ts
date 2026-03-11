@@ -15,13 +15,11 @@ export function createBot(token: string) {
   return new Bot(token);
 }
 
-export function buildInlineKeyboard(buttons: Array<Array<{ label: string }>>): InlineKeyboard {
+export function buildInlineKeyboard(buttons: string[]): InlineKeyboard {
   const kb = new InlineKeyboard();
   for (let i = 0; i < buttons.length; i++) {
     if (i > 0) kb.row();
-    for (const btn of buttons[i]) {
-      kb.text(btn.label, btn.label);
-    }
+    kb.text(buttons[i], buttons[i]);
   }
   return kb;
 }
@@ -30,7 +28,7 @@ export async function sendResponse(
   bot: Bot,
   chatId: string,
   text: string,
-  buttons?: Array<Array<{ label: string }>>,
+  buttons?: string[],
 ): Promise<void> {
   const opts = { parse_mode: "HTML" as const };
   const replyMarkup = buttons?.length ? buildInlineKeyboard(buttons) : undefined;
