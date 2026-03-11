@@ -74,7 +74,7 @@ export function applyEnvOverrides(settings: Settings): { settings: Settings; ove
 
 // --- Startup log ---
 
-function maskValue(key: string, value: string | undefined): string {
+export function maskValue(key: string, value: string | undefined): string {
   if (value === undefined) return "(not set)";
   if (key === "botToken" || key === "openaiApiKey") {
     return value.length > 4 ? `****${value.slice(-4)}` : "****";

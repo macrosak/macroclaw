@@ -5,6 +5,7 @@ import type { SetupIO } from "./setup";
 const mockBotInit = mock(async () => {});
 const mockBotStart = mock(() => {});
 const mockBotStop = mock(async () => {});
+const mockSetMyCommands = mock(async () => {});
 let mockBotCatchHandler: Function | null = null;
 let mockBotCommandHandler: Function | null = null;
 
@@ -12,6 +13,8 @@ mock.module("grammy", () => ({
   Bot: class MockBot {
     token: string;
     botInfo = { username: "test_bot" };
+
+    api = { setMyCommands: mockSetMyCommands };
 
     constructor(token: string) {
       this.token = token;
@@ -62,6 +65,7 @@ beforeEach(() => {
   mockBotInit.mockImplementation(async () => {});
   mockBotStart.mockClear();
   mockBotStop.mockClear();
+  mockSetMyCommands.mockClear();
   mockBotCatchHandler = null;
   mockBotCommandHandler = null;
 });

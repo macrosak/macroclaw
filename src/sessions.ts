@@ -34,31 +34,3 @@ export function saveSessions(sessions: Sessions, dir: string = defaultDir): void
 export function newSessionId(): string {
   return randomUUID();
 }
-
-/**
- * Migrate sessionId from settings.json to sessions.json (one-time migration).
- * If settings.json has a sessionId and sessions.json doesn't exist or has no mainSessionId,
- * copy it over.
- */
-export function migrateSessionFromSettings(dir: string = defaultDir): void {
-  const sessionsPath = join(dir, "sessions.json");
-  const settingsPath = join(dir, "settings.json");
-
-  // Only migrate if sessions.json doesn't exist yet
-  if (existsSync(sessionsPath)) return;
-  if (!existsSync(settingsPath)) return;
-
-  try {
-    const raw = JSON.parse(readFileSync(settingsPath, "utf-8"));
-    if (typeof raw.sessionId === "string") {
-      log.info("Migrating sessionId from settings.json to sessions.json");
-      saveSessions({ mainSessionId: raw.sessionId }, dir);
-
-      // Remove sessionId from settings.json
-      const { sessionId: _, ...rest } = raw;
-      writeFileSync(settingsPath, `${JSON.stringify(rest, null, 2)}\n`);
-    }
-  } catch {
-    // Settings file corrupt — skip migration
-  }
-}

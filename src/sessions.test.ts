@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { loadSessions, migrateSessionFromSettings, newSessionId, saveSessions } from "./sessions";
+import { loadSessions, newSessionId, saveSessions } from "./sessions";
 
 const tmpDir = "/tmp/macroclaw-sessions-test";
 
@@ -58,58 +58,5 @@ describe("newSessionId", () => {
     const id = newSessionId();
     expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
     expect(newSessionId()).not.toBe(id);
-  });
-});
-
-describe("migrateSessionFromSettings", () => {
-  it("migrates sessionId from settings.json to sessions.json", () => {
-    mkdirSync(tmpDir, { recursive: true });
-    writeFileSync(join(tmpDir, "settings.json"), JSON.stringify({ sessionId: "old-session", other: "data" }));
-
-    migrateSessionFromSettings(tmpDir);
-
-    const sessions = loadSessions(tmpDir);
-    expect(sessions).toEqual({ mainSessionId: "old-session" });
-
-    // settings.json should have sessionId removed
-    const settings = JSON.parse(readFileSync(join(tmpDir, "settings.json"), "utf-8"));
-    expect(settings).toEqual({ other: "data" });
-  });
-
-  it("skips migration when sessions.json already exists", () => {
-    mkdirSync(tmpDir, { recursive: true });
-    writeFileSync(join(tmpDir, "settings.json"), JSON.stringify({ sessionId: "old" }));
-    writeFileSync(join(tmpDir, "sessions.json"), JSON.stringify({ mainSessionId: "existing" }));
-
-    migrateSessionFromSettings(tmpDir);
-
-    const sessions = loadSessions(tmpDir);
-    expect(sessions).toEqual({ mainSessionId: "existing" });
-  });
-
-  it("skips migration when settings.json does not exist", () => {
-    mkdirSync(tmpDir, { recursive: true });
-
-    migrateSessionFromSettings(tmpDir);
-
-    expect(existsSync(join(tmpDir, "sessions.json"))).toBe(false);
-  });
-
-  it("skips migration when settings.json has no sessionId", () => {
-    mkdirSync(tmpDir, { recursive: true });
-    writeFileSync(join(tmpDir, "settings.json"), JSON.stringify({ other: "data" }));
-
-    migrateSessionFromSettings(tmpDir);
-
-    expect(existsSync(join(tmpDir, "sessions.json"))).toBe(false);
-  });
-
-  it("skips migration when settings.json is corrupt", () => {
-    mkdirSync(tmpDir, { recursive: true });
-    writeFileSync(join(tmpDir, "settings.json"), "not json");
-
-    migrateSessionFromSettings(tmpDir);
-
-    expect(existsSync(join(tmpDir, "sessions.json"))).toBe(false);
   });
 });
