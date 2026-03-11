@@ -59,12 +59,17 @@ mock.module("grammy", () => ({
 
 const tmpSettingsDir = "/tmp/macroclaw-test-settings";
 
+const savedOpenAIKey = process.env.OPENAI_API_KEY;
+
 beforeEach(() => {
+  process.env.OPENAI_API_KEY = "test-key";
   if (existsSync(tmpSettingsDir)) rmSync(tmpSettingsDir, { recursive: true });
   saveSettings({ sessionId: "test-session" }, tmpSettingsDir);
 });
 
 afterEach(() => {
+  if (savedOpenAIKey) process.env.OPENAI_API_KEY = savedOpenAIKey;
+  else delete process.env.OPENAI_API_KEY;
   if (existsSync(tmpSettingsDir)) rmSync(tmpSettingsDir, { recursive: true });
 });
 
@@ -401,6 +406,24 @@ describe("App", () => {
       });
       await new Promise((r) => setTimeout(r, 50));
 
+      expect((config.claude as any).run).not.toHaveBeenCalled();
+    });
+
+    it("responds with unavailable message when OPENAI_API_KEY is not set", async () => {
+      delete process.env.OPENAI_API_KEY;
+      const config = makeConfig();
+      const app = new App(config);
+      const bot = app.bot as any;
+      const handler = bot.filterHandlers.get("message:voice")![0];
+
+      await handler({
+        chat: { id: 12345 },
+        message: { voice: { file_id: "voice-id", duration: 5 } },
+      });
+
+      const sendCalls = (bot.api.sendMessage as any).mock.calls;
+      const call = sendCalls.find((c: any) => c[1].includes("OPENAI_API_KEY"));
+      expect(call).toBeDefined();
       expect((config.claude as any).run).not.toHaveBeenCalled();
     });
 
