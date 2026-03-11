@@ -3,7 +3,7 @@ import type { Claude } from "./claude";
 import { CronScheduler } from "./cron";
 import { createLogger } from "./logger";
 import { Orchestrator, type OrchestratorResponse } from "./orchestrator";
-import { transcribe } from "./stt";
+import { isAvailable as isSttAvailable, transcribe } from "./stt";
 import { createBot, downloadFile, sendFile, sendResponse } from "./telegram";
 
 const log = createLogger("app");
@@ -119,6 +119,10 @@ export class App {
 
     this.#bot.on("message:voice", async (ctx) => {
       if (ctx.chat.id.toString() !== this.#config.authorizedChatId) return;
+      if (!isSttAvailable()) {
+        await sendResponse(this.#bot, this.#config.authorizedChatId, "[Voice messages not available — set OPENAI_API_KEY to enable]");
+        return;
+      }
       try {
         const path = await downloadFile(this.#bot, ctx.message.voice.file_id, this.#config.botToken, "voice.ogg");
         const text = await transcribe(path);

@@ -12,6 +12,10 @@ function getClient(): OpenAI {
   return client;
 }
 
+export function isAvailable(): boolean {
+  return !!process.env.OPENAI_API_KEY;
+}
+
 export async function transcribe(filePath: string): Promise<string> {
   const buffer = await readFile(filePath);
   const file = new File([buffer], basename(filePath), { type: "audio/ogg" });
