@@ -4,6 +4,18 @@ import { App, type AppConfig } from "./app";
 import type { Claude, ClaudeDeferredResult, ClaudeResult, ClaudeRunOptions } from "./claude";
 import { saveSettings } from "./settings";
 
+const mockOpenAICreate = mock(async () => ({ text: "transcribed text" }));
+
+mock.module("openai", () => ({
+  default: class MockOpenAI {
+    audio = {
+      transcriptions: {
+        create: mockOpenAICreate,
+      },
+    };
+  },
+}));
+
 // Mock Grammy Bot
 mock.module("grammy", () => ({
   Bot: class MockBot {
@@ -84,12 +96,13 @@ describe("App", () => {
     expect(app.bot).toBeDefined();
   });
 
-  it("registers message:text, message:photo, message:document, and callback_query:data handlers", () => {
+  it("registers message:text, message:photo, message:document, message:voice, and callback_query:data handlers", () => {
     const app = new App(makeConfig());
     const bot = app.bot as any;
     expect(bot.filterHandlers.has("message:text")).toBe(true);
     expect(bot.filterHandlers.has("message:photo")).toBe(true);
     expect(bot.filterHandlers.has("message:document")).toBe(true);
+    expect(bot.filterHandlers.has("message:voice")).toBe(true);
     expect(bot.filterHandlers.has("callback_query:data")).toBe(true);
   });
 
@@ -290,6 +303,105 @@ describe("App", () => {
       expect((config.claude as any).run).toHaveBeenCalled();
       const opts = (config.claude as any).run.mock.calls[0][0] as ClaudeRunOptions;
       expect(opts.prompt).toContain("[File download failed: huge.pdf]");
+    });
+
+    it("handles voice messages by transcribing and routing text to orchestrator", async () => {
+      const origFetch = globalThis.fetch;
+      globalThis.fetch = mock(() =>
+        Promise.resolve(new Response("fake-audio", { status: 200 })),
+      ) as any;
+      mockOpenAICreate.mockImplementationOnce(async () => ({ text: "hello from voice" }));
+
+      const config = makeConfig();
+      const app = new App(config);
+      const bot = app.bot as any;
+      const handler = bot.filterHandlers.get("message:voice")![0];
+
+      await handler({
+        chat: { id: 12345 },
+        message: { voice: { file_id: "voice-id", duration: 5 } },
+      });
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Should echo transcription to user
+      const sendCalls = (bot.api.sendMessage as any).mock.calls;
+      const echoCall = sendCalls.find((c: any) => c[1].includes("[Received audio]"));
+      expect(echoCall).toBeDefined();
+      expect(echoCall[1]).toContain("hello from voice");
+
+      // Should route transcribed text to orchestrator
+      expect((config.claude as any).run).toHaveBeenCalled();
+      const opts = (config.claude as any).run.mock.calls[0][0] as ClaudeRunOptions;
+      expect(opts.prompt).toBe("hello from voice");
+
+      globalThis.fetch = origFetch;
+    });
+
+    it("sends error message when voice transcription fails", async () => {
+      const origFetch = globalThis.fetch;
+      globalThis.fetch = mock(() =>
+        Promise.resolve(new Response("fake-audio", { status: 200 })),
+      ) as any;
+      mockOpenAICreate.mockImplementationOnce(async () => { throw new Error("API error"); });
+
+      const config = makeConfig();
+      const app = new App(config);
+      const bot = app.bot as any;
+      const handler = bot.filterHandlers.get("message:voice")![0];
+
+      await handler({
+        chat: { id: 12345 },
+        message: { voice: { file_id: "voice-id", duration: 5 } },
+      });
+      await new Promise((r) => setTimeout(r, 50));
+
+      const sendCalls = (bot.api.sendMessage as any).mock.calls;
+      const errorCall = sendCalls.find((c: any) => c[1].includes("[Failed to transcribe audio]"));
+      expect(errorCall).toBeDefined();
+      expect((config.claude as any).run).not.toHaveBeenCalled();
+
+      globalThis.fetch = origFetch;
+    });
+
+    it("sends message when voice transcription returns empty text", async () => {
+      const origFetch = globalThis.fetch;
+      globalThis.fetch = mock(() =>
+        Promise.resolve(new Response("fake-audio", { status: 200 })),
+      ) as any;
+      mockOpenAICreate.mockImplementationOnce(async () => ({ text: "  " }));
+
+      const config = makeConfig();
+      const app = new App(config);
+      const bot = app.bot as any;
+      const handler = bot.filterHandlers.get("message:voice")![0];
+
+      await handler({
+        chat: { id: 12345 },
+        message: { voice: { file_id: "voice-id", duration: 2 } },
+      });
+      await new Promise((r) => setTimeout(r, 50));
+
+      const sendCalls = (bot.api.sendMessage as any).mock.calls;
+      const emptyCall = sendCalls.find((c: any) => c[1].includes("[Could not understand audio]"));
+      expect(emptyCall).toBeDefined();
+      expect((config.claude as any).run).not.toHaveBeenCalled();
+
+      globalThis.fetch = origFetch;
+    });
+
+    it("ignores voice messages from unauthorized chats", async () => {
+      const config = makeConfig();
+      const app = new App(config);
+      const bot = app.bot as any;
+      const handler = bot.filterHandlers.get("message:voice")![0];
+
+      await handler({
+        chat: { id: 99999 },
+        message: { voice: { file_id: "voice-id", duration: 5 } },
+      });
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect((config.claude as any).run).not.toHaveBeenCalled();
     });
 
     it("ignores photo messages from unauthorized chats", async () => {
