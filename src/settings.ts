@@ -44,3 +44,51 @@ export function saveSettings(settings: Settings, dir: string = defaultDir): void
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "settings.json"), `${JSON.stringify(settings, null, 2)}\n`);
 }
+
+// --- Env var overrides ---
+
+const envMapping: Record<keyof Settings, string> = {
+  botToken: "TELEGRAM_BOT_TOKEN",
+  chatId: "AUTHORIZED_CHAT_ID",
+  model: "MODEL",
+  workspace: "WORKSPACE",
+  openaiApiKey: "OPENAI_API_KEY",
+  logLevel: "LOG_LEVEL",
+  pinoramaUrl: "PINORAMA_URL",
+};
+
+export function applyEnvOverrides(settings: Settings): { settings: Settings; overrides: Set<string> } {
+  const merged = { ...settings };
+  const overrides = new Set<string>();
+
+  for (const [key, envVar] of Object.entries(envMapping)) {
+    const value = process.env[envVar];
+    if (value !== undefined) {
+      (merged as Record<string, unknown>)[key] = value;
+      overrides.add(key);
+    }
+  }
+
+  return { settings: merged, overrides };
+}
+
+// --- Startup log ---
+
+function maskValue(key: string, value: string | undefined): string {
+  if (value === undefined) return "(not set)";
+  if (key === "botToken" || key === "openaiApiKey") {
+    return value.length > 4 ? `****${value.slice(-4)}` : "****";
+  }
+  return value;
+}
+
+export function printSettings(settings: Settings, overrides: Set<string>): void {
+  const lines = ["Settings:"];
+  for (const key of Object.keys(envMapping) as (keyof Settings)[]) {
+    const value = settings[key];
+    const masked = maskValue(key, value);
+    const suffix = overrides.has(key) ? " (env)" : "";
+    lines.push(`  ${key}: ${masked}${suffix}`);
+  }
+  log.info(lines.join("\n"));
+}

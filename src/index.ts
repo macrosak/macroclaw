@@ -2,21 +2,31 @@ import { cpSync, existsSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { App, type AppConfig } from "./app";
 import { createLogger, initLogger } from "./logger";
+import { migrateSessionFromSettings } from "./sessions";
+import { applyEnvOverrides, loadSettings, printSettings } from "./settings";
 
 await initLogger();
 const log = createLogger("index");
 
-function requireEnv(name: string): string {
-  const value = process.env[name];
-  if (!value) {
-    log.error({ name }, "Missing environment variable");
-    process.exit(1);
-  }
-  return value;
+const defaultDir = resolve(process.env.HOME || "~", ".macroclaw");
+
+// Migrate sessionId from old settings.json to sessions.json
+migrateSessionFromSettings(defaultDir);
+
+let settings = loadSettings(defaultDir);
+
+if (!settings) {
+  // TODO: setup wizard (commit 4)
+  log.error("No settings.json found. Run the setup wizard first.");
+  process.exit(1);
 }
 
-const defaultWorkspace = resolve(process.env.HOME || "~", ".macroclaw-workspace");
-const workspace = process.env.WORKSPACE || defaultWorkspace;
+const { settings: resolved, overrides } = applyEnvOverrides(settings);
+settings = resolved;
+
+printSettings(settings, overrides);
+
+const workspace = resolve(settings.workspace.replace(/^~/, process.env.HOME || "~"));
 
 function initWorkspace(workspace: string) {
   const templateDir = join(dirname(import.meta.dir), "workspace-template");
@@ -33,10 +43,10 @@ function initWorkspace(workspace: string) {
 initWorkspace(workspace);
 
 const config: AppConfig = {
-  botToken: requireEnv("TELEGRAM_BOT_TOKEN"),
-  authorizedChatId: requireEnv("AUTHORIZED_CHAT_ID"),
+  botToken: settings.botToken,
+  authorizedChatId: settings.chatId,
   workspace,
-  model: process.env.MODEL,
+  model: settings.model,
 };
 
 new App(config).start();
