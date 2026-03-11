@@ -1,6 +1,6 @@
 import { Bot } from "grammy";
 import { createLogger } from "./logger";
-import { type Settings, maskValue, settingsSchema } from "./settings";
+import { maskValue, type Settings, settingsSchema } from "./settings";
 
 const log = createLogger("setup");
 
@@ -12,7 +12,7 @@ export interface SetupIO {
 async function startSetupBot(token: string): Promise<Bot> {
   const bot = new Bot(token);
   bot.command("chatid", (ctx) => {
-    ctx.reply(`Your chat ID is: ${ctx.chat.id}`);
+    ctx.reply(ctx.chat.id.toString());
   });
   bot.catch((err) => {
     log.debug({ err }, "Setup bot error");

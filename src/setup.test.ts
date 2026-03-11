@@ -236,6 +236,6 @@ describe("runSetupWizard", () => {
     expect(mockBotCommandHandler).not.toBeNull();
     const mockReply = mock(() => {});
     mockBotCommandHandler!({ chat: { id: 12345 }, reply: mockReply });
-    expect(mockReply).toHaveBeenCalledWith("Your chat ID is: 12345");
+    expect(mockReply).toHaveBeenCalledWith("12345");
   });
 });
