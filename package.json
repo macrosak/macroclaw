@@ -5,9 +5,10 @@
   "license": "MIT",
   "type": "module",
   "bin": {
-    "macroclaw": "./src/index.ts"
+    "macroclaw": "./bin/macroclaw.js"
   },
   "files": [
+    "bin/",
     "src/",
     "workspace-template/"
   ],
