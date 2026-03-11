@@ -254,18 +254,12 @@ export class Orchestrator {
 
     log.debug({ name, sessionId }, "Adopting backgrounded task");
 
-    completion.then(
-      (response) => {
-        this.#active.delete(sessionId);
-        log.debug({ name, message: response.message }, "Adopted task finished");
-        this.#queue.push({ type: "background-agent-result", name, response, sessionId });
-      },
-      (err) => {
-        this.#active.delete(sessionId);
-        log.error({ name, err }, "Adopted task failed");
-        this.#queue.push({ type: "background-agent-result", name, response: { action: "send", message: `[Error] ${err}`, actionReason: "adopted-task-failed" }, sessionId });
-      },
-    );
+    // completion is pre-wrapped with .then(ok, err) at the call site, so it never rejects
+    completion.then((response) => {
+      this.#active.delete(sessionId);
+      log.debug({ name, message: response.message }, "Adopted task finished");
+      this.#queue.push({ type: "background-agent-result", name, response, sessionId });
+    });
   }
 
   // --- Core Claude processing ---

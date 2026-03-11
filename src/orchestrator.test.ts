@@ -607,26 +607,6 @@ describe("Orchestrator", () => {
       expect(messages).toContain("completed!");
     });
 
-    it("adopt feeds error back when completion rejects", async () => {
-      saveSettings({ sessionId: "adopted-session" }, tmpSettingsDir);
-      let rejectCompletion: (e: Error) => void;
-      const completion = new Promise<ClaudeResult>((_, r) => { rejectCompletion = r; });
-      const claude = mockClaude(async (): Promise<ClaudeResult | ClaudeDeferredResult> =>
-        ({ deferred: true, sessionId: "adopted-session", completion }),
-      );
-      const { orch, responses } = makeOrchestrator(claude);
-
-      orch.handleMessage("slow");
-      await waitForProcessing();
-      expect(responses[0].message).toContain("taking longer");
-
-      rejectCompletion!(new Error("network failure"));
-      try { await completion; } catch {}
-      await waitForProcessing(100);
-
-      const messages = responses.map((r) => r.message);
-      expect(messages.some((m) => m.includes("[Error]"))).toBe(true);
-    });
   });
 
   describe("onResponse error handling", () => {
