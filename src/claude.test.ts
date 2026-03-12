@@ -124,6 +124,25 @@ describe("Claude", () => {
     expect(args).not.toContain("--append-system-prompt");
   });
 
+  it("omits --json-schema when plainText is true", async () => {
+    const envelope = JSON.stringify({ type: "result", result: "status update", duration_ms: 100, total_cost_usd: 0.01, session_id: "sid-pt" });
+    mockSpawn({ stdout: envelope, exitCode: 0 });
+    const claude = makeClaude();
+    const result = await runSync(claude, opts({ sessionId: "sid-pt", plainText: true }));
+    const args = (Bun.spawn as any).mock.calls[0][0] as string[];
+    expect(args).not.toContain("--json-schema");
+    expect(args).toContain("--output-format");
+    expect(result.result).toBe("status update");
+  });
+
+  it("includes --json-schema when plainText is not set", async () => {
+    mockSpawn({ stdout: jsonResult({ action: "send" }), exitCode: 0 });
+    const claude = makeClaude();
+    await claude.run(opts({ sessionId: "sid-schema" }));
+    const args = (Bun.spawn as any).mock.calls[0][0] as string[];
+    expect(args).toContain("--json-schema");
+  });
+
   it("throws ClaudeProcessError on non-zero exit", async () => {
     mockSpawn({ stderr: "something went wrong", exitCode: 1 });
     const claude = makeClaude();
