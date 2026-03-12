@@ -54,7 +54,7 @@ describe("claude CLI structured output", () => {
     const claude = new Claude({ workspace: WORKSPACE, jsonSchema: SIMPLE_SCHEMA });
     const result = await runSync(claude, {
       prompt: "Say hello",
-      sessionFlag: "--session-id",
+      resume: false,
       sessionId: randomUUID(),
       model: "haiku",
     });
@@ -67,7 +67,7 @@ describe("claude CLI structured output", () => {
     const claude = new Claude({ workspace: WORKSPACE, jsonSchema: SIMPLE_SCHEMA });
     const result = await runSync(claude, {
       prompt: "Say hello",
-      sessionFlag: "--session-id",
+      resume: false,
       sessionId: randomUUID(),
       model: "haiku",
       systemPrompt: "You are a helpful assistant. This is a direct message from the user.",
@@ -81,7 +81,7 @@ describe("claude CLI structured output", () => {
     const claude = new Claude({ workspace: WORKSPACE, jsonSchema: FULL_SCHEMA });
     const result = await runSync(claude, {
       prompt: "Say hello",
-      sessionFlag: "--session-id",
+      resume: false,
       sessionId: randomUUID(),
       model: "haiku",
       systemPrompt: "You are a helpful assistant. This is a direct message from the user.",
@@ -96,7 +96,7 @@ describe("claude CLI structured output", () => {
     const claude = new Claude({ workspace, jsonSchema: FULL_SCHEMA });
     const result = await runSync(claude, {
       prompt: "Say hello",
-      sessionFlag: "--session-id",
+      resume: false,
       sessionId: randomUUID(),
       model: "sonnet",
       systemPrompt: `You are an AI assistant running inside macroclaw. This is a direct message from the user.`,
