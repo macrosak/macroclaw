@@ -5,6 +5,7 @@ import { createLogger } from "./logger";
 import { BG_TIMEOUT, CRON_TIMEOUT, MAIN_TIMEOUT, SYSTEM_PROMPT } from "./prompts";
 import { Queue } from "./queue";
 import { loadSessions, newSessionId, type Sessions, saveSessions } from "./sessions";
+import type { ButtonSpec } from "./telegram";
 
 const log = createLogger("orchestrator");
 
@@ -32,7 +33,7 @@ const jsonSchema = JSON.stringify(z.toJSONSchema(claudeResponseSchema, { target:
 
 // --- Public response type ---
 
-export type ButtonSpec = string | { text: string; data: string };
+export type { ButtonSpec };
 
 export interface OrchestratorResponse {
   message: string;
