@@ -3,6 +3,7 @@ import {existsSync, readFileSync} from "node:fs";
 import {join, resolve} from "node:path";
 import {createInterface} from "node:readline";
 import {defineCommand} from "citty";
+import pkg from "../package.json" with { type: "json" };
 import {initLogger} from "./logger";
 import {ServiceManager, type SystemService} from "./service";
 import {loadSessions} from "./sessions";
@@ -180,7 +181,7 @@ const serviceCommand = defineCommand({
 });
 
 export const main = defineCommand({
-	meta: { name: "macroclaw", description: "Telegram-to-Claude-Code bridge", version: "0.0.0-dev" },
+	meta: { name: pkg.name, description: pkg.description, version: pkg.version },
 	subCommands: { start: startCommand, setup: setupCommand, claude: claudeCommand, service: serviceCommand },
 });
 
