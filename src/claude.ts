@@ -91,7 +91,16 @@ export class Claude {
     delete env.CLAUDECODE;
 
     const sessionFlag = options.resume ? "--resume" : "--session-id";
-    const args = ["claude", "-p", sessionFlag, options.sessionId, "--output-format", "json"];
+    const args = [
+      "claude",
+      "-p",
+      sessionFlag,
+      options.sessionId,
+      "--output-format",
+      "json",
+      "--disallowedTools",
+      "CronList,CronDelete,CronCreate,AskUserQuestion",
+    ];
     if (!options.plainText) args.push("--json-schema", this.#jsonSchema);
     if (options.forkSession) args.push("--fork-session");
     if (options.model) args.push("--model", options.model);
