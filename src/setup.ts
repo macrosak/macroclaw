@@ -46,7 +46,7 @@ export function resolveClaudePath(exec: (cmd: string) => string = (cmd) => execS
   }
 }
 
-export async function runSetupWizard(io: SetupIO, opts?: { defaults?: SetupDefaults; serviceInstaller?: ServiceInstaller; onSettingsReady?: (settings: Settings) => void; resolveClaude?: () => string }): Promise<Settings> {
+export async function runSetupWizard(io: SetupIO, opts?: { defaults?: SetupDefaults; serviceInstaller?: ServiceInstaller; onSettingsReady?: (settings: Settings) => void; resolveClaude?: () => string; platform?: string }): Promise<Settings> {
   const { ask, write } = io;
   const prev = opts?.defaults ?? {};
 
@@ -122,7 +122,7 @@ export async function runSetupWizard(io: SetupIO, opts?: { defaults?: SetupDefau
   const installAnswer = await ask("Install as a system service? [Y/n]: ");
   let oauthToken: string | undefined;
   if (installAnswer.toLowerCase() !== "n" && installAnswer.toLowerCase() !== "no") {
-    if (process.platform === "darwin") {
+    if ((opts?.platform ?? process.platform) === "darwin") {
       write("\nmacOS requires a long-lived OAuth token for the service.\n");
       write("Run `claude setup-token` in another terminal, then paste the token here.\n\n");
       oauthToken = await ask("OAuth token: ");
