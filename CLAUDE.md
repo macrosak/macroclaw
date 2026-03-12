@@ -90,4 +90,4 @@ App (app.ts)                        — I/O layer: Telegram + Cron
 - Finish tasks completely before asking follow-up questions
 - Follow-up fixes can happen after the main implementation
 - Always run `bun run check` before committing (typecheck + lint + tests)
-- **PRs by default.** Before implementing anything, ensure `main` is clean and up to date with `origin/main`, then create a feature branch off it. Open a PR when the work is ready.
+- **Always use PRs.** Never commit directly to `main`. Before implementing anything, ensure `main` is clean and up to date with `origin/main`, then create a feature branch off it. Open a PR when the work is ready.
