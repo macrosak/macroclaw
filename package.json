@@ -17,8 +17,8 @@
     "url": "https://github.com/macrosak/macroclaw"
   },
   "scripts": {
-    "start": "bun run src/cli.ts",
-    "dev": "bun run --watch src/cli.ts",
+    "start": "bun run src/main.ts",
+    "dev": "bun run --watch src/main.ts",
     "check": "tsc --noEmit && biome check && bun test",
     "typecheck": "tsc --noEmit",
     "lint": "biome check",
