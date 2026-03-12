@@ -6,6 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { createLogger } from "./logger";
 
 const log = createLogger("service");
+const LAUNCHD_LABEL = "com.macroclaw";
 
 export type Platform = "launchd" | "systemd";
 
@@ -28,7 +29,7 @@ function defaultDeps(): ServiceDeps {
 		writeFileSync,
 		mkdirSync: (path, opts) => mkdirSync(path, opts),
 		rmSync,
-		execSync: (cmd, opts) => execSync(cmd, { encoding: "utf-8", ...opts }).toString(),
+		execSync: (cmd, opts) => execSync(cmd, { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], ...opts }).toString(),
 		tmpdir,
 		randomUUID,
 		userInfo: () => ({ username: osUserInfo().username, homedir: osUserInfo().homedir }),
@@ -80,6 +81,24 @@ export class ServiceManager implements SystemService {
 		return this.#deps.existsSync(this.serviceFilePath);
 	}
 
+	get isRunning(): boolean {
+		if (this.#platform === "launchd") {
+			try {
+				const out = this.#deps.execSync(`launchctl list ${LAUNCHD_LABEL}`);
+				// If the PID line shows a number (not "-"), the service is running
+				return /"PID"\s*=\s*\d+/.test(out);
+			} catch {
+				return false;
+			}
+		}
+		try {
+			const out = this.#deps.execSync("systemctl is-active macroclaw");
+			return out.trim() === "active";
+		} catch {
+			return false;
+		}
+	}
+
 	install(oauthToken?: string): string {
 		if (this.#platform === "launchd") {
 			this.#installLaunchd(oauthToken);
@@ -105,8 +124,9 @@ export class ServiceManager implements SystemService {
 
 		const logDir = resolve(this.#deps.home, ".macroclaw/logs");
 		this.#deps.mkdirSync(logDir, { recursive: true });
-		// Unload old version if present (ignore errors if not loaded)
-		try { this.#deps.execSync(`launchctl unload ${this.serviceFilePath}`); } catch { /* not loaded */ }
+		if (this.isRunning) {
+			this.#deps.execSync(`launchctl unload ${this.serviceFilePath}`);
+		}
 
 		this.#deps.writeFileSync(this.serviceFilePath, this.#generateLaunchdPlist(bunPath, macroclawPath, pathDirs, oauthToken));
 		log.debug({ filePath: this.serviceFilePath }, "Wrote launchd plist");
@@ -116,8 +136,9 @@ export class ServiceManager implements SystemService {
 	#installSystemd(): void {
 		const target = this.#resolveLinuxUser();
 
-		// Stop old version if present
-		try { this.#sudo("systemctl stop macroclaw"); } catch { /* not running */ }
+		if (this.isRunning) {
+			this.#sudo("systemctl stop macroclaw");
+		}
 
 		this.#deps.execSync("bun install -g macroclaw");
 		const bunPath = this.#resolvePath("bun");
@@ -138,10 +159,14 @@ export class ServiceManager implements SystemService {
 		this.#requireInstalled();
 
 		if (this.#platform === "launchd") {
-			try { this.#deps.execSync(`launchctl unload ${this.serviceFilePath}`); } catch { /* already unloaded */ }
+			if (this.isRunning) {
+				this.#deps.execSync(`launchctl unload ${this.serviceFilePath}`);
+			}
 			this.#deps.rmSync(this.serviceFilePath);
 		} else {
-			try { this.#sudo("systemctl stop macroclaw"); } catch { /* already stopped */ }
+			if (this.isRunning) {
+				this.#sudo("systemctl stop macroclaw");
+			}
 			try { this.#sudo("systemctl disable macroclaw"); } catch { /* already disabled */ }
 			this.#sudo(`rm ${this.serviceFilePath}`);
 			this.#sudo("systemctl daemon-reload");
@@ -152,6 +177,10 @@ export class ServiceManager implements SystemService {
 
 	start(): string {
 		this.#requireInstalled();
+
+		if (this.isRunning) {
+			throw new Error("Service is already running.");
+		}
 
 		if (this.#platform === "launchd") {
 			this.#deps.execSync(`launchctl load ${this.serviceFilePath}`);
@@ -166,6 +195,10 @@ export class ServiceManager implements SystemService {
 	stop(): void {
 		this.#requireInstalled();
 
+		if (!this.isRunning) {
+			throw new Error("Service is not running.");
+		}
+
 		if (this.#platform === "launchd") {
 			this.#deps.execSync(`launchctl unload ${this.serviceFilePath}`);
 		} else {
@@ -179,11 +212,15 @@ export class ServiceManager implements SystemService {
 		this.#requireInstalled();
 
 		if (this.#platform === "launchd") {
-			this.#deps.execSync(`launchctl unload ${this.serviceFilePath}`);
+			if (this.isRunning) {
+				this.#deps.execSync(`launchctl unload ${this.serviceFilePath}`);
+			}
 			this.#deps.execSync("bun install -g macroclaw@latest");
 			this.#deps.execSync(`launchctl load ${this.serviceFilePath}`);
 		} else {
-			this.#sudo("systemctl stop macroclaw");
+			if (this.isRunning) {
+				this.#sudo("systemctl stop macroclaw");
+			}
 			this.#deps.execSync("bun install -g macroclaw@latest");
 			this.#sudo("systemctl start macroclaw");
 		}

@@ -22,6 +22,11 @@ function createManager(overrides?: Partial<ServiceDeps>): ServiceManager {
 	});
 }
 
+const LAUNCHD_RUNNING = `{\n\t"PID" = 12345;\n\t"Label" = "com.macroclaw";\n}`;
+const LAUNCHD_STOPPED = `{\n\t"Label" = "com.macroclaw";\n}`;
+const SYSTEMD_ACTIVE = "active";
+const SYSTEMD_INACTIVE = "inactive";
+
 beforeEach(() => {
 	mockExecSync.mockClear();
 	mockExistsSync.mockClear();
@@ -73,6 +78,62 @@ describe("isInstalled", () => {
 		mockExistsSync.mockImplementation(() => false);
 		const mgr = createManager();
 		expect(mgr.isInstalled).toBe(false);
+	});
+});
+
+describe("isRunning", () => {
+	it("returns true when launchd service has a PID", () => {
+		mockExecSync.mockImplementation((cmd: string) => {
+			if (cmd.startsWith("launchctl list ")) return LAUNCHD_RUNNING;
+			return "";
+		});
+		const mgr = createManager({ platform: "darwin" });
+		expect(mgr.isRunning).toBe(true);
+	});
+
+	it("returns false when launchd service has no PID", () => {
+		mockExecSync.mockImplementation((cmd: string) => {
+			if (cmd.startsWith("launchctl list ")) return LAUNCHD_STOPPED;
+			return "";
+		});
+		const mgr = createManager({ platform: "darwin" });
+		expect(mgr.isRunning).toBe(false);
+	});
+
+	it("returns false when launchctl list throws", () => {
+		mockExecSync.mockImplementation((cmd: string) => {
+			if (cmd.startsWith("launchctl list ")) throw new Error("not found");
+			return "";
+		});
+		const mgr = createManager({ platform: "darwin" });
+		expect(mgr.isRunning).toBe(false);
+	});
+
+	it("returns true when systemd service is active", () => {
+		mockExecSync.mockImplementation((cmd: string) => {
+			if (cmd === "systemctl is-active macroclaw") return SYSTEMD_ACTIVE;
+			return "";
+		});
+		const mgr = createManager();
+		expect(mgr.isRunning).toBe(true);
+	});
+
+	it("returns false when systemd service is inactive", () => {
+		mockExecSync.mockImplementation((cmd: string) => {
+			if (cmd === "systemctl is-active macroclaw") return SYSTEMD_INACTIVE;
+			return "";
+		});
+		const mgr = createManager();
+		expect(mgr.isRunning).toBe(false);
+	});
+
+	it("returns false when systemctl throws", () => {
+		mockExecSync.mockImplementation((cmd: string) => {
+			if (cmd === "systemctl is-active macroclaw") throw new Error("not found");
+			return "";
+		});
+		const mgr = createManager();
+		expect(mgr.isRunning).toBe(false);
 	});
 });
 
@@ -149,6 +210,39 @@ describe("install", () => {
 		mgr.install();
 		const writtenContent = mockWriteFileSync.mock.calls[0]![1] as string;
 		expect(writtenContent).not.toContain("CLAUDE_CODE_OAUTH_TOKEN");
+	});
+
+	it("stops running launchd service before reinstalling", () => {
+		const calls: string[] = [];
+		mockExistsSync.mockImplementation(() => true);
+		mockExecSync.mockImplementation((cmd: string) => {
+			calls.push(cmd);
+			if (cmd === "which bun") return "/Users/testuser/.bun/bin/bun\n";
+			if (cmd === "which claude") return "/Users/testuser/.local/bin/claude\n";
+			if (cmd === "bun pm bin -g") return "/Users/testuser/.bun/bin\n";
+			if (cmd.startsWith("launchctl list ")) return LAUNCHD_RUNNING;
+			return "";
+		});
+		const mgr = createManager({ platform: "darwin" });
+		mgr.install();
+		const unloadIdx = calls.findIndex(c => c.includes("launchctl unload"));
+		const loadIdx = calls.findIndex(c => c.includes("launchctl load"));
+		expect(unloadIdx).toBeGreaterThan(-1);
+		expect(loadIdx).toBeGreaterThan(unloadIdx);
+	});
+
+	it("skips unload when launchd service is not running", () => {
+		mockExistsSync.mockImplementation(() => true);
+		mockExecSync.mockImplementation((cmd: string) => {
+			if (cmd === "which bun") return "/Users/testuser/.bun/bin/bun\n";
+			if (cmd === "which claude") return "/Users/testuser/.local/bin/claude\n";
+			if (cmd === "bun pm bin -g") return "/Users/testuser/.bun/bin\n";
+			if (cmd.startsWith("launchctl list ")) return LAUNCHD_STOPPED;
+			return "";
+		});
+		const mgr = createManager({ platform: "darwin" });
+		mgr.install();
+		expect(mockExecSync).not.toHaveBeenCalledWith(expect.stringContaining("launchctl unload"));
 	});
 
 	it("installs systemd service with PATH via temp file and sudo cp", () => {
@@ -287,16 +381,36 @@ describe("uninstall", () => {
 		);
 	});
 
-	it("uninstalls launchd service", () => {
+	it("uninstalls running launchd service", () => {
 		mockExistsSync.mockImplementation(() => true);
+		mockExecSync.mockImplementation((cmd: string) => {
+			if (cmd.startsWith("launchctl list ")) return LAUNCHD_RUNNING;
+			return "";
+		});
 		const mgr = createManager({ platform: "darwin" });
 		mgr.uninstall();
 		expect(mockExecSync).toHaveBeenCalledWith(expect.stringContaining("launchctl unload"));
 		expect(mockRmSync).toHaveBeenCalled();
 	});
 
-	it("uninstalls systemd service via sudo", () => {
+	it("uninstalls stopped launchd service without unloading", () => {
 		mockExistsSync.mockImplementation(() => true);
+		mockExecSync.mockImplementation((cmd: string) => {
+			if (cmd.startsWith("launchctl list ")) return LAUNCHD_STOPPED;
+			return "";
+		});
+		const mgr = createManager({ platform: "darwin" });
+		mgr.uninstall();
+		expect(mockExecSync).not.toHaveBeenCalledWith(expect.stringContaining("launchctl unload"));
+		expect(mockRmSync).toHaveBeenCalled();
+	});
+
+	it("uninstalls running systemd service via sudo", () => {
+		mockExistsSync.mockImplementation(() => true);
+		mockExecSync.mockImplementation((cmd: string) => {
+			if (cmd === "systemctl is-active macroclaw") return SYSTEMD_ACTIVE;
+			return "";
+		});
 		const mgr = createManager();
 		mgr.uninstall();
 		expect(mockExecSync).toHaveBeenCalledWith("sudo systemctl stop macroclaw");
@@ -305,24 +419,16 @@ describe("uninstall", () => {
 		expect(mockExecSync).toHaveBeenCalledWith("sudo systemctl daemon-reload");
 	});
 
-	it("handles already-unloaded launchd service gracefully", () => {
+	it("uninstalls stopped systemd service without stopping", () => {
 		mockExistsSync.mockImplementation(() => true);
 		mockExecSync.mockImplementation((cmd: string) => {
-			if (cmd.includes("launchctl")) throw new Error("already unloaded");
-			return "";
-		});
-		const mgr = createManager({ platform: "darwin" });
-		expect(() => mgr.uninstall()).not.toThrow();
-	});
-
-	it("handles already-stopped systemd service gracefully", () => {
-		mockExistsSync.mockImplementation(() => true);
-		mockExecSync.mockImplementation((cmd: string) => {
-			if (cmd === "sudo systemctl stop macroclaw" || cmd === "sudo systemctl disable macroclaw") throw new Error("already stopped");
+			if (cmd === "systemctl is-active macroclaw") return SYSTEMD_INACTIVE;
 			return "";
 		});
 		const mgr = createManager();
-		expect(() => mgr.uninstall()).not.toThrow();
+		mgr.uninstall();
+		expect(mockExecSync).not.toHaveBeenCalledWith("sudo systemctl stop macroclaw");
+		expect(mockExecSync).toHaveBeenCalledWith("sudo systemctl disable macroclaw");
 	});
 });
 
@@ -335,8 +441,32 @@ describe("start", () => {
 		);
 	});
 
+	it("throws when service is already running (launchd)", () => {
+		mockExistsSync.mockImplementation(() => true);
+		mockExecSync.mockImplementation((cmd: string) => {
+			if (cmd.startsWith("launchctl list ")) return LAUNCHD_RUNNING;
+			return "";
+		});
+		const mgr = createManager({ platform: "darwin" });
+		expect(() => mgr.start()).toThrow("Service is already running.");
+	});
+
+	it("throws when service is already running (systemd)", () => {
+		mockExistsSync.mockImplementation(() => true);
+		mockExecSync.mockImplementation((cmd: string) => {
+			if (cmd === "systemctl is-active macroclaw") return SYSTEMD_ACTIVE;
+			return "";
+		});
+		const mgr = createManager();
+		expect(() => mgr.start()).toThrow("Service is already running.");
+	});
+
 	it("starts launchd service", () => {
 		mockExistsSync.mockImplementation(() => true);
+		mockExecSync.mockImplementation((cmd: string) => {
+			if (cmd.startsWith("launchctl list ")) throw new Error("not loaded");
+			return "";
+		});
 		const mgr = createManager({ platform: "darwin" });
 		mgr.start();
 		expect(mockExecSync).toHaveBeenCalledWith(expect.stringContaining("launchctl load"));
@@ -344,6 +474,10 @@ describe("start", () => {
 
 	it("starts systemd service via sudo", () => {
 		mockExistsSync.mockImplementation(() => true);
+		mockExecSync.mockImplementation((cmd: string) => {
+			if (cmd === "systemctl is-active macroclaw") return SYSTEMD_INACTIVE;
+			return "";
+		});
 		const mgr = createManager();
 		mgr.start();
 		expect(mockExecSync).toHaveBeenCalledWith("sudo systemctl start macroclaw");
@@ -359,8 +493,32 @@ describe("stop", () => {
 		);
 	});
 
+	it("throws when service is not running (launchd)", () => {
+		mockExistsSync.mockImplementation(() => true);
+		mockExecSync.mockImplementation((cmd: string) => {
+			if (cmd.startsWith("launchctl list ")) return LAUNCHD_STOPPED;
+			return "";
+		});
+		const mgr = createManager({ platform: "darwin" });
+		expect(() => mgr.stop()).toThrow("Service is not running.");
+	});
+
+	it("throws when service is not running (systemd)", () => {
+		mockExistsSync.mockImplementation(() => true);
+		mockExecSync.mockImplementation((cmd: string) => {
+			if (cmd === "systemctl is-active macroclaw") return SYSTEMD_INACTIVE;
+			return "";
+		});
+		const mgr = createManager();
+		expect(() => mgr.stop()).toThrow("Service is not running.");
+	});
+
 	it("stops launchd service", () => {
 		mockExistsSync.mockImplementation(() => true);
+		mockExecSync.mockImplementation((cmd: string) => {
+			if (cmd.startsWith("launchctl list ")) return LAUNCHD_RUNNING;
+			return "";
+		});
 		const mgr = createManager({ platform: "darwin" });
 		mgr.stop();
 		expect(mockExecSync).toHaveBeenCalledWith(expect.stringContaining("launchctl unload"));
@@ -368,6 +526,10 @@ describe("stop", () => {
 
 	it("stops systemd service via sudo", () => {
 		mockExistsSync.mockImplementation(() => true);
+		mockExecSync.mockImplementation((cmd: string) => {
+			if (cmd === "systemctl is-active macroclaw") return SYSTEMD_ACTIVE;
+			return "";
+		});
 		const mgr = createManager();
 		mgr.stop();
 		expect(mockExecSync).toHaveBeenCalledWith("sudo systemctl stop macroclaw");
@@ -383,8 +545,12 @@ describe("update", () => {
 		);
 	});
 
-	it("updates systemd: user-scoped bun install, sudo for systemctl", () => {
+	it("updates systemd: stops if running, reinstalls, starts", () => {
 		mockExistsSync.mockImplementation(() => true);
+		mockExecSync.mockImplementation((cmd: string) => {
+			if (cmd === "systemctl is-active macroclaw") return SYSTEMD_ACTIVE;
+			return "";
+		});
 		const mgr = createManager();
 		mgr.update();
 		expect(mockExecSync).toHaveBeenCalledWith("sudo systemctl stop macroclaw");
@@ -393,8 +559,25 @@ describe("update", () => {
 		expect(mockExecSync).toHaveBeenCalledWith("sudo systemctl start macroclaw");
 	});
 
+	it("updates systemd: skips stop when not running", () => {
+		mockExistsSync.mockImplementation(() => true);
+		mockExecSync.mockImplementation((cmd: string) => {
+			if (cmd === "systemctl is-active macroclaw") return SYSTEMD_INACTIVE;
+			return "";
+		});
+		const mgr = createManager();
+		mgr.update();
+		expect(mockExecSync).not.toHaveBeenCalledWith("sudo systemctl stop macroclaw");
+		expect(mockExecSync).toHaveBeenCalledWith("bun install -g macroclaw@latest");
+		expect(mockExecSync).toHaveBeenCalledWith("sudo systemctl start macroclaw");
+	});
+
 	it("updates launchd without sudo", () => {
 		mockExistsSync.mockImplementation(() => true);
+		mockExecSync.mockImplementation((cmd: string) => {
+			if (cmd.startsWith("launchctl list ")) return LAUNCHD_RUNNING;
+			return "";
+		});
 		const mgr = createManager({ platform: "darwin" });
 		mgr.update();
 		expect(mockExecSync).toHaveBeenCalledWith(expect.stringContaining("launchctl unload"));
