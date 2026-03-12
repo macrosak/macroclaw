@@ -280,7 +280,7 @@ describe("runSetupWizard", () => {
       "sk-test-token",  // oauth token (macOS)
     ]);
 
-    await runSetupWizard(io, { serviceInstaller: installer, onSettingsReady });
+    await runSetupWizard(io, { serviceInstaller: installer, onSettingsReady, platform: "darwin" });
 
     expect(order).toEqual(["save", "install"]);
   });
@@ -298,7 +298,7 @@ describe("runSetupWizard", () => {
     ]);
     const installer = { install: () => { closedBeforeInstall = io.closed; return ""; } };
 
-    await runSetupWizard(io, { serviceInstaller: installer });
+    await runSetupWizard(io, { serviceInstaller: installer, platform: "darwin" });
 
     expect(closedBeforeInstall).toBe(true);
   });
@@ -316,7 +316,7 @@ describe("runSetupWizard", () => {
       "sk-test-token",  // oauth token (macOS)
     ]);
 
-    await runSetupWizard(io, { serviceInstaller: installer });
+    await runSetupWizard(io, { serviceInstaller: installer, platform: "darwin" });
 
     expect(mockInstall).toHaveBeenCalled();
     expect(io.written).toContainEqual(expect.stringContaining("Service installed and started."));
@@ -340,6 +340,26 @@ describe("runSetupWizard", () => {
     expect(io.closed).toBe(true);
   });
 
+  it("skips service install when oauth token is empty on macOS", async () => {
+    mockInstall.mockClear();
+    const installer = createMockServiceInstaller();
+    const io = createMockIO([
+      "tok",
+      "123",
+      "",
+      "",
+      "",
+      "y",
+      "",  // empty oauth token
+    ]);
+
+    const settings = await runSetupWizard(io, { serviceInstaller: installer, platform: "darwin" });
+
+    expect(mockInstall).not.toHaveBeenCalled();
+    expect(io.written).toContainEqual(expect.stringContaining("No token provided"));
+    expect(settings.botToken).toBe("tok");
+  });
+
   it("handles service install failure gracefully", async () => {
     mockInstall.mockImplementation(() => { throw new Error("Permission denied"); });
     const installer = createMockServiceInstaller();
@@ -353,7 +373,7 @@ describe("runSetupWizard", () => {
       "sk-test-token",  // oauth token (macOS)
     ]);
 
-    await runSetupWizard(io, { serviceInstaller: installer });
+    await runSetupWizard(io, { serviceInstaller: installer, platform: "darwin" });
 
     expect(io.written).toContainEqual(expect.stringContaining("Service installation failed: Permission denied"));
   });
