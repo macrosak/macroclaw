@@ -17,17 +17,28 @@ describe("createLogger", () => {
 });
 
 describe("initLogger", () => {
-  it("adds pinorama transport when PINORAMA_URL is set", async () => {
-    process.env.PINORAMA_URL = "http://localhost:6200/pinorama";
-    await initLogger();
-    expect(mockPinoramaTransport).toHaveBeenCalledWith({ url: "http://localhost:6200/pinorama" });
-    delete process.env.PINORAMA_URL;
-  });
-
-  it("does nothing when PINORAMA_URL is not set", async () => {
-    delete process.env.PINORAMA_URL;
+  it("does nothing when called without opts", async () => {
     mockPinoramaTransport.mockClear();
     await initLogger();
+    expect(mockPinoramaTransport).not.toHaveBeenCalled();
+  });
+
+  it("sets log level from opts", async () => {
+    const log = createLogger("opts-level");
+    await initLogger({ level: "warn" });
+    expect(log.level).toBe("warn");
+    await initLogger({ level: "info" }); // restore
+  });
+
+  it("adds pinorama transport from opts", async () => {
+    mockPinoramaTransport.mockClear();
+    await initLogger({ pinoramaUrl: "http://example.com/pinorama" });
+    expect(mockPinoramaTransport).toHaveBeenCalledWith({ url: "http://example.com/pinorama" });
+  });
+
+  it("does not add duplicate pinorama transport on second call", async () => {
+    mockPinoramaTransport.mockClear();
+    await initLogger({ pinoramaUrl: "http://example.com/pinorama" });
     expect(mockPinoramaTransport).not.toHaveBeenCalled();
   });
 });

@@ -5,7 +5,6 @@ import { createLogger, initLogger } from "./logger";
 import { applyEnvOverrides, loadSettings, printSettings } from "./settings";
 
 export async function start(): Promise<void> {
-  await initLogger();
   const log = createLogger("index");
 
   const defaultDir = resolve(process.env.HOME || "~", ".macroclaw");
@@ -19,6 +18,7 @@ export async function start(): Promise<void> {
 
   const { settings: resolved, overrides } = applyEnvOverrides(settings);
 
+  await initLogger({ level: resolved.logLevel, pinoramaUrl: resolved.pinoramaUrl });
   printSettings(resolved, overrides);
 
   const workspace = resolve(resolved.workspace.replace(/^~/, process.env.HOME || "~"));

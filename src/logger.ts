@@ -6,20 +6,30 @@ const prettyStream = pretty({
 	messageFormat: "[{module}] {msg}",
 });
 
-const level = (process.env.LOG_LEVEL || "info") as pino.Level;
+const defaultLevel = (process.env.LOG_LEVEL || "info") as pino.Level;
 
-const streams: pino.StreamEntry[] = [{ level, stream: prettyStream }];
+// Streams accept all levels; logger.level is the sole gate
+const streams: pino.StreamEntry[] = [{ level: "trace", stream: prettyStream }];
 
 const logger = pino(
-	{ level: process.env.LOG_LEVEL || "info" },
+	{ level: defaultLevel },
 	pino.multistream(streams),
 );
 
-export async function initLogger(): Promise<void> {
-	const pinoramaUrl = process.env.PINORAMA_URL;
-	if (pinoramaUrl) {
+export interface LoggerOptions {
+	level?: pino.Level;
+	pinoramaUrl?: string;
+}
+
+let pinoramaAdded = false;
+
+export async function initLogger(opts?: LoggerOptions): Promise<void> {
+	if (opts?.level) logger.level = opts.level;
+
+	if (opts?.pinoramaUrl && !pinoramaAdded) {
 		const { default: pinoramaTransport } = await import("pinorama-transport");
-		streams.push({ level, stream: pinoramaTransport({ url: pinoramaUrl }) });
+		streams.push({ level: "trace", stream: pinoramaTransport({ url: opts.pinoramaUrl }) });
+		pinoramaAdded = true;
 	}
 }
 
