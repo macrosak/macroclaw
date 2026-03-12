@@ -63,26 +63,22 @@ the bot.
 - [Bun](https://bun.sh/) runtime
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and logged in
 
-## Setup
+## Quick Start
 
 ```bash
-# Run directly (no install needed)
-bunx macroclaw
-
-# Or install globally
-bun install -g macroclaw
-macroclaw
+bunx macroclaw setup
 ```
 
-On first launch, an interactive setup wizard guides you through configuration.
+This runs the setup wizard, which:
+1. Asks for your **Telegram bot token** (from [@BotFather](https://t.me/BotFather))
+2. Starts the bot temporarily so you can send `/chatid` to discover your chat ID
+3. Asks for your **chat ID**, **model** preference, **workspace path**, and optional **OpenAI API key**
+4. Saves settings to `~/.macroclaw/settings.json`
+5. Offers to install as a system service — this installs macroclaw globally (`bun install -g`), registers it as a **launchd** agent (macOS) or **systemd** unit (Linux), and starts the bridge automatically
 
-The setup wizard will:
-1. Ask for your **Telegram bot token** (from [@BotFather](https://t.me/BotFather))
-2. Start the bot temporarily so you can send `/chatid` to discover your chat ID
-3. Ask for your **chat ID**, **model** preference, **workspace path**, and optional **OpenAI API key**
-4. Save settings to `~/.macroclaw/settings.json`
+No separate install step needed — answering yes to the service prompt handles everything.
 
-On subsequent runs, settings are loaded from the file. Environment variables override file settings (see `.env.example`).
+On subsequent runs, settings are pre-filled from the file.
 
 ### Configuration
 
@@ -102,31 +98,41 @@ Env vars take precedence over settings file values. On startup, a masked setting
 
 Session state (Claude session IDs) is stored separately in `~/.macroclaw/sessions.json`.
 
-## Usage
+## Commands
 
-Run inside a tmux session so it survives SSH disconnects:
+| Command | Description |
+|---------|-------------|
+| `macroclaw start` | Start the bridge |
+| `macroclaw setup` | Run the interactive setup wizard |
+| `macroclaw claude` | Open Claude Code CLI in the main session |
+| `macroclaw service install` | Install globally and register as a system service |
+| `macroclaw service uninstall` | Stop and remove the system service |
+| `macroclaw service start` | Start the system service |
+| `macroclaw service stop` | Stop the system service |
+| `macroclaw service update` | Reinstall latest version and restart |
+
+### Running as a service
+
+The recommended path is `bunx macroclaw setup` and answering yes to the service prompt (see [Quick Start](#quick-start)).
+
+If macroclaw is already installed and configured, you can also install the service directly:
 
 ```bash
-tmux new -s macroclaw       # start session
-macroclaw                   # run the bot
-
-# Ctrl+B, D              — detach (bot keeps running)
-# tmux attach -t macroclaw — reattach later
-# tmux kill-session -t macroclaw — stop everything
+macroclaw service install
 ```
+
+Both paths install macroclaw globally via `bun install -g`, register it as a **launchd** agent (macOS) or **systemd** unit (Linux) with auto-restart, and start the bridge.
+
+On Linux, the command runs as a normal user. Only the privileged operations (writing to `/etc/systemd/system/`, systemctl commands) are elevated via `sudo`, which prompts for a password when needed. Package installation and path resolution stay in the user's environment.
 
 ## Development
 
 ```bash
 git clone git@github.com:macrosak/macroclaw.git
 cd macroclaw
-cp .env.example .env  # fill in real values
+cp .env.example .env  # fill in real values (see .env.example for available vars)
 bun install --frozen-lockfile
-```
 
-## Development
-
-```bash
 bun run dev    # start with watch mode
 bun test       # run tests (100% coverage enforced)
 bun run claude # open Claude Code CLI in current main session

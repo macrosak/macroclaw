@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import { Bot } from "grammy";
 import { createLogger } from "./logger";
 import { maskValue, type Settings, settingsSchema } from "./settings";
@@ -7,6 +8,7 @@ const log = createLogger("setup");
 export interface SetupIO {
   ask: (question: string) => Promise<string>;
   write: (msg: string) => void;
+  close?: () => void;
 }
 
 async function startSetupBot(token: string): Promise<Bot> {
@@ -20,19 +22,42 @@ async function startSetupBot(token: string): Promise<Bot> {
 
   await bot.init();
   await bot.api.setMyCommands([{ command: "chatid", description: "Get your chat ID" }]);
-  log.info({ username: bot.botInfo.username }, "Setup bot started");
-
   bot.start();
   return bot;
 }
 
-export async function runSetupWizard(io: SetupIO): Promise<Settings> {
+export interface ServiceInstaller {
+  install: (oauthToken?: string) => string;
+}
+
+export interface SetupDefaults {
+  botToken?: string;
+  chatId?: string;
+  model?: string;
+  workspace?: string;
+  openaiApiKey?: string;
+}
+
+export function resolveClaudePath(exec: (cmd: string) => string = (cmd) => execSync(cmd, { encoding: "utf-8" })): string {
+  try {
+    return exec("which claude").trim();
+  } catch {
+    throw new Error("Claude Code CLI not found. Install it first: https://docs.anthropic.com/en/docs/claude-code");
+  }
+}
+
+export async function runSetupWizard(io: SetupIO, opts?: { defaults?: SetupDefaults; serviceInstaller?: ServiceInstaller; onSettingsReady?: (settings: Settings) => void; resolveClaude?: () => string }): Promise<Settings> {
   const { ask, write } = io;
+  const prev = opts?.defaults ?? {};
+
+  // Fail fast if claude CLI is not installed
+  const resolve = opts?.resolveClaude ?? resolveClaudePath;
+  resolve();
 
   write("\n=== Macroclaw Setup ===\n\n");
 
   // Bot token
-  const defaultToken = process.env.TELEGRAM_BOT_TOKEN || "";
+  const defaultToken = prev.botToken || process.env.TELEGRAM_BOT_TOKEN || "";
   const tokenPrompt = defaultToken ? `Bot token [${maskValue("botToken", defaultToken)}]: ` : "Bot token: ";
   let botToken = await ask(tokenPrompt) || defaultToken;
 
@@ -54,7 +79,7 @@ export async function runSetupWizard(io: SetupIO): Promise<Settings> {
   }
 
   // Chat ID
-  const defaultChatId = process.env.AUTHORIZED_CHAT_ID || "";
+  const defaultChatId = prev.chatId || process.env.AUTHORIZED_CHAT_ID || "";
   const chatIdPrompt = defaultChatId ? `Chat ID [${defaultChatId}]: ` : "Chat ID: ";
   let chatId = await ask(chatIdPrompt) || defaultChatId;
   while (!chatId) {
@@ -67,15 +92,15 @@ export async function runSetupWizard(io: SetupIO): Promise<Settings> {
   }
 
   // Model
-  const defaultModel = process.env.MODEL || "sonnet";
+  const defaultModel = prev.model || process.env.MODEL || "sonnet";
   const model = await ask(`Model [${defaultModel}]: `) || defaultModel;
 
   // Workspace
-  const defaultWorkspace = process.env.WORKSPACE || "~/.macroclaw-workspace";
+  const defaultWorkspace = prev.workspace || process.env.WORKSPACE || "~/.macroclaw-workspace";
   const workspace = await ask(`Workspace [${defaultWorkspace}]: `) || defaultWorkspace;
 
   // OpenAI API key
-  const defaultOpenai = process.env.OPENAI_API_KEY || "";
+  const defaultOpenai = prev.openaiApiKey || process.env.OPENAI_API_KEY || "";
   const openaiPrompt = defaultOpenai ? `OpenAI API key [${maskValue("openaiApiKey", defaultOpenai)}] (optional): ` : "OpenAI API key (optional): ";
   const openaiApiKey = await ask(openaiPrompt) || defaultOpenai || undefined;
 
@@ -88,7 +113,37 @@ export async function runSetupWizard(io: SetupIO): Promise<Settings> {
     logLevel: "debug",
   });
 
+  // Persist settings before service install prompt so ServiceManager can find them
+  opts?.onSettingsReady?.(settings);
+
   write("\nSetup complete!\n\n");
+
+  // Optional service installation
+  const installAnswer = await ask("Install as a system service? [Y/n]: ");
+  let oauthToken: string | undefined;
+  if (installAnswer.toLowerCase() !== "n" && installAnswer.toLowerCase() !== "no") {
+    if (process.platform === "darwin") {
+      write("\nmacOS requires a long-lived OAuth token for the service.\n");
+      write("Run `claude setup-token` in another terminal, then paste the token here.\n\n");
+      oauthToken = await ask("OAuth token: ");
+      if (!oauthToken) {
+        write("No token provided. Skipping service installation.\n");
+        io.close?.();
+        return settings;
+      }
+    }
+  }
+  // Release terminal control before sudo may prompt for a password
+  io.close?.();
+  if (installAnswer.toLowerCase() !== "n" && installAnswer.toLowerCase() !== "no") {
+    try {
+      const svc = opts?.serviceInstaller ?? new (await import("./service")).ServiceManager();
+      const logCmd = svc.install(oauthToken);
+      write(`Service installed and started. Check logs:\n  ${logCmd}\n`);
+    } catch (err) {
+      write(`Service installation failed: ${(err as Error).message}\n`);
+    }
+  }
 
   return settings;
 }
