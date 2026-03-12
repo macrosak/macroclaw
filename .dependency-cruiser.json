@@ -1,0 +1,57 @@
+{
+  "forbidden": [
+    {
+      "name": "no-telegram-outside-app",
+      "comment": "Grammy/Telegram is an I/O detail — only app.ts may import telegram.ts",
+      "severity": "error",
+      "from": { "path": "^src/(?!app\\.ts$)", "pathNot": "\\.test\\.ts$" },
+      "to": { "path": "^src/telegram\\.ts$" }
+    },
+    {
+      "name": "no-claude-outside-orchestrator",
+      "comment": "Only orchestrator may import claude.ts — everything else goes through orchestrator",
+      "severity": "error",
+      "from": { "path": "^src/(?!orchestrator\\.ts$)", "pathNot": "\\.test\\.ts$|\\.integration-test\\.ts$" },
+      "to": { "path": "^src/claude\\.ts$" }
+    },
+    {
+      "name": "no-stt-outside-app",
+      "comment": "STT is an I/O detail — only app.ts may import stt.ts",
+      "severity": "error",
+      "from": { "path": "^src/(?!app\\.ts$)", "pathNot": "\\.test\\.ts$" },
+      "to": { "path": "^src/stt\\.ts$" }
+    },
+    {
+      "name": "no-import-from-entrypoints",
+      "comment": "Entry points (cli, index) must not be imported by other modules (cli→index and tests are allowed)",
+      "severity": "error",
+      "from": { "path": "^src/", "pathNot": "^src/(cli|index|main)\\.ts$|\\.test\\.ts$" },
+      "to": { "path": "^src/(cli|index|main)\\.ts$" }
+    },
+    {
+      "name": "no-cycles",
+      "severity": "error",
+      "from": {},
+      "to": { "circular": true }
+    },
+    {
+      "name": "no-non-package-json",
+      "severity": "error",
+      "comment": "because an npm i --production will otherwise deliver an unreliably running package",
+      "from": { "pathNot": "^(node_modules)" },
+      "to": {
+        "dependencyTypes": ["unknown", "undetermined", "npm-no-pkg", "npm-unknown"]
+      }
+    }
+  ],
+  "options": {
+    "doNotFollow": {
+      "path": "node_modules"
+    },
+    "tsPreCompilationDeps": true,
+    "enhancedResolveOptions": {
+      "exportsFields": ["exports"],
+      "conditionNames": ["import", "require", "node", "default", "types"]
+    }
+  }
+}

@@ -1,8 +1,7 @@
 import type { Bot } from "grammy";
-import type { Claude } from "./claude";
 import { CronScheduler } from "./cron";
 import { createLogger } from "./logger";
-import { Orchestrator, type OrchestratorResponse } from "./orchestrator";
+import { type Claude, Orchestrator, type OrchestratorResponse } from "./orchestrator";
 import { isAvailable as isSttAvailable, transcribe } from "./stt";
 import { createBot, downloadFile, sendFile, sendResponse } from "./telegram";
 
