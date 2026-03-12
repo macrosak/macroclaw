@@ -320,12 +320,10 @@ export class Orchestrator {
   // --- Background management ---
 
   #spawnBackground(name: string, prompt: string, model: string | undefined) {
-    if (!this.#mainSessionId) {
-      log.warn({ name }, "Cannot spawn background agent without a session");
-      return;
-    }
     const bgPrompt = `[Context: background-agent/${name}] ${prompt}`;
-    const query = this.#claude.forkSession(this.#mainSessionId, bgPrompt, responseResultType, { model });
+    const query = this.#mainSessionId
+      ? this.#claude.forkSession(this.#mainSessionId, bgPrompt, responseResultType, { model })
+      : this.#claude.newSession(bgPrompt, responseResultType, { model });
     const sessionId = query.sessionId;
     const info: BackgroundInfo = { name, sessionId, startTime: query.startedAt };
     this.#backgroundAgents.set(sessionId, info);
