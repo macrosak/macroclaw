@@ -588,3 +588,115 @@ describe("update", () => {
 		}
 	});
 });
+
+describe("status", () => {
+	it("returns not installed, not running when service file missing", () => {
+		mockExistsSync.mockImplementation(() => false);
+		mockExecSync.mockImplementation((cmd: string) => {
+			if (cmd === "systemctl is-active macroclaw") throw new Error("not found");
+			return "";
+		});
+		const mgr = createManager();
+		const s = mgr.status();
+		expect(s.installed).toBe(false);
+		expect(s.running).toBe(false);
+		expect(s.platform).toBe("systemd");
+		expect(s.pid).toBeUndefined();
+		expect(s.uptime).toBeUndefined();
+	});
+
+	it("returns installed but not running for systemd", () => {
+		mockExistsSync.mockImplementation(() => true);
+		mockExecSync.mockImplementation((cmd: string) => {
+			if (cmd === "systemctl is-active macroclaw") return SYSTEMD_INACTIVE;
+			return "";
+		});
+		const mgr = createManager();
+		const s = mgr.status();
+		expect(s.installed).toBe(true);
+		expect(s.running).toBe(false);
+		expect(s.pid).toBeUndefined();
+	});
+
+	it("returns pid and uptime for running systemd service", () => {
+		mockExistsSync.mockImplementation(() => true);
+		mockExecSync.mockImplementation((cmd: string) => {
+			if (cmd === "systemctl is-active macroclaw") return SYSTEMD_ACTIVE;
+			if (cmd.startsWith("systemctl show macroclaw")) return "MainPID=42\nActiveEnterTimestamp=Thu 2026-03-12 10:00:00 UTC";
+			return "";
+		});
+		const mgr = createManager();
+		const s = mgr.status();
+		expect(s.installed).toBe(true);
+		expect(s.running).toBe(true);
+		expect(s.pid).toBe(42);
+		expect(s.uptime).toBe("Thu 2026-03-12 10:00:00 UTC");
+	});
+
+	it("returns pid for running launchd service", () => {
+		mockExistsSync.mockImplementation(() => true);
+		mockExecSync.mockImplementation((cmd: string) => {
+			if (cmd.startsWith("launchctl list ")) return LAUNCHD_RUNNING;
+			return "";
+		});
+		const mgr = createManager({ platform: "darwin" });
+		const s = mgr.status();
+		expect(s.installed).toBe(true);
+		expect(s.running).toBe(true);
+		expect(s.platform).toBe("launchd");
+		expect(s.pid).toBe(12345);
+	});
+
+	it("handles systemctl show failure gracefully", () => {
+		mockExistsSync.mockImplementation(() => true);
+		mockExecSync.mockImplementation((cmd: string) => {
+			if (cmd === "systemctl is-active macroclaw") return SYSTEMD_ACTIVE;
+			if (cmd.startsWith("systemctl show")) throw new Error("failed");
+			return "";
+		});
+		const mgr = createManager();
+		const s = mgr.status();
+		expect(s.running).toBe(true);
+		expect(s.pid).toBeUndefined();
+		expect(s.uptime).toBeUndefined();
+	});
+
+	it("handles launchctl list failure gracefully during status", () => {
+		mockExistsSync.mockImplementation(() => true);
+		let callCount = 0;
+		mockExecSync.mockImplementation((cmd: string) => {
+			if (cmd.startsWith("launchctl list ")) {
+				callCount++;
+				if (callCount === 1) return LAUNCHD_RUNNING;
+				throw new Error("failed");
+			}
+			return "";
+		});
+		const mgr = createManager({ platform: "darwin" });
+		const s = mgr.status();
+		expect(s.running).toBe(true);
+		expect(s.pid).toBeUndefined();
+	});
+});
+
+describe("logs", () => {
+	it("returns journalctl command for systemd", () => {
+		const mgr = createManager();
+		expect(mgr.logs()).toBe("journalctl -u macroclaw -n 50 --no-pager");
+	});
+
+	it("returns journalctl follow command for systemd", () => {
+		const mgr = createManager();
+		expect(mgr.logs(true)).toBe("journalctl -u macroclaw -f");
+	});
+
+	it("returns tail command for launchd", () => {
+		const mgr = createManager({ platform: "darwin" });
+		expect(mgr.logs()).toBe("tail -n 50 /home/testuser/.macroclaw/logs/stdout.log");
+	});
+
+	it("returns tail follow command for launchd", () => {
+		const mgr = createManager({ platform: "darwin" });
+		expect(mgr.logs(true)).toBe("tail -f /home/testuser/.macroclaw/logs/stdout.log /home/testuser/.macroclaw/logs/stderr.log");
+	});
+});
