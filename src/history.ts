@@ -28,10 +28,10 @@ async function append(entry: HistoryEntry): Promise<void> {
   }
 }
 
-export async function logPrompt(request: HistoryRequest): Promise<void> {
+export async function writeHistoryPrompt(request: HistoryRequest): Promise<void> {
   await append({ ts: new Date().toISOString(), type: "prompt", request });
 }
 
-export async function logResult(response: HistoryResponse): Promise<void> {
+export async function writeHistoryResult(response: HistoryResponse): Promise<void> {
   await append({ ts: new Date().toISOString(), type: "result", response });
 }
