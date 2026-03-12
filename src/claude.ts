@@ -103,17 +103,17 @@ export class Claude {
 
     const model = options?.model ?? this.#model;
     const systemPrompt = options?.systemPrompt ?? this.#systemPrompt;
-    const sessionId = mode.kind === "new" ? crypto.randomUUID() : mode.sessionId;
+    const sessionId = mode.kind === "resume" ? mode.sessionId : crypto.randomUUID();
 
     const args = ["claude", "-p", "--output-format", "json", "--disallowedTools", "CronList,CronDelete,CronCreate,AskUserQuestion"];
 
-    if (mode.kind === "resume" || mode.kind === "fork") {
+    if (mode.kind === "resume") {
       args.push("--resume", sessionId);
+    } else if (mode.kind === "fork") {
+      args.push("--resume", mode.sessionId, "--fork-session", "--session-id", sessionId);
     } else {
       args.push("--session-id", sessionId);
     }
-
-    if (mode.kind === "fork") args.push("--fork-session");
 
     if (resultType.type === "object") {
       args.push("--json-schema", JSON.stringify(z.toJSONSchema(resultType.schema, { target: "jsonSchema7" })));
