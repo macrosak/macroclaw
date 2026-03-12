@@ -12,7 +12,8 @@ import { createLogger } from "./logger";
 import { CRON_TIMEOUT, MAIN_TIMEOUT, SYSTEM_PROMPT } from "./prompts";
 import { Queue } from "./queue";
 import { loadSessions, saveSessions } from "./sessions";
-import type { ButtonSpec } from "./telegram";
+
+type ButtonSpec = string | { text: string; data: string };
 
 const log = createLogger("orchestrator");
 
@@ -42,6 +43,7 @@ const textResultType = { type: "text" } as const;
 // --- Public response type ---
 
 export type { ButtonSpec };
+export type { Claude };
 
 export interface OrchestratorResponse {
   message: string;
