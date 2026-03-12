@@ -86,7 +86,7 @@ export class Orchestrator {
   #claude: Claude;
   #sessions: Sessions;
   #sessionId: string;
-  #sessionFlag: "--resume" | "--session-id";
+  #resumeSession: boolean;
   #sessionResolved = false;
   #config: OrchestratorConfig;
   #active = new Map<string, BackgroundInfo>();
@@ -101,10 +101,10 @@ export class Orchestrator {
 
     if (this.#sessions.mainSessionId) {
       this.#sessionId = this.#sessions.mainSessionId;
-      this.#sessionFlag = "--resume";
+      this.#resumeSession = true;
     } else {
       this.#sessionId = newSessionId();
-      this.#sessionFlag = "--session-id";
+      this.#resumeSession = false;
       saveSessions({ mainSessionId: this.#sessionId }, config.settingsDir);
       log.info({ sessionId: this.#sessionId }, "Created new session");
     }
@@ -265,15 +265,15 @@ export class Orchestrator {
     await logPrompt(request);
 
     if (built.useMainSession) {
-      let result = await this.#callClaude(built, this.#sessionFlag, this.#sessionId, options?.forkSession);
+      let result = await this.#callClaude(built, this.#resumeSession, this.#sessionId, options?.forkSession);
 
       // Session resolution: if resume failed on first call, create new session
-      if (!isDeferred(result) && !this.#sessionResolved && this.#sessionFlag === "--resume" && result.response.actionReason === "process-error") {
+      if (!isDeferred(result) && !this.#sessionResolved && this.#resumeSession && result.response.actionReason === "process-error") {
         this.#sessionId = newSessionId();
         log.info({ sessionId: this.#sessionId }, "Resume failed, created new session");
-        this.#sessionFlag = "--session-id";
+        this.#resumeSession = false;
         saveSessions({ mainSessionId: this.#sessionId }, this.#config.settingsDir);
-        result = await this.#callClaude(built, this.#sessionFlag, this.#sessionId);
+        result = await this.#callClaude(built, this.#resumeSession, this.#sessionId);
       }
 
       if (isDeferred(result)) return result;
@@ -288,7 +288,7 @@ export class Orchestrator {
       // Mark resolved on first success
       if (!this.#sessionResolved && result.response.actionReason !== "process-error") {
         this.#sessionResolved = true;
-        this.#sessionFlag = "--resume";
+        this.#resumeSession = true;
       }
 
       await logResult(result.response);
@@ -297,7 +297,7 @@ export class Orchestrator {
 
     // background-agent: fork from main session for full context
     log.debug({ name: (request as { name: string }).name }, "Processing background-agent (forked session)");
-    const bgResult = await this.#callClaude(built, "--resume", this.#sessionId, true);
+    const bgResult = await this.#callClaude(built, true, this.#sessionId, true);
     if (isDeferred(bgResult)) return bgResult;
     await logResult(bgResult.response);
     return bgResult.response;
@@ -368,11 +368,11 @@ export class Orchestrator {
     return { response: { action: "send", message: msg, actionReason: "no-structured-output" }, sessionId: result.sessionId };
   }
 
-  async #callClaude(built: BuiltRequest, flag: "--resume" | "--session-id", sid: string, forkSession?: boolean): Promise<CallResult | ClaudeDeferredResult> {
+  async #callClaude(built: BuiltRequest, resume: boolean, sid: string, forkSession?: boolean): Promise<CallResult | ClaudeDeferredResult> {
     try {
       const result = await this.#claude.run({
         prompt: built.prompt,
-        sessionFlag: flag,
+        resume,
         sessionId: sid,
         forkSession,
         model: built.model,

@@ -4,7 +4,7 @@ const log = createLogger("claude");
 
 export interface ClaudeRunOptions {
   prompt: string;
-  sessionFlag: "--resume" | "--session-id";
+  resume?: boolean;
   sessionId: string;
   forkSession?: boolean;
   model?: string;
@@ -89,7 +89,8 @@ export class Claude {
     const env = { ...process.env };
     delete env.CLAUDECODE;
 
-    const args = ["claude", "-p", options.sessionFlag, options.sessionId, "--output-format", "json", "--json-schema", this.#jsonSchema];
+    const sessionFlag = options.resume ? "--resume" : "--session-id";
+    const args = ["claude", "-p", sessionFlag, options.sessionId, "--output-format", "json", "--json-schema", this.#jsonSchema];
     if (options.forkSession) args.push("--fork-session");
     if (options.model) args.push("--model", options.model);
     if (options.systemPrompt) args.push("--append-system-prompt", options.systemPrompt);
@@ -98,7 +99,7 @@ export class Claude {
     log.debug(
       {
         model: options.model,
-        sessionFlag: options.sessionFlag,
+        resume: options.resume,
         sessionId: options.sessionId,
         promptLen: options.prompt.length,
         hasSystemPrompt: !!options.systemPrompt,

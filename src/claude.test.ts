@@ -45,7 +45,6 @@ function makeClaude() {
 function opts(overrides?: Partial<ClaudeRunOptions>): ClaudeRunOptions {
   return {
     prompt: "test message",
-    sessionFlag: "--session-id",
     sessionId: "sid-1",
     ...overrides,
   };
@@ -58,7 +57,7 @@ async function runSync(claude: Claude, options: ClaudeRunOptions): Promise<Claud
 }
 
 describe("Claude", () => {
-  it("passes --session-id flag when given", async () => {
+  it("passes --session-id flag when resume is false/unset", async () => {
     mockSpawn({ stdout: jsonResult({ action: "send", message: "Hello" }), exitCode: 0 });
     const claude = makeClaude();
     const result = await runSync(claude, opts());
@@ -69,10 +68,10 @@ describe("Claude", () => {
     );
   });
 
-  it("passes --resume flag when given", async () => {
+  it("passes --resume flag when resume is true", async () => {
     mockSpawn({ stdout: jsonResult({ action: "send" }), exitCode: 0 });
     const claude = makeClaude();
-    await claude.run(opts({ sessionFlag: "--resume", sessionId: "sid-2" }));
+    await claude.run(opts({ resume: true, sessionId: "sid-2" }));
     expect(Bun.spawn).toHaveBeenCalledWith(
       expect.arrayContaining(["claude", "-p", "--resume", "sid-2"]),
       expect.objectContaining({ cwd: TEST_WORKSPACE }),
@@ -102,7 +101,7 @@ describe("Claude", () => {
   it("passes --fork-session when forkSession is true", async () => {
     mockSpawn({ stdout: jsonResult({ action: "send" }), exitCode: 0 });
     const claude = makeClaude();
-    await claude.run(opts({ sessionFlag: "--resume", sessionId: "sid-fork", forkSession: true, prompt: "bg task" }));
+    await claude.run(opts({ resume: true, sessionId: "sid-fork", forkSession: true, prompt: "bg task" }));
     expect(Bun.spawn).toHaveBeenCalledWith(
       expect.arrayContaining(["--resume", "sid-fork", "--fork-session"]),
       expect.objectContaining({ cwd: TEST_WORKSPACE }),
@@ -179,7 +178,7 @@ describe("Claude", () => {
   it("returns structured_output from successful response", async () => {
     mockSpawn({ stdout: jsonResult({ action: "silent", actionReason: "no new results" }), exitCode: 0 });
     const claude = makeClaude();
-    const result = await runSync(claude, opts({ sessionFlag: "--resume", sessionId: "sid-8" }));
+    const result = await runSync(claude, opts({ resume: true, sessionId: "sid-8" }));
     expect(result.structuredOutput).toEqual({ action: "silent", actionReason: "no new results" });
     expect(result.sessionId).toBe("test-session-id");
   });
@@ -188,7 +187,7 @@ describe("Claude", () => {
     const envelope = JSON.stringify({ type: "result", result: "plain text", duration_ms: 100, total_cost_usd: 0.01, session_id: "sid-abc" });
     mockSpawn({ stdout: envelope, exitCode: 0 });
     const claude = makeClaude();
-    const result = await runSync(claude, opts({ sessionFlag: "--resume", sessionId: "sid-9" }));
+    const result = await runSync(claude, opts({ resume: true, sessionId: "sid-9" }));
     expect(result.structuredOutput).toBeNull();
     expect(result.result).toBe("plain text");
     expect(result.sessionId).toBe("sid-abc");
@@ -198,14 +197,14 @@ describe("Claude", () => {
     const envelope = JSON.stringify({ type: "result", result: "text", duration_ms: 100, total_cost_usd: 0.01 });
     mockSpawn({ stdout: envelope, exitCode: 0 });
     const claude = makeClaude();
-    const result = await runSync(claude, opts({ sessionFlag: "--resume", sessionId: "sid-9c" }));
+    const result = await runSync(claude, opts({ resume: true, sessionId: "sid-9c" }));
     expect(result.sessionId).toBe("");
   });
 
   it("returns result from envelope", async () => {
     mockSpawn({ stdout: jsonResult({ action: "send" }), exitCode: 0 });
     const claude = makeClaude();
-    const result = await runSync(claude, opts({ sessionFlag: "--resume", sessionId: "sid-9b" }));
+    const result = await runSync(claude, opts({ resume: true, sessionId: "sid-9b" }));
     expect(result.result).toBe("");
   });
 
@@ -213,7 +212,7 @@ describe("Claude", () => {
     mockSpawn({ stdout: "not json at all", exitCode: 0 });
     const claude = makeClaude();
     try {
-      await runSync(claude, opts({ sessionFlag: "--resume", sessionId: "sid-10" }));
+      await runSync(claude, opts({ resume: true, sessionId: "sid-10" }));
       expect.unreachable("should have thrown");
     } catch (err) {
       expect(err).toBeInstanceOf(ClaudeParseError);
@@ -224,7 +223,7 @@ describe("Claude", () => {
   it("returns duration and cost from envelope", async () => {
     mockSpawn({ stdout: jsonResult({ action: "send" }), exitCode: 0 });
     const claude = makeClaude();
-    const result = await runSync(claude, opts({ sessionFlag: "--resume", sessionId: "sid-11" }));
+    const result = await runSync(claude, opts({ resume: true, sessionId: "sid-11" }));
     expect(result.duration).toBe("1.2s");
     expect(result.cost).toBe("$0.0500");
   });
@@ -232,7 +231,7 @@ describe("Claude", () => {
   it("does not set timeout when timeoutMs is not provided", async () => {
     mockSpawn({ stdout: jsonResult({ action: "send" }), exitCode: 0 });
     const claude = makeClaude();
-    const result = await runSync(claude, opts({ sessionFlag: "--resume", sessionId: "sid-12" }));
+    const result = await runSync(claude, opts({ resume: true, sessionId: "sid-12" }));
     expect(result.structuredOutput).toEqual({ action: "send" });
   });
 

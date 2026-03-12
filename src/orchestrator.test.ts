@@ -230,7 +230,7 @@ describe("Orchestrator", () => {
   });
 
   describe("session management", () => {
-    it("uses --resume for existing session", async () => {
+    it("uses resume=true for existing session", async () => {
       saveSessions({ mainSessionId: "existing-session" }, tmpSettingsDir);
       const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }));
       const { orch } = makeOrchestrator(claude);
@@ -238,7 +238,7 @@ describe("Orchestrator", () => {
       orch.handleMessage("hello");
       await waitForProcessing();
 
-      expect(claude.run.mock.calls[0][0].sessionFlag).toBe("--resume");
+      expect(claude.run.mock.calls[0][0].resume).toBe(true);
       expect(claude.run.mock.calls[0][0].sessionId).toBe("existing-session");
     });
 
@@ -249,7 +249,7 @@ describe("Orchestrator", () => {
       orch.handleMessage("hello");
       await waitForProcessing();
 
-      expect(claude.run.mock.calls[0][0].sessionFlag).toBe("--session-id");
+      expect(claude.run.mock.calls[0][0].resume).toBe(false);
       expect(claude.run.mock.calls[0][0].sessionId).toMatch(/^[0-9a-f]{8}-/);
     });
 
@@ -267,12 +267,12 @@ describe("Orchestrator", () => {
       await waitForProcessing();
 
       expect(callCount).toBe(2);
-      expect(claude.run.mock.calls[0][0].sessionFlag).toBe("--resume");
-      expect(claude.run.mock.calls[1][0].sessionFlag).toBe("--session-id");
+      expect(claude.run.mock.calls[0][0].resume).toBe(true);
+      expect(claude.run.mock.calls[1][0].resume).toBe(false);
       expect(claude.run.mock.calls[1][0].sessionId).not.toBe("old-session");
     });
 
-    it("switches to --resume after first success", async () => {
+    it("switches to resume=true after first success", async () => {
       const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }));
       const { orch } = makeOrchestrator(claude);
 
@@ -281,8 +281,8 @@ describe("Orchestrator", () => {
       orch.handleMessage("second");
       await waitForProcessing();
 
-      expect(claude.run.mock.calls[0][0].sessionFlag).toBe("--session-id");
-      expect(claude.run.mock.calls[1][0].sessionFlag).toBe("--resume");
+      expect(claude.run.mock.calls[0][0].resume).toBe(false);
+      expect(claude.run.mock.calls[1][0].resume).toBe(true);
     });
 
     it("handleSessionCommand sends session via onResponse", async () => {
@@ -314,7 +314,7 @@ describe("Orchestrator", () => {
       await waitForProcessing();
 
       // background-agent should use --resume and forkSession
-      expect(claude.run.mock.calls[1][0].sessionFlag).toBe("--resume");
+      expect(claude.run.mock.calls[1][0].resume).toBe(true);
       expect(claude.run.mock.calls[1][0].forkSession).toBe(true);
     });
 
