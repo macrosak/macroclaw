@@ -4,7 +4,8 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Bot, InlineKeyboard, InputFile } from "grammy";
 import { createLogger } from "./logger";
-import type { ButtonSpec } from "./orchestrator";
+
+export type ButtonSpec = string | { text: string; data: string };
 
 const log = createLogger("telegram");
 
