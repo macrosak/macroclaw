@@ -83,7 +83,7 @@ export class Cli {
 		exec(args.join(" "), { cwd: settings.workspace, stdio: "inherit", env: { ...process.env, CLAUDECODE: "" } });
 	}
 
-	service(action: string, token?: string): void {
+	service(action: string, token?: string, follow?: boolean): void {
 		switch (action) {
 			case "install": {
 				const logCmd = this.#systemService.install(token);
@@ -106,6 +106,23 @@ export class Cli {
 			case "update": {
 				const logCmd = this.#systemService.update();
 				console.log(`Service updated. Check logs:\n  ${logCmd}`);
+				break;
+			}
+			case "status": {
+				const s = this.#systemService.status();
+				const lines = [
+					`Platform: ${s.platform}`,
+					`Installed: ${s.installed ? "yes" : "no"}`,
+					`Running: ${s.running ? "yes" : "no"}`,
+				];
+				if (s.pid) lines.push(`PID: ${s.pid}`);
+				if (s.uptime) lines.push(`Active since: ${s.uptime}`);
+				console.log(lines.join("\n"));
+				break;
+			}
+			case "logs": {
+				const cmd = this.#systemService.logs(follow);
+				console.log(cmd);
 				break;
 			}
 			default:
@@ -169,6 +186,19 @@ const serviceUpdateCommand = defineCommand({
 	run: () => { try { defaultCli.service("update"); } catch (err) { handleError(err); } },
 });
 
+const serviceStatusCommand = defineCommand({
+	meta: { name: "status", description: "Show service installation and running status" },
+	run: () => { try { defaultCli.service("status"); } catch (err) { handleError(err); } },
+});
+
+const serviceLogsCommand = defineCommand({
+	meta: { name: "logs", description: "Print the command to view service logs" },
+	args: {
+		follow: { type: "boolean", alias: "f", description: "Follow log output in real-time" },
+	},
+	run: ({ args }) => { try { defaultCli.service("logs", undefined, args.follow); } catch (err) { handleError(err); } },
+});
+
 const serviceCommand = defineCommand({
 	meta: { name: "service", description: "Manage macroclaw system service" },
 	subCommands: {
@@ -177,6 +207,8 @@ const serviceCommand = defineCommand({
 		start: serviceStartCommand,
 		stop: serviceStopCommand,
 		update: serviceUpdateCommand,
+		status: serviceStatusCommand,
+		logs: serviceLogsCommand,
 	},
 });
 

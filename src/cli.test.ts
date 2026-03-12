@@ -115,6 +115,8 @@ function mockService(overrides?: Partial<SystemService>): SystemService {
 		start: mock(() => ""),
 		stop: mock(() => {}),
 		update: mock(() => ""),
+		status: mock(() => ({ installed: false, running: false, platform: "systemd" as const })),
+		logs: mock(() => "journalctl -u macroclaw -n 50 --no-pager"),
 		...overrides,
 	};
 }
@@ -153,6 +155,27 @@ describe("Cli.service", () => {
 		const cli = new Cli(undefined, mockService({ update }));
 		cli.service("update");
 		expect(update).toHaveBeenCalled();
+	});
+
+	it("runs status action", () => {
+		const status = mock(() => ({ installed: true, running: true, platform: "systemd" as const, pid: 42, uptime: "Thu 2026-03-12 10:00:00 UTC" }));
+		const cli = new Cli(undefined, mockService({ status }));
+		cli.service("status");
+		expect(status).toHaveBeenCalled();
+	});
+
+	it("runs logs action", () => {
+		const logs = mock(() => "journalctl -u macroclaw -n 50 --no-pager");
+		const cli = new Cli(undefined, mockService({ logs }));
+		cli.service("logs");
+		expect(logs).toHaveBeenCalledWith(undefined);
+	});
+
+	it("passes follow flag to logs action", () => {
+		const logs = mock(() => "journalctl -u macroclaw -f");
+		const cli = new Cli(undefined, mockService({ logs }));
+		cli.service("logs", undefined, true);
+		expect(logs).toHaveBeenCalledWith(true);
 	});
 
 	it("throws for unknown action", () => {

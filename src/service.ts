@@ -50,12 +50,22 @@ interface LinuxUser {
 	home: string;
 }
 
+export interface ServiceStatus {
+	installed: boolean;
+	running: boolean;
+	platform: Platform;
+	pid?: number;
+	uptime?: string;
+}
+
 export interface SystemService {
 	install: (oauthToken?: string) => string;
 	uninstall: () => void;
 	start: () => string;
 	stop: () => void;
 	update: () => string;
+	status: () => ServiceStatus;
+	logs: (follow?: boolean) => string;
 }
 
 export class ServiceManager implements SystemService {
@@ -227,6 +237,46 @@ export class ServiceManager implements SystemService {
 
 		log.debug("Service updated (reinstalled, restarted)");
 		return this.#logTailCommand();
+	}
+
+	status(): ServiceStatus {
+		const result: ServiceStatus = {
+			installed: this.isInstalled,
+			running: this.isRunning,
+			platform: this.#platform,
+		};
+
+		if (result.running) {
+			if (this.#platform === "launchd") {
+				try {
+					const out = this.#deps.execSync(`launchctl list ${LAUNCHD_LABEL}`);
+					const pidMatch = /"PID"\s*=\s*(\d+)/.exec(out);
+					if (pidMatch) result.pid = Number(pidMatch[1]);
+				} catch { /* best effort */ }
+			} else {
+				try {
+					const out = this.#deps.execSync("systemctl show macroclaw --property=MainPID,ActiveEnterTimestamp --no-pager");
+					const pidMatch = /MainPID=(\d+)/.exec(out);
+					if (pidMatch && pidMatch[1] !== "0") result.pid = Number(pidMatch[1]);
+					const tsMatch = /ActiveEnterTimestamp=(.+)/.exec(out);
+					if (tsMatch?.[1].trim()) result.uptime = tsMatch[1].trim();
+				} catch { /* best effort */ }
+			}
+		}
+
+		return result;
+	}
+
+	logs(follow = false): string {
+		if (this.#platform === "launchd") {
+			const logDir = resolve(this.#deps.home, ".macroclaw/logs");
+			return follow
+				? `tail -f ${logDir}/stdout.log ${logDir}/stderr.log`
+				: `tail -n 50 ${logDir}/stdout.log`;
+		}
+		return follow
+			? "journalctl -u macroclaw -f"
+			: "journalctl -u macroclaw -n 50 --no-pager";
 	}
 
 	#resolvePath(binary: string): string {
