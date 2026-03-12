@@ -519,6 +519,92 @@ describe("Orchestrator", () => {
 
       expect(responses[0].message).toBe("No background agents running.");
     });
+
+    it("includes peek buttons and dismiss when agents are running", async () => {
+      const claude = mockClaude(() => new Promise<ClaudeResult>(() => {}));
+      const { orch, responses } = makeOrchestrator(claude);
+
+      orch.handleBackgroundCommand("long-task");
+      await waitForProcessing();
+
+      orch.handleBackgroundList();
+      await waitForProcessing();
+
+      const listResponse = responses[responses.length - 1];
+      expect(listResponse.message).toContain("long-task");
+      expect(listResponse.buttons).toBeDefined();
+      expect(listResponse.buttons!.length).toBe(2); // 1 peek + dismiss
+      const peekBtn = listResponse.buttons![0];
+      expect(typeof peekBtn).toBe("object");
+      expect((peekBtn as any).data).toMatch(/^peek:/);
+      expect((peekBtn as any).text).toContain("long-task");
+      expect(listResponse.buttons![1]).toBe("_dismiss");
+    });
+  });
+
+  describe("handlePeek", () => {
+    it("returns 'not found' for unknown sessionId", async () => {
+      const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }));
+      const { orch, responses } = makeOrchestrator(claude);
+
+      await orch.handlePeek("nonexistent-session");
+      await waitForProcessing();
+
+      expect(responses[0].message).toBe("Agent not found or already finished.");
+    });
+
+    it("peeks at running agent and returns status", async () => {
+      let callCount = 0;
+      const claude = mockClaude(async (): Promise<ClaudeResult> => {
+        callCount++;
+        if (callCount === 1) return new Promise(() => {}); // bg agent never finishes
+        return { structuredOutput: null, sessionId: "peek-session", result: "Working on it, 50% done." };
+      });
+      const { orch, responses } = makeOrchestrator(claude);
+
+      orch.handleBackgroundCommand("research");
+      await waitForProcessing();
+
+      // Get the internal session ID from the peek button
+      orch.handleBackgroundList();
+      await waitForProcessing();
+      const listResponse = responses[responses.length - 1];
+      const peekBtn = listResponse.buttons![0] as { text: string; data: string };
+      const sessionId = peekBtn.data.slice(5); // strip "peek:"
+
+      await orch.handlePeek(sessionId);
+      await waitForProcessing();
+
+      const messages = responses.map((r) => r.message);
+      expect(messages.some((m) => m.includes("Peeking at"))).toBe(true);
+      expect(messages.some((m) => m.includes("Working on it"))).toBe(true);
+    });
+
+    it("handles Claude error during peek gracefully", async () => {
+      let callCount = 0;
+      const claude = mockClaude(async (): Promise<ClaudeResult> => {
+        callCount++;
+        if (callCount === 1) return new Promise(() => {}); // bg agent never finishes
+        throw new Error("connection lost");
+      });
+      const { orch, responses } = makeOrchestrator(claude);
+
+      orch.handleBackgroundCommand("failing-peek");
+      await waitForProcessing();
+
+      // Get the internal session ID from the peek button
+      orch.handleBackgroundList();
+      await waitForProcessing();
+      const listResponse = responses[responses.length - 1];
+      const peekBtn = listResponse.buttons![0] as { text: string; data: string };
+      const sessionId = peekBtn.data.slice(5);
+
+      await orch.handlePeek(sessionId);
+      await waitForProcessing();
+
+      const messages = responses.map((r) => r.message);
+      expect(messages.some((m) => m.includes("Couldn't peek at"))).toBe(true);
+    });
   });
 
   describe("handleBackgroundCommand", () => {

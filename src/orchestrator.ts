@@ -32,10 +32,12 @@ const jsonSchema = JSON.stringify(z.toJSONSchema(claudeResponseSchema, { target:
 
 // --- Public response type ---
 
+export type ButtonSpec = string | { text: string; data: string };
+
 export interface OrchestratorResponse {
   message: string;
   files?: string[];
-  buttons?: string[];
+  buttons?: ButtonSpec[];
 }
 
 // --- Internal request types ---
@@ -140,7 +142,39 @@ export class Orchestrator {
       const elapsed = Math.round((Date.now() - a.startTime.getTime()) / 1000);
       return `- ${escapeHtml(a.name)} (${elapsed}s)`;
     });
-    this.#callOnResponse({ message: lines.join("\n") });
+    const buttons: ButtonSpec[] = agents.map((a) => {
+      const elapsed = Math.round((Date.now() - a.startTime.getTime()) / 1000);
+      const text = `${a.name} (${elapsed}s)`.slice(0, 27);
+      return { text, data: `peek:${a.sessionId}` };
+    });
+    buttons.push("_dismiss");
+    this.#callOnResponse({ message: lines.join("\n"), buttons });
+  }
+
+  async handlePeek(sessionId: string): Promise<void> {
+    const agent = this.#active.get(sessionId);
+    if (!agent) {
+      this.#callOnResponse({ message: "Agent not found or already finished." });
+      return;
+    }
+
+    this.#callOnResponse({ message: `Peeking at <b>${escapeHtml(agent.name)}</b>...` });
+
+    try {
+      const result = await this.#claude.run({
+        resume: true,
+        sessionId,
+        forkSession: true,
+        model: "haiku",
+        plainText: true,
+        prompt: "Give a brief status update: what has been done so far, what's currently happening, and what's remaining. 2-3 sentences max.",
+      });
+
+      const text = isDeferred(result) ? "Agent is still working..." : (result.result ?? "[No output]");
+      this.#callOnResponse({ message: `<b>[${escapeHtml(agent.name)}]</b> ${text}` });
+    } catch (err) {
+      this.#callOnResponse({ message: `Couldn't peek at ${escapeHtml(agent.name)}: ${err}` });
+    }
   }
 
   handleSessionCommand(): void {

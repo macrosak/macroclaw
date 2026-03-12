@@ -140,12 +140,26 @@ export class App {
 
     this.#bot.on("callback_query:data", async (ctx) => {
       await ctx.answerCallbackQuery();
-      const label = ctx.callbackQuery.data;
-      if (label === "_noop") return;
-      await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [[{ text: `✓ ${label}`, callback_data: "_noop" }]] } });
+      const data = ctx.callbackQuery.data;
+      if (data === "_noop") return;
       if (ctx.chat?.id.toString() !== this.#config.authorizedChatId) return;
-      log.debug({ label }, "Button clicked");
-      this.#orchestrator.handleButton(label);
+
+      if (data === "_dismiss") {
+        await ctx.editMessageReplyMarkup({ reply_markup: undefined });
+        return;
+      }
+
+      if (data.startsWith("peek:")) {
+        const sessionId = data.slice(5);
+        await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [[{ text: "✓ Peeked", callback_data: "_noop" }]] } });
+        log.debug({ sessionId }, "Peek requested");
+        this.#orchestrator.handlePeek(sessionId);
+        return;
+      }
+
+      await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [[{ text: `✓ ${data}`, callback_data: "_noop" }]] } });
+      log.debug({ label: data }, "Button clicked");
+      this.#orchestrator.handleButton(data);
     });
 
     this.#bot.on("message:text", (ctx) => {
