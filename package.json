@@ -17,8 +17,8 @@
     "url": "https://github.com/macrosak/macroclaw"
   },
   "scripts": {
-    "start": "bun run src/index.ts",
-    "dev": "bun run --watch src/index.ts",
+    "start": "bun run src/cli.ts",
+    "dev": "bun run --watch src/cli.ts",
     "check": "tsc --noEmit && biome check && bun test",
     "typecheck": "tsc --noEmit",
     "lint": "biome check",
@@ -28,6 +28,7 @@
     "claude": "set -a && . ./.env && set +a && cd ${WORKSPACE:-~/.macroclaw-workspace} && claude --resume $(node -p \"require('$HOME/.macroclaw/settings.json').sessionId\") --model ${MODEL:-sonnet}"
   },
   "dependencies": {
+    "citty": "^0.2.1",
     "cron-parser": "^5.5.0",
     "grammy": "^1.39.3",
     "openai": "^6.27.0",

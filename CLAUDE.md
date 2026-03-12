@@ -76,6 +76,7 @@ App (app.ts)                        — I/O layer: Telegram + Cron
 - Single authorized chat only
 - Messages are processed serially (FIFO queue)
 - When adding a new environment variable, document it in `.env.example` with a one-line comment
+- Use camelCase for acronyms in identifiers: `runCli`, `parseUrl`, `httpApi` (not `runCLI`, `parseURL`, `httpAPI`)
 
 ## Design Docs
 
