@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { existsSync, rmSync } from "node:fs";
 import { App, type AppConfig } from "./app";
-import type { Claude, ClaudeDeferredResult, ClaudeResult, ClaudeRunOptions } from "./claude";
+import { type Claude, QueryProcessError, type QueryResult, type RunningQuery } from "./claude";
 import { saveSessions } from "./sessions";
 
 const mockOpenAICreate = mock(async () => ({ text: "transcribed text" }));
@@ -73,13 +73,52 @@ afterEach(() => {
   if (existsSync(tmpSettingsDir)) rmSync(tmpSettingsDir, { recursive: true });
 });
 
-function successResult(output: unknown, sessionId = "test-session-id"): ClaudeResult {
-  return { structuredOutput: output, sessionId, duration: "1.0s", cost: "$0.05" };
+function queryResult<T>(value: T, sessionId = "test-session-id"): QueryResult<T> {
+  return { value, sessionId, duration: "1.0s", cost: "$0.05" };
 }
 
-function mockClaude(handler: (opts: ClaudeRunOptions) => Promise<ClaudeResult | ClaudeDeferredResult>): Claude {
-  const claude = { run: mock(handler) };
-  return claude as unknown as Claude;
+function resolvedQuery<T>(value: T, sessionId = "test-session-id"): RunningQuery<T> {
+  return {
+    sessionId,
+    startedAt: new Date(),
+    result: Promise.resolve(queryResult(value, sessionId)),
+    kill: mock(async () => {}),
+  };
+}
+
+interface CallInfo {
+  method: string;
+  prompt: string;
+  sessionId?: string;
+}
+
+function mockClaude(handler: (info: CallInfo) => RunningQuery<unknown>): Claude & { calls: CallInfo[] } {
+  const calls: CallInfo[] = [];
+  const claude = {
+    newSession: mock((prompt: string, _resultType: unknown, _options?: any) => {
+      const info: CallInfo = { method: "newSession", prompt };
+      calls.push(info);
+      return handler(info);
+    }),
+    resumeSession: mock((sessionId: string, prompt: string, _resultType: unknown, _options?: any) => {
+      const info: CallInfo = { method: "resumeSession", sessionId, prompt };
+      calls.push(info);
+      return handler(info);
+    }),
+    forkSession: mock((sessionId: string, prompt: string, _resultType: unknown, _options?: any) => {
+      const info: CallInfo = { method: "forkSession", sessionId, prompt };
+      calls.push(info);
+      return handler(info);
+    }),
+    calls,
+  } as unknown as Claude & { calls: CallInfo[] };
+  return claude;
+}
+
+function defaultMockClaude(): Claude & { calls: CallInfo[] } {
+  return mockClaude((info) =>
+    resolvedQuery({ action: "send", message: `Response to: ${info.prompt}`, actionReason: "user message" }),
+  );
 }
 
 function makeConfig(overrides?: Partial<AppConfig>): AppConfig {
@@ -88,9 +127,7 @@ function makeConfig(overrides?: Partial<AppConfig>): AppConfig {
     authorizedChatId: "12345",
     workspace: "/tmp/macroclaw-test-workspace",
     settingsDir: tmpSettingsDir,
-    claude: mockClaude(async (opts: ClaudeRunOptions): Promise<ClaudeResult> =>
-      successResult({ action: "send", message: `Response to: ${opts.prompt}`, actionReason: "user message" }),
-    ),
+    claude: defaultMockClaude(),
     ...overrides,
   };
 }
@@ -135,9 +172,8 @@ describe("App", () => {
       handler({ chat: { id: 12345 }, message: { text: "hello" } });
       await new Promise((r) => setTimeout(r, 50));
 
-      const claude = config.claude as any;
-      const opts = claude.run.mock.calls[0][0] as ClaudeRunOptions;
-      expect(opts.prompt).toBe("hello");
+      const claude = config.claude as Claude & { calls: CallInfo[] };
+      expect(claude.calls[0].prompt).toBe("hello");
     });
 
     it("ignores messages from unauthorized chats", async () => {
@@ -149,13 +185,12 @@ describe("App", () => {
       handler({ chat: { id: 99999 }, message: { text: "hello" } });
       await new Promise((r) => setTimeout(r, 50));
 
-      expect((config.claude as any).run).not.toHaveBeenCalled();
+      expect((config.claude as Claude & { calls: CallInfo[] }).calls).toHaveLength(0);
     });
 
     it("sends [No output] for empty claude response", async () => {
-      const config = makeConfig({
-        claude: mockClaude(async (): Promise<ClaudeResult> => successResult({ action: "send", message: "", actionReason: "empty" })),
-      });
+      const claude = mockClaude(() => resolvedQuery({ action: "send", message: "", actionReason: "empty" }));
+      const config = makeConfig({ claude });
       const app = new App(config);
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:text")![0];
@@ -169,9 +204,8 @@ describe("App", () => {
     });
 
     it("skips sending when action is silent", async () => {
-      const config = makeConfig({
-        claude: mockClaude(async (): Promise<ClaudeResult> => successResult({ action: "silent", actionReason: "no new results" })),
-      });
+      const claude = mockClaude(() => resolvedQuery({ action: "silent", actionReason: "no new results" }));
+      const config = makeConfig({ claude });
       const app = new App(config);
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:text")![0];
@@ -191,17 +225,18 @@ describe("App", () => {
       handler({ chat: { id: 12345 }, message: { text: "bg: research pricing" } });
       await new Promise((r) => setTimeout(r, 50));
 
-      const opts = (config.claude as any).run.mock.calls[0][0] as ClaudeRunOptions;
-      expect(opts.prompt).toBe("bg: research pricing");
+      const claude = config.claude as Claude & { calls: CallInfo[] };
+      expect(claude.calls[0].prompt).toBe("bg: research pricing");
     });
 
-    it("sends error wrapped in ClaudeResponse", async () => {
-      const { ClaudeProcessError } = await import("./claude");
-      const config = makeConfig({
-        claude: mockClaude(async (): Promise<ClaudeResult> => {
-          throw new ClaudeProcessError(1, "spawn failed");
-        }),
-      });
+    it("sends error wrapped in response", async () => {
+      const claude = mockClaude((): RunningQuery<unknown> => ({
+        sessionId: "err-sid",
+        startedAt: new Date(),
+        result: Promise.reject(new QueryProcessError(1, "spawn failed")),
+        kill: mock(async () => {}),
+      }));
+      const config = makeConfig({ claude });
       const app = new App(config);
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:text")![0];
@@ -239,9 +274,9 @@ describe("App", () => {
       await new Promise((r) => setTimeout(r, 50));
 
       expect(bot.api.getFile).toHaveBeenCalledWith("large");
-      expect((config.claude as any).run).toHaveBeenCalled();
-      const opts = (config.claude as any).run.mock.calls[0][0] as ClaudeRunOptions;
-      expect(opts.prompt).toContain("[File:");
+      const claude = config.claude as Claude & { calls: CallInfo[] };
+      expect(claude.calls).toHaveLength(1);
+      expect(claude.calls[0].prompt).toContain("[File:");
 
       globalThis.fetch = origFetch;
     });
@@ -267,9 +302,9 @@ describe("App", () => {
       await new Promise((r) => setTimeout(r, 50));
 
       expect(bot.api.getFile).toHaveBeenCalledWith("doc-id");
-      expect((config.claude as any).run).toHaveBeenCalled();
-      const opts = (config.claude as any).run.mock.calls[0][0] as ClaudeRunOptions;
-      expect(opts.prompt).toContain("[File:");
+      const claude = config.claude as Claude & { calls: CallInfo[] };
+      expect(claude.calls).toHaveLength(1);
+      expect(claude.calls[0].prompt).toContain("[File:");
 
       globalThis.fetch = origFetch;
     });
@@ -287,9 +322,9 @@ describe("App", () => {
       });
       await new Promise((r) => setTimeout(r, 50));
 
-      expect((config.claude as any).run).toHaveBeenCalled();
-      const opts = (config.claude as any).run.mock.calls[0][0] as ClaudeRunOptions;
-      expect(opts.prompt).toContain("[File download failed: photo.jpg]");
+      const claude = config.claude as Claude & { calls: CallInfo[] };
+      expect(claude.calls).toHaveLength(1);
+      expect(claude.calls[0].prompt).toContain("[File download failed: photo.jpg]");
     });
 
     it("routes error message when document download fails", async () => {
@@ -305,9 +340,9 @@ describe("App", () => {
       });
       await new Promise((r) => setTimeout(r, 50));
 
-      expect((config.claude as any).run).toHaveBeenCalled();
-      const opts = (config.claude as any).run.mock.calls[0][0] as ClaudeRunOptions;
-      expect(opts.prompt).toContain("[File download failed: huge.pdf]");
+      const claude = config.claude as Claude & { calls: CallInfo[] };
+      expect(claude.calls).toHaveLength(1);
+      expect(claude.calls[0].prompt).toContain("[File download failed: huge.pdf]");
     });
 
     it("handles voice messages by transcribing and routing text to orchestrator", async () => {
@@ -328,16 +363,14 @@ describe("App", () => {
       });
       await new Promise((r) => setTimeout(r, 50));
 
-      // Should echo transcription to user
       const sendCalls = (bot.api.sendMessage as any).mock.calls;
       const echoCall = sendCalls.find((c: any) => c[1].includes("[Received audio]"));
       expect(echoCall).toBeDefined();
       expect(echoCall[1]).toContain("hello from voice");
 
-      // Should route transcribed text to orchestrator
-      expect((config.claude as any).run).toHaveBeenCalled();
-      const opts = (config.claude as any).run.mock.calls[0][0] as ClaudeRunOptions;
-      expect(opts.prompt).toBe("hello from voice");
+      const claude = config.claude as Claude & { calls: CallInfo[] };
+      expect(claude.calls).toHaveLength(1);
+      expect(claude.calls[0].prompt).toBe("hello from voice");
 
       globalThis.fetch = origFetch;
     });
@@ -363,7 +396,7 @@ describe("App", () => {
       const sendCalls = (bot.api.sendMessage as any).mock.calls;
       const errorCall = sendCalls.find((c: any) => c[1].includes("[Failed to transcribe audio]"));
       expect(errorCall).toBeDefined();
-      expect((config.claude as any).run).not.toHaveBeenCalled();
+      expect((config.claude as Claude & { calls: CallInfo[] }).calls).toHaveLength(0);
 
       globalThis.fetch = origFetch;
     });
@@ -389,7 +422,7 @@ describe("App", () => {
       const sendCalls = (bot.api.sendMessage as any).mock.calls;
       const emptyCall = sendCalls.find((c: any) => c[1].includes("[Could not understand audio]"));
       expect(emptyCall).toBeDefined();
-      expect((config.claude as any).run).not.toHaveBeenCalled();
+      expect((config.claude as Claude & { calls: CallInfo[] }).calls).toHaveLength(0);
 
       globalThis.fetch = origFetch;
     });
@@ -406,7 +439,7 @@ describe("App", () => {
       });
       await new Promise((r) => setTimeout(r, 50));
 
-      expect((config.claude as any).run).not.toHaveBeenCalled();
+      expect((config.claude as Claude & { calls: CallInfo[] }).calls).toHaveLength(0);
     });
 
     it("responds with unavailable message when OPENAI_API_KEY is not set", async () => {
@@ -424,7 +457,7 @@ describe("App", () => {
       const sendCalls = (bot.api.sendMessage as any).mock.calls;
       const call = sendCalls.find((c: any) => c[1].includes("OPENAI_API_KEY"));
       expect(call).toBeDefined();
-      expect((config.claude as any).run).not.toHaveBeenCalled();
+      expect((config.claude as Claude & { calls: CallInfo[] }).calls).toHaveLength(0);
     });
 
     it("ignores photo messages from unauthorized chats", async () => {
@@ -439,23 +472,20 @@ describe("App", () => {
       });
       await new Promise((r) => setTimeout(r, 50));
 
-      expect((config.claude as any).run).not.toHaveBeenCalled();
+      expect((config.claude as Claude & { calls: CallInfo[] }).calls).toHaveLength(0);
     });
 
     it("sends outbound files before text message (onResponse delivery)", async () => {
       const tmpFile = `/tmp/macroclaw-test-outbound-${Date.now()}.png`;
       await Bun.write(tmpFile, "fake png");
 
-      const config = makeConfig({
-        claude: mockClaude(async (): Promise<ClaudeResult> =>
-          successResult({
-            action: "send",
-            message: "Here's your chart",
-            actionReason: "ok",
-            files: [tmpFile],
-          }),
-        ),
-      });
+      const claude = mockClaude(() => resolvedQuery({
+        action: "send",
+        message: "Here's your chart",
+        actionReason: "ok",
+        files: [tmpFile],
+      }));
+      const config = makeConfig({ claude });
       const app = new App(config);
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:text")![0];
@@ -471,16 +501,13 @@ describe("App", () => {
     });
 
     it("passes buttons to sendResponse (onResponse delivery)", async () => {
-      const config = makeConfig({
-        claude: mockClaude(async (): Promise<ClaudeResult> =>
-          successResult({
-            action: "send",
-            message: "Choose one",
-            actionReason: "ok",
-            buttons: ["Yes", "No"],
-          }),
-        ),
-      });
+      const claude = mockClaude(() => resolvedQuery({
+        action: "send",
+        message: "Choose one",
+        actionReason: "ok",
+        buttons: ["Yes", "No"],
+      }));
+      const config = makeConfig({ claude });
       const app = new App(config);
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:text")![0];
@@ -511,9 +538,9 @@ describe("App", () => {
 
       expect(ctx.answerCallbackQuery).toHaveBeenCalled();
       expect(ctx.editMessageReplyMarkup).toHaveBeenCalledWith({ reply_markup: { inline_keyboard: [[{ text: "✓ Yes", callback_data: "_noop" }]] } });
-      expect((config.claude as any).run).toHaveBeenCalled();
-      const opts = (config.claude as any).run.mock.calls[0][0] as ClaudeRunOptions;
-      expect(opts.prompt).toBe('[Context: button-click] User tapped "Yes"');
+      const claude = config.claude as Claude & { calls: CallInfo[] };
+      expect(claude.calls).toHaveLength(1);
+      expect(claude.calls[0].prompt).toBe('[Context: button-click] User tapped "Yes"');
     });
 
     it("handles _dismiss callback by removing reply markup", async () => {
@@ -534,7 +561,7 @@ describe("App", () => {
 
       expect(ctx.answerCallbackQuery).toHaveBeenCalled();
       expect(ctx.editMessageReplyMarkup).toHaveBeenCalledWith({ reply_markup: undefined });
-      expect((config.claude as any).run).not.toHaveBeenCalled();
+      expect((config.claude as Claude & { calls: CallInfo[] }).calls).toHaveLength(0);
     });
 
     it("handles peek: callback by routing to orchestrator.handlePeek", async () => {
@@ -555,7 +582,6 @@ describe("App", () => {
 
       expect(ctx.answerCallbackQuery).toHaveBeenCalled();
       expect(ctx.editMessageReplyMarkup).toHaveBeenCalledWith({ reply_markup: { inline_keyboard: [[{ text: "✓ Peeked", callback_data: "_noop" }]] } });
-      // handlePeek sends "Agent not found" since no active agents
       const calls = (bot.api.sendMessage as any).mock.calls;
       const text = calls[calls.length - 1][1];
       expect(text).toBe("Agent not found or already finished.");
@@ -578,20 +604,17 @@ describe("App", () => {
       await new Promise((r) => setTimeout(r, 50));
 
       expect(ctx.answerCallbackQuery).toHaveBeenCalled();
-      expect((config.claude as any).run).not.toHaveBeenCalled();
+      expect((config.claude as Claude & { calls: CallInfo[] }).calls).toHaveLength(0);
     });
 
     it("skips outbound files that don't exist", async () => {
-      const config = makeConfig({
-        claude: mockClaude(async (): Promise<ClaudeResult> =>
-          successResult({
-            action: "send",
-            message: "Done",
-            actionReason: "ok",
-            files: ["/tmp/nonexistent-xyz.png"],
-          }),
-        ),
-      });
+      const claude = mockClaude(() => resolvedQuery({
+        action: "send",
+        message: "Done",
+        actionReason: "ok",
+        files: ["/tmp/nonexistent-xyz.png"],
+      }));
+      const config = makeConfig({ claude });
       const app = new App(config);
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:text")![0];
@@ -657,9 +680,13 @@ describe("App", () => {
     });
 
     it("/bg with prompt spawns a background agent via sendMessage", async () => {
-      const config = makeConfig({
-        claude: mockClaude(() => new Promise<ClaudeResult>(() => {})),
-      });
+      const claude = mockClaude((): RunningQuery<unknown> => ({
+        sessionId: "bg-sid",
+        startedAt: new Date(),
+        result: new Promise(() => {}),
+        kill: mock(async () => {}),
+      }));
+      const config = makeConfig({ claude });
       const app = new App(config);
       const bot = app.bot as any;
       const handler = bot.commandHandlers.get("bg")!;
@@ -671,23 +698,25 @@ describe("App", () => {
       const calls = (bot.api.sendMessage as any).mock.calls;
       const text = calls[calls.length - 1][1];
       expect(text).toBe('Background agent "research-pricing" started.');
-      expect((config.claude as any).run).toHaveBeenCalledTimes(1);
+      expect(claude.calls).toHaveLength(1);
     });
 
     it("/bg lists active background agents via sendMessage", async () => {
-      const config = makeConfig({
-        claude: mockClaude(() => new Promise<ClaudeResult>(() => {})),
-      });
+      const claude = mockClaude((): RunningQuery<unknown> => ({
+        sessionId: `bg-${Date.now()}`,
+        startedAt: new Date(),
+        result: new Promise(() => {}),
+        kill: mock(async () => {}),
+      }));
+      const config = makeConfig({ claude });
       const app = new App(config);
       const bot = app.bot as any;
       const bgHandler = bot.commandHandlers.get("bg")!;
 
-      // Spawn via /bg command
       const spawnCtx = { chat: { id: 12345 }, match: "long task" };
       bgHandler(spawnCtx);
       await new Promise((r) => setTimeout(r, 10));
 
-      // List via /bg with no args
       const listCtx = { chat: { id: 12345 }, match: "" };
       bgHandler(listCtx);
       await new Promise((r) => setTimeout(r, 10));
@@ -698,7 +727,7 @@ describe("App", () => {
       expect(lastText).toMatch(/\d+s/);
     });
 
-    it("generates new session ID when settings is empty", async () => {
+    it("shows 'none' when no session exists yet", async () => {
       if (existsSync(tmpSettingsDir)) rmSync(tmpSettingsDir, { recursive: true });
       const app = new App(makeConfig());
       const bot = app.bot as any;
@@ -710,7 +739,7 @@ describe("App", () => {
 
       const calls = (bot.api.sendMessage as any).mock.calls;
       const text = calls[calls.length - 1][1];
-      expect(text).toMatch(/Session: <code>[0-9a-f]{8}-/);
+      expect(text).toBe("Session: <code>none</code>");
     });
   });
 

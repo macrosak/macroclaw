@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import * as fs from "node:fs/promises";
-import { logPrompt, logResult } from "./history";
+import { writeHistoryPrompt, writeHistoryResult } from "./history";
 
 const mockMkdir = spyOn(fs, "mkdir").mockResolvedValue(undefined);
 const mockAppendFile = spyOn(fs, "appendFile").mockResolvedValue(undefined);
@@ -15,10 +15,10 @@ afterAll(() => {
   mockAppendFile.mockRestore();
 });
 
-describe("logPrompt", () => {
+describe("writeHistoryPrompt", () => {
   it("writes a prompt entry as JSONL", async () => {
     const request = { type: "user", message: "hello" };
-    await logPrompt(request);
+    await writeHistoryPrompt(request);
 
     expect(mockMkdir).toHaveBeenCalledTimes(1);
     expect(mockMkdir.mock.calls[0][1]).toEqual({ recursive: true });
@@ -33,17 +33,17 @@ describe("logPrompt", () => {
 
   it("writes cron request", async () => {
     const request = { type: "cron", name: "daily", prompt: "check" };
-    await logPrompt(request);
+    await writeHistoryPrompt(request);
 
     const parsed = JSON.parse(mockAppendFile.mock.calls[0][1] as string);
     expect(parsed.request).toEqual(request);
   });
 });
 
-describe("logResult", () => {
+describe("writeHistoryResult", () => {
   it("writes a result entry as JSONL", async () => {
     const response = { action: "send", message: "hi", actionReason: "ok" };
-    await logResult(response);
+    await writeHistoryResult(response);
 
     expect(mockAppendFile).toHaveBeenCalledTimes(1);
     const written = mockAppendFile.mock.calls[0][1] as string;
@@ -55,7 +55,7 @@ describe("logResult", () => {
 
   it("writes silent response", async () => {
     const response = { action: "silent", actionReason: "nothing new" };
-    await logResult(response);
+    await writeHistoryResult(response);
 
     const parsed = JSON.parse(mockAppendFile.mock.calls[0][1] as string);
     expect(parsed.response).toEqual(response);
@@ -64,7 +64,7 @@ describe("logResult", () => {
 
 describe("file path", () => {
   it("uses today's date in YYYY-MM-DD.jsonl format", async () => {
-    await logPrompt({ type: "user", message: "test" });
+    await writeHistoryPrompt({ type: "user", message: "test" });
 
     const filePath = mockAppendFile.mock.calls[0][0] as string;
     const today = new Date().toISOString().slice(0, 10);
@@ -75,7 +75,7 @@ describe("file path", () => {
 
 describe("mkdir", () => {
   it("creates history directory recursively", async () => {
-    await logPrompt({ type: "user", message: "test" });
+    await writeHistoryPrompt({ type: "user", message: "test" });
 
     const dirPath = mockMkdir.mock.calls[0][0] as string;
     expect(dirPath).toContain(".macroclaw/history");
@@ -87,6 +87,6 @@ describe("error handling", () => {
     mockAppendFile.mockRejectedValueOnce(new Error("disk full"));
 
     // Should not throw
-    await logPrompt({ type: "user", message: "test" });
+    await writeHistoryPrompt({ type: "user", message: "test" });
   });
 });

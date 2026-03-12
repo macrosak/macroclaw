@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { existsSync, rmSync } from "node:fs";
-import { type Claude, type ClaudeDeferredResult, ClaudeParseError, ClaudeProcessError, type ClaudeResult, type ClaudeRunOptions } from "./claude";
+import { type Claude, QueryParseError, QueryProcessError, type QueryResult, type RunningQuery } from "./claude";
 import { Orchestrator, type OrchestratorConfig, type OrchestratorResponse } from "./orchestrator";
 import { saveSessions } from "./sessions";
 
@@ -15,15 +15,54 @@ afterEach(() => {
   if (existsSync(tmpSettingsDir)) rmSync(tmpSettingsDir, { recursive: true });
 });
 
-function mockClaude(response: ClaudeResult | ((opts: ClaudeRunOptions) => Promise<ClaudeResult | ClaudeDeferredResult>)) {
-  const run = typeof response === "function"
-    ? mock(response)
-    : mock(async () => response);
-  return { run } as unknown as Claude & { run: ReturnType<typeof mock> };
+interface CallInfo {
+  method: "newSession" | "resumeSession" | "forkSession";
+  prompt: string;
+  sessionId?: string;
+  model?: string;
+  systemPrompt?: string;
 }
 
-function successResult(structuredOutput: unknown, sessionId = "test-session-id"): ClaudeResult {
-  return { structuredOutput, sessionId, duration: "1.0s", cost: "$0.05" };
+type MockHandler = (info: CallInfo) => RunningQuery<unknown>;
+
+function queryResult<T>(value: T, sessionId = "test-session-id"): QueryResult<T> {
+  return { value, sessionId, duration: "1.0s", cost: "$0.05" };
+}
+
+function resolvedQuery<T>(value: T, sessionId = "test-session-id"): RunningQuery<T> {
+  return {
+    sessionId,
+    startedAt: new Date(),
+    result: Promise.resolve(queryResult(value, sessionId)),
+    kill: mock(async () => {}),
+  };
+}
+
+function mockClaude(handler: MockHandler | unknown) {
+  const calls: CallInfo[] = [];
+  const handlerFn: MockHandler = typeof handler === "function"
+    ? handler as MockHandler
+    : () => resolvedQuery(handler);
+
+  const claude = {
+    newSession: mock((prompt: string, _resultType: unknown, options?: { model?: string; systemPrompt?: string }) => {
+      const info: CallInfo = { method: "newSession", prompt, model: options?.model, systemPrompt: options?.systemPrompt };
+      calls.push(info);
+      return handlerFn(info);
+    }),
+    resumeSession: mock((sessionId: string, prompt: string, _resultType: unknown, options?: { model?: string; systemPrompt?: string }) => {
+      const info: CallInfo = { method: "resumeSession", sessionId, prompt, model: options?.model, systemPrompt: options?.systemPrompt };
+      calls.push(info);
+      return handlerFn(info);
+    }),
+    forkSession: mock((sessionId: string, prompt: string, _resultType: unknown, options?: { model?: string; systemPrompt?: string }) => {
+      const info: CallInfo = { method: "forkSession", sessionId, prompt, model: options?.model, systemPrompt: options?.systemPrompt };
+      calls.push(info);
+      return handlerFn(info);
+    }),
+    calls,
+  } as unknown as Claude & { calls: CallInfo[]; newSession: ReturnType<typeof mock>; resumeSession: ReturnType<typeof mock>; forkSession: ReturnType<typeof mock> };
+  return claude;
 }
 
 function makeOrchestrator(claude: Claude, extraConfig?: Partial<OrchestratorConfig>) {
@@ -46,89 +85,79 @@ async function waitForProcessing(ms = 50) {
 describe("Orchestrator", () => {
   describe("prompt building", () => {
     it("builds user prompt as-is", async () => {
-      const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }));
+      const claude = mockClaude({ action: "send", message: "ok", actionReason: "ok" });
       const { orch } = makeOrchestrator(claude);
 
       orch.handleMessage("hello");
       await waitForProcessing();
 
-      const opts = claude.run.mock.calls[0][0];
-      expect(opts.prompt).toBe("hello");
-      expect(opts.systemPrompt).toContain("macroclaw");
-      expect(opts.timeoutMs).toBe(60_000);
+      expect(claude.calls[0].prompt).toBe("hello");
     });
 
     it("prepends file references for user requests", async () => {
-      const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }));
+      const claude = mockClaude({ action: "send", message: "ok", actionReason: "ok" });
       const { orch } = makeOrchestrator(claude);
 
       orch.handleMessage("check this", ["/tmp/photo.jpg", "/tmp/doc.pdf"]);
       await waitForProcessing();
 
-      const opts = claude.run.mock.calls[0][0];
-      expect(opts.prompt).toBe("[File: /tmp/photo.jpg]\n[File: /tmp/doc.pdf]\ncheck this");
+      expect(claude.calls[0].prompt).toBe("[File: /tmp/photo.jpg]\n[File: /tmp/doc.pdf]\ncheck this");
     });
 
     it("sends only file references when message is empty", async () => {
-      const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }));
+      const claude = mockClaude({ action: "send", message: "ok", actionReason: "ok" });
       const { orch } = makeOrchestrator(claude);
 
       orch.handleMessage("", ["/tmp/photo.jpg"]);
       await waitForProcessing();
 
-      expect(claude.run.mock.calls[0][0].prompt).toBe("[File: /tmp/photo.jpg]");
+      expect(claude.calls[0].prompt).toBe("[File: /tmp/photo.jpg]");
     });
 
     it("builds cron prompt with prefix", async () => {
-      const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }));
+      const claude = mockClaude({ action: "send", message: "ok", actionReason: "ok" });
       const { orch } = makeOrchestrator(claude);
 
       orch.handleCron("daily", "check updates");
       await waitForProcessing();
 
-      const opts = claude.run.mock.calls[0][0];
-      expect(opts.prompt).toBe("[Context: cron/daily] check updates");
-      expect(opts.systemPrompt).toContain("macroclaw");
-      expect(opts.timeoutMs).toBe(300_000);
+      expect(claude.calls[0].prompt).toBe("[Context: cron/daily] check updates");
     });
 
     it("uses cron model override", async () => {
-      const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }));
+      const claude = mockClaude({ action: "send", message: "ok", actionReason: "ok" });
       const { orch } = makeOrchestrator(claude, { model: "sonnet" });
 
       orch.handleCron("smart", "think", "opus");
       await waitForProcessing();
 
-      expect(claude.run.mock.calls[0][0].model).toBe("opus");
+      expect(claude.calls[0].model).toBe("opus");
     });
 
     it("falls back to config model when cron has no model", async () => {
-      const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }));
+      const claude = mockClaude({ action: "send", message: "ok", actionReason: "ok" });
       const { orch } = makeOrchestrator(claude, { model: "sonnet" });
 
       orch.handleCron("basic", "check");
       await waitForProcessing();
 
-      expect(claude.run.mock.calls[0][0].model).toBe("sonnet");
+      expect(claude.calls[0].model).toBe("sonnet");
     });
 
     it("builds button click prompt", async () => {
-      const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }));
+      const claude = mockClaude({ action: "send", message: "ok", actionReason: "ok" });
       const { orch } = makeOrchestrator(claude);
 
       orch.handleButton("Yes");
       await waitForProcessing();
 
-      const opts = claude.run.mock.calls[0][0];
-      expect(opts.prompt).toBe('[Context: button-click] User tapped "Yes"');
-      expect(opts.systemPrompt).toContain("macroclaw");
-      expect(opts.timeoutMs).toBe(60_000);
+      expect(claude.calls[0].prompt).toBe('[Context: button-click] User tapped "Yes"');
     });
   });
 
   describe("schema validation", () => {
     it("validates and returns structured output via onResponse", async () => {
-      const claude = mockClaude(successResult({ action: "send", message: "hello", actionReason: "ok" }));
+      const claude = mockClaude({ action: "send", message: "hello", actionReason: "ok" });
       const { orch, responses } = makeOrchestrator(claude);
 
       orch.handleMessage("hi");
@@ -138,46 +167,6 @@ describe("Orchestrator", () => {
       expect(responses[0].message).toBe("hello");
     });
 
-    it("returns validation-failed response for wrong shape", async () => {
-      const claude = mockClaude(successResult({ action: "invalid", message: "hi", actionReason: "ok" }));
-      const { orch, responses } = makeOrchestrator(claude);
-
-      orch.handleMessage("hi");
-      await waitForProcessing();
-
-      expect(responses[0].message).toBe("hi");
-    });
-
-    it("sends result with prefix when structured_output is missing", async () => {
-      const claude = mockClaude({ structuredOutput: null, sessionId: "s1", result: "Claude said this" });
-      const { orch, responses } = makeOrchestrator(claude);
-
-      orch.handleMessage("hi");
-      await waitForProcessing();
-
-      expect(responses[0].message).toBe("[No structured output] Claude said this");
-    });
-
-    it("escapes HTML in fallback result to prevent Telegram parse errors", async () => {
-      const claude = mockClaude({ structuredOutput: null, sessionId: "s1", result: "<b>bold</b> & stuff" });
-      const { orch, responses } = makeOrchestrator(claude);
-
-      orch.handleMessage("hi");
-      await waitForProcessing();
-
-      expect(responses[0].message).toBe("[No structured output] &lt;b&gt;bold&lt;/b&gt; &amp; stuff");
-    });
-
-    it("returns [No output] when both structured_output and result are missing", async () => {
-      const claude = mockClaude({ structuredOutput: null, sessionId: "s1" });
-      const { orch, responses } = makeOrchestrator(claude);
-
-      orch.handleMessage("hi");
-      await waitForProcessing();
-
-      expect(responses[0].message).toBe("[No output]");
-    });
-
     it("passes buttons through onResponse", async () => {
       const output = {
         action: "send",
@@ -185,7 +174,7 @@ describe("Orchestrator", () => {
         actionReason: "ok",
         buttons: ["Yes", "No", "Maybe"],
       };
-      const claude = mockClaude(successResult(output));
+      const claude = mockClaude(output);
       const { orch, responses } = makeOrchestrator(claude);
 
       orch.handleMessage("hi");
@@ -196,7 +185,7 @@ describe("Orchestrator", () => {
 
     it("passes files through onResponse", async () => {
       const output = { action: "send", message: "chart", actionReason: "ok", files: ["/tmp/chart.png"] };
-      const claude = mockClaude(successResult(output));
+      const claude = mockClaude(output);
       const { orch, responses } = makeOrchestrator(claude);
 
       orch.handleMessage("hi");
@@ -207,8 +196,13 @@ describe("Orchestrator", () => {
   });
 
   describe("error mapping", () => {
-    it("maps ClaudeProcessError to process-error response", async () => {
-      const claude = mockClaude(async () => { throw new ClaudeProcessError(1, "spawn failed"); });
+    it("maps QueryProcessError to process-error response", async () => {
+      const claude = mockClaude((): RunningQuery<unknown> => ({
+        sessionId: "err-sid",
+        startedAt: new Date(),
+        result: Promise.reject(new QueryProcessError(1, "spawn failed")),
+        kill: mock(async () => {}),
+      }));
       const { orch, responses } = makeOrchestrator(claude);
 
       orch.handleMessage("hi");
@@ -218,8 +212,13 @@ describe("Orchestrator", () => {
       expect(responses[0].message).toContain("spawn failed");
     });
 
-    it("maps ClaudeParseError to json-parse-failed response", async () => {
-      const claude = mockClaude(async () => { throw new ClaudeParseError("not json"); });
+    it("maps QueryParseError to json-parse-failed response", async () => {
+      const claude = mockClaude((): RunningQuery<unknown> => ({
+        sessionId: "err-sid",
+        startedAt: new Date(),
+        result: Promise.reject(new QueryParseError("not json")),
+        kill: mock(async () => {}),
+      }));
       const { orch, responses } = makeOrchestrator(claude);
 
       orch.handleMessage("hi");
@@ -230,36 +229,42 @@ describe("Orchestrator", () => {
   });
 
   describe("session management", () => {
-    it("uses resume=true for existing session", async () => {
+    it("uses resumeSession for existing session", async () => {
       saveSessions({ mainSessionId: "existing-session" }, tmpSettingsDir);
-      const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }));
+      const claude = mockClaude({ action: "send", message: "ok", actionReason: "ok" });
       const { orch } = makeOrchestrator(claude);
 
       orch.handleMessage("hello");
       await waitForProcessing();
 
-      expect(claude.run.mock.calls[0][0].resume).toBe(true);
-      expect(claude.run.mock.calls[0][0].sessionId).toBe("existing-session");
+      expect(claude.calls[0].method).toBe("resumeSession");
+      expect(claude.calls[0].sessionId).toBe("existing-session");
     });
 
-    it("creates new session when no settings exist", async () => {
-      const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }));
+    it("uses newSession when no settings exist", async () => {
+      const claude = mockClaude({ action: "send", message: "ok", actionReason: "ok" });
       const { orch } = makeOrchestrator(claude);
 
       orch.handleMessage("hello");
       await waitForProcessing();
 
-      expect(claude.run.mock.calls[0][0].resume).toBe(false);
-      expect(claude.run.mock.calls[0][0].sessionId).toMatch(/^[0-9a-f]{8}-/);
+      expect(claude.calls[0].method).toBe("newSession");
     });
 
     it("creates new session when resume fails", async () => {
       saveSessions({ mainSessionId: "old-session" }, tmpSettingsDir);
       let callCount = 0;
-      const claude = mockClaude(async (_opts: ClaudeRunOptions): Promise<ClaudeResult> => {
+      const claude = mockClaude((_info: CallInfo): RunningQuery<unknown> => {
         callCount++;
-        if (callCount === 1) throw new ClaudeProcessError(1, "session not found");
-        return successResult({ action: "send", message: "ok", actionReason: "ok" });
+        if (callCount === 1) {
+          return {
+            sessionId: "old-session",
+            startedAt: new Date(),
+            result: Promise.reject(new QueryProcessError(1, "session not found")),
+            kill: mock(async () => {}),
+          };
+        }
+        return resolvedQuery({ action: "send", message: "ok", actionReason: "ok" });
       });
       const { orch } = makeOrchestrator(claude);
 
@@ -267,13 +272,12 @@ describe("Orchestrator", () => {
       await waitForProcessing();
 
       expect(callCount).toBe(2);
-      expect(claude.run.mock.calls[0][0].resume).toBe(true);
-      expect(claude.run.mock.calls[1][0].resume).toBe(false);
-      expect(claude.run.mock.calls[1][0].sessionId).not.toBe("old-session");
+      expect(claude.calls[0].method).toBe("resumeSession");
+      expect(claude.calls[1].method).toBe("newSession");
     });
 
-    it("switches to resume=true after first success", async () => {
-      const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }));
+    it("switches to resumeSession after first success", async () => {
+      const claude = mockClaude({ action: "send", message: "ok", actionReason: "ok" });
       const { orch } = makeOrchestrator(claude);
 
       orch.handleMessage("first");
@@ -281,13 +285,13 @@ describe("Orchestrator", () => {
       orch.handleMessage("second");
       await waitForProcessing();
 
-      expect(claude.run.mock.calls[0][0].resume).toBe(false);
-      expect(claude.run.mock.calls[1][0].resume).toBe(true);
+      expect(claude.calls[0].method).toBe("newSession");
+      expect(claude.calls[1].method).toBe("resumeSession");
     });
 
     it("handleSessionCommand sends session via onResponse", async () => {
       saveSessions({ mainSessionId: "test-id" }, tmpSettingsDir);
-      const claude = mockClaude(successResult({ action: "send", message: "", actionReason: "" }));
+      const claude = mockClaude({ action: "send", message: "", actionReason: "" });
       const { orch, responses } = makeOrchestrator(claude);
 
       orch.handleSessionCommand();
@@ -297,30 +301,24 @@ describe("Orchestrator", () => {
       expect(responses[0].message).toBe("Session: <code>test-id</code>");
     });
 
-    it("background-agent forks from main session without affecting it", async () => {
+    it("background-agent forks from main session", async () => {
       saveSessions({ mainSessionId: "main-session" }, tmpSettingsDir);
-      const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }, "main-session"));
+      const claude = mockClaude({ action: "send", message: "ok", actionReason: "ok" });
       const { orch } = makeOrchestrator(claude);
 
       orch.handleMessage("hello");
       await waitForProcessing();
 
-      // Trigger a background agent spawn via a response with backgroundAgents
-      // The background agent is spawned by #deliverClaudeResponse
-      // We can't directly call handleBackgroundCommand here because it uses #spawnBackground
-      // which calls #processRequest (background-agent type)
-      // So let's verify via handleBackgroundCommand
       orch.handleBackgroundCommand("do work");
       await waitForProcessing();
 
-      // background-agent should use --resume and forkSession
-      expect(claude.run.mock.calls[1][0].resume).toBe(true);
-      expect(claude.run.mock.calls[1][0].forkSession).toBe(true);
+      // bg agent uses forkSession
+      expect(claude.calls[1].method).toBe("forkSession");
     });
 
     it("updates session ID after forked call", async () => {
       saveSessions({ mainSessionId: "old-session" }, tmpSettingsDir);
-      const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }, "new-forked-session"));
+      const claude = mockClaude(() => resolvedQuery({ action: "send", message: "ok", actionReason: "ok" }, "new-forked-session"));
       const { orch } = makeOrchestrator(claude);
 
       orch.handleMessage("hello");
@@ -330,42 +328,42 @@ describe("Orchestrator", () => {
       orch.handleMessage("follow up");
       await waitForProcessing();
 
-      expect(claude.run.mock.calls[1][0].sessionId).toBe("new-forked-session");
+      expect(claude.calls[1].sessionId).toBe("new-forked-session");
     });
   });
 
   describe("queue-based processing", () => {
     it("handleMessage queues a user request and calls onResponse", async () => {
-      const claude = mockClaude(successResult({ action: "send", message: "result", actionReason: "ok" }));
+      const claude = mockClaude({ action: "send", message: "result", actionReason: "ok" });
       const { orch, responses } = makeOrchestrator(claude);
 
       orch.handleMessage("test message");
       await waitForProcessing();
 
-      expect(claude.run).toHaveBeenCalledTimes(1);
+      expect(claude.calls).toHaveLength(1);
       expect(responses[0].message).toBe("result");
     });
 
     it("handleButton queues a button request", async () => {
-      const claude = mockClaude(successResult({ action: "send", message: "button response", actionReason: "ok" }));
+      const claude = mockClaude({ action: "send", message: "button response", actionReason: "ok" });
       const { orch, responses } = makeOrchestrator(claude);
 
       orch.handleButton("Yes");
       await waitForProcessing();
 
-      expect(claude.run.mock.calls[0][0].prompt).toBe('[Context: button-click] User tapped "Yes"');
+      expect(claude.calls[0].prompt).toBe('[Context: button-click] User tapped "Yes"');
       expect(responses[0].message).toBe("button response");
     });
 
     it("handleCron queues a cron request with right params", async () => {
-      const claude = mockClaude(successResult({ action: "send", message: "cron done", actionReason: "ok" }));
+      const claude = mockClaude({ action: "send", message: "cron done", actionReason: "ok" });
       const { orch, responses } = makeOrchestrator(claude);
 
       orch.handleCron("daily-check", "Check for updates", "haiku");
       await waitForProcessing();
 
-      expect(claude.run.mock.calls[0][0].prompt).toBe("[Context: cron/daily-check] Check for updates");
-      expect(claude.run.mock.calls[0][0].model).toBe("haiku");
+      expect(claude.calls[0].prompt).toBe("[Context: cron/daily-check] Check for updates");
+      expect(claude.calls[0].model).toBe("haiku");
       expect(responses[0].message).toBe("cron done");
     });
 
@@ -374,31 +372,39 @@ describe("Orchestrator", () => {
       let firstResolve: () => void;
       const firstCallDone = new Promise<void>((r) => { firstResolve = r; });
 
-      const claude = mockClaude(async (_opts: ClaudeRunOptions): Promise<ClaudeResult> => {
-        const callNum = (claude as any).run.mock.calls.length;
-        if (callNum === 1) {
-          await firstCallDone;
+      let callNum = 0;
+      const claude = mockClaude((): RunningQuery<unknown> => {
+        callNum++;
+        const n = callNum;
+        if (n === 1) {
+          return {
+            sessionId: "sid",
+            startedAt: new Date(),
+            result: firstCallDone.then(() => {
+              callOrder.push(n);
+              return queryResult({ action: "send", message: `call ${n}`, actionReason: "ok" });
+            }),
+            kill: mock(async () => {}),
+          };
         }
-        callOrder.push(callNum);
-        return successResult({ action: "send", message: `call ${callNum}`, actionReason: "ok" });
+        callOrder.push(n);
+        return resolvedQuery({ action: "send", message: `call ${n}`, actionReason: "ok" });
       });
       const { orch } = makeOrchestrator(claude);
 
       orch.handleMessage("first");
       orch.handleMessage("second");
 
-      // Let first call start but not finish
       await new Promise((r) => setTimeout(r, 10));
       firstResolve!();
       await waitForProcessing();
 
-      // Verify they ran in order
-      expect((claude as any).run).toHaveBeenCalledTimes(2);
+      expect(claude.calls).toHaveLength(2);
       expect(callOrder).toEqual([1, 2]);
     });
 
     it("silent response: onResponse not called when action=silent", async () => {
-      const claude = mockClaude(successResult({ action: "silent", actionReason: "no new results" }));
+      const claude = mockClaude({ action: "silent", actionReason: "no new results" });
       const { orch, onResponse } = makeOrchestrator(claude);
 
       orch.handleMessage("hello");
@@ -409,17 +415,17 @@ describe("Orchestrator", () => {
 
     it("background agents spawned from Claude response: calls onResponse with started message", async () => {
       let callCount = 0;
-      const claude = mockClaude(async (): Promise<ClaudeResult> => {
+      const claude = mockClaude((): RunningQuery<unknown> => {
         callCount++;
         if (callCount === 1) {
-          return successResult({
+          return resolvedQuery({
             action: "send",
             message: "Starting research",
             actionReason: "needs research",
             backgroundAgents: [{ name: "research", prompt: "research this" }],
           });
         }
-        return successResult({ action: "send", message: "research result", actionReason: "done" });
+        return resolvedQuery({ action: "send", message: "research result", actionReason: "done" });
       });
       const { orch, responses } = makeOrchestrator(claude);
 
@@ -437,20 +443,33 @@ describe("Orchestrator", () => {
 
     it("deferred → sends 'taking longer' via onResponse, feeds result back when resolved", async () => {
       saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
-      let resolveCompletion: (r: ClaudeResult) => void;
-      const completion = new Promise<ClaudeResult>((r) => { resolveCompletion = r; });
-      const claude = mockClaude(async (): Promise<ClaudeResult | ClaudeDeferredResult> =>
-        ({ deferred: true, sessionId: "test-session", completion }),
-      );
+      let resolveCompletion: (r: QueryResult<unknown>) => void;
+      const completion = new Promise<QueryResult<unknown>>((r) => { resolveCompletion = r; });
+
+      // Mock setTimeout to fire immediately only for the timeout race, not for waitForProcessing
+      const origSetTimeout = globalThis.setTimeout;
+      const claude = mockClaude((): RunningQuery<unknown> => {
+        // Mock setTimeout right before the race happens (synchronously after this returns)
+        globalThis.setTimeout = ((fn: Function) => { fn(); return 0 as any; }) as any;
+        return {
+          sessionId: "test-session",
+          startedAt: new Date(),
+          result: completion,
+          kill: mock(async () => {}),
+        };
+      });
       const { orch, responses } = makeOrchestrator(claude);
 
       orch.handleMessage("slow task");
+      // Restore immediately so waitForProcessing works
+      await new Promise((r) => origSetTimeout(r, 10));
+      globalThis.setTimeout = origSetTimeout;
       await waitForProcessing();
 
       const messages = responses.map((r) => r.message);
       expect(messages).toContain("This is taking longer, continuing in the background.");
 
-      resolveCompletion!(successResult({ action: "send", message: "done!", actionReason: "ok" }));
+      resolveCompletion!(queryResult({ action: "send", message: "done!", actionReason: "ok" }));
       await waitForProcessing(100);
 
       const allMessages = responses.map((r) => r.message);
@@ -459,59 +478,79 @@ describe("Orchestrator", () => {
 
     it("session fork when background agent running on main session", async () => {
       saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
-      let resolveCompletion: (r: ClaudeResult) => void;
-      const completion = new Promise<ClaudeResult>((r) => { resolveCompletion = r; });
+      let resolveCompletion: (r: QueryResult<unknown>) => void;
+      const completion = new Promise<QueryResult<unknown>>((r) => { resolveCompletion = r; });
+
+      const origSetTimeout = globalThis.setTimeout;
+
       let callCount = 0;
-      const claude = mockClaude(async (): Promise<ClaudeResult | ClaudeDeferredResult> => {
+      const claude = mockClaude((): RunningQuery<unknown> => {
         callCount++;
-        if (callCount === 1) return { deferred: true, sessionId: "test-session", completion };
-        return successResult({ action: "send", message: "forked response", actionReason: "ok" });
+        if (callCount === 1) {
+          globalThis.setTimeout = ((fn: Function) => { fn(); return 0 as any; }) as any;
+          return {
+            sessionId: "test-session",
+            startedAt: new Date(),
+            result: completion,
+            kill: mock(async () => {}),
+          };
+        }
+        return resolvedQuery({ action: "send", message: "forked response", actionReason: "ok" });
       });
       const { orch } = makeOrchestrator(claude);
 
       // First message gets deferred (backgrounded on test-session)
       orch.handleMessage("slow task");
+      await new Promise((r) => origSetTimeout(r, 10));
+      globalThis.setTimeout = origSetTimeout;
       await waitForProcessing();
 
       // Second message should trigger a fork (background running on test-session = main session)
       orch.handleMessage("follow up");
       await waitForProcessing();
 
-      const opts = (claude as any).run.mock.calls[1][0] as ClaudeRunOptions;
-      expect(opts.forkSession).toBe(true);
+      expect(claude.calls[1].method).toBe("forkSession");
 
-      resolveCompletion!(successResult({ action: "send", message: "bg done", actionReason: "ok" }));
+      resolveCompletion!(queryResult({ action: "send", message: "bg done", actionReason: "ok" }));
       await waitForProcessing(50);
     });
 
     it("background result with matching session: applied directly (no extra Claude call)", async () => {
       saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
-      // Use a deferred claude to simulate the scenario where a task is backgrounded
-      let resolveCompletion: (r: ClaudeResult) => void;
-      const completion = new Promise<ClaudeResult>((r) => { resolveCompletion = r; });
-      const deferredClaude = mockClaude(async (): Promise<ClaudeResult | ClaudeDeferredResult> =>
-        ({ deferred: true, sessionId: "test-session", completion }),
-      );
-      const { orch: orch2, responses: responses2 } = makeOrchestrator(deferredClaude);
+      let resolveCompletion: (r: QueryResult<unknown>) => void;
+      const completion = new Promise<QueryResult<unknown>>((r) => { resolveCompletion = r; });
 
-      orch2.handleMessage("slow");
+      const origSetTimeout = globalThis.setTimeout;
+
+      const claude = mockClaude((): RunningQuery<unknown> => {
+        globalThis.setTimeout = ((fn: Function) => { fn(); return 0 as any; }) as any;
+        return {
+          sessionId: "test-session",
+          startedAt: new Date(),
+          result: completion,
+          kill: mock(async () => {}),
+        };
+      });
+      const { orch, responses } = makeOrchestrator(claude);
+
+      orch.handleMessage("slow");
+      await new Promise((r) => origSetTimeout(r, 10));
+      globalThis.setTimeout = origSetTimeout;
       await waitForProcessing();
-      // Now test-session is tracked as adopted
 
-      // Resolve with a result that has sessionId matching
-      resolveCompletion!(successResult({ action: "send", message: "direct result", actionReason: "ok" }, "test-session"));
+      resolveCompletion!(queryResult({ action: "send", message: "direct result", actionReason: "ok" }, "test-session"));
       await waitForProcessing(100);
 
-      const messages = responses2.map((r) => r.message);
+      const messages = responses.map((r) => r.message);
       expect(messages).toContain("direct result");
-      // The deferred claude was only called once (for the initial slow request, not for the result)
-      expect(deferredClaude.run).toHaveBeenCalledTimes(1);
+      // Only called once (for the initial slow request, not for the result)
+      expect(claude.calls).toHaveLength(1);
     });
   });
 
   describe("handleBackgroundList", () => {
     it("sends 'no agents' message when none running", async () => {
-      const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }));
+      const claude = mockClaude({ action: "send", message: "ok", actionReason: "ok" });
       const { orch, responses } = makeOrchestrator(claude);
 
       orch.handleBackgroundList();
@@ -521,7 +560,13 @@ describe("Orchestrator", () => {
     });
 
     it("includes peek buttons and dismiss when agents are running", async () => {
-      const claude = mockClaude(() => new Promise<ClaudeResult>(() => {}));
+      saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
+      const claude = mockClaude((): RunningQuery<unknown> => ({
+        sessionId: `bg-${Date.now()}`,
+        startedAt: new Date(),
+        result: new Promise(() => {}),
+        kill: mock(async () => {}),
+      }));
       const { orch, responses } = makeOrchestrator(claude);
 
       orch.handleBackgroundCommand("long-task");
@@ -538,13 +583,13 @@ describe("Orchestrator", () => {
       expect(typeof peekBtn).toBe("object");
       expect((peekBtn as any).data).toMatch(/^peek:/);
       expect((peekBtn as any).text).toContain("long-task");
-      expect(listResponse.buttons![1]).toBe("_dismiss");
+      expect(listResponse.buttons![1]).toEqual({ text: "Dismiss", data: "_dismiss" });
     });
   });
 
   describe("handlePeek", () => {
     it("returns 'not found' for unknown sessionId", async () => {
-      const claude = mockClaude(successResult({ action: "send", message: "ok", actionReason: "ok" }));
+      const claude = mockClaude({ action: "send", message: "ok", actionReason: "ok" });
       const { orch, responses } = makeOrchestrator(claude);
 
       await orch.handlePeek("nonexistent-session");
@@ -554,11 +599,21 @@ describe("Orchestrator", () => {
     });
 
     it("peeks at running agent and returns status", async () => {
+      saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
       let callCount = 0;
-      const claude = mockClaude(async (): Promise<ClaudeResult> => {
+      const claude = mockClaude((): RunningQuery<unknown> => {
         callCount++;
-        if (callCount === 1) return new Promise(() => {}); // bg agent never finishes
-        return { structuredOutput: null, sessionId: "peek-session", result: "Working on it, 50% done." };
+        if (callCount === 1) {
+          // bg agent — never finishes
+          return {
+            sessionId: "bg-sid",
+            startedAt: new Date(),
+            result: new Promise(() => {}),
+            kill: mock(async () => {}),
+          };
+        }
+        // peek fork call
+        return resolvedQuery("Working on it, 50% done.", "peek-session");
       });
       const { orch, responses } = makeOrchestrator(claude);
 
@@ -581,18 +636,30 @@ describe("Orchestrator", () => {
     });
 
     it("handles Claude error during peek gracefully", async () => {
+      saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
       let callCount = 0;
-      const claude = mockClaude(async (): Promise<ClaudeResult> => {
+      const claude = mockClaude((): RunningQuery<unknown> => {
         callCount++;
-        if (callCount === 1) return new Promise(() => {}); // bg agent never finishes
-        throw new Error("connection lost");
+        if (callCount === 1) {
+          return {
+            sessionId: "bg-sid",
+            startedAt: new Date(),
+            result: new Promise(() => {}),
+            kill: mock(async () => {}),
+          };
+        }
+        return {
+          sessionId: "peek-err",
+          startedAt: new Date(),
+          result: Promise.reject(new Error("connection lost")),
+          kill: mock(async () => {}),
+        };
       });
       const { orch, responses } = makeOrchestrator(claude);
 
       orch.handleBackgroundCommand("failing-peek");
       await waitForProcessing();
 
-      // Get the internal session ID from the peek button
       orch.handleBackgroundList();
       await waitForProcessing();
       const listResponse = responses[responses.length - 1];
@@ -609,28 +676,41 @@ describe("Orchestrator", () => {
 
   describe("handleBackgroundCommand", () => {
     it("spawns background agent and sends started message", async () => {
-      const claude = mockClaude(() => new Promise<ClaudeResult>(() => {}));
+      saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
+      const claude = mockClaude((): RunningQuery<unknown> => ({
+        sessionId: "bg-sid",
+        startedAt: new Date(),
+        result: new Promise(() => {}),
+        kill: mock(async () => {}),
+      }));
       const { orch, responses } = makeOrchestrator(claude);
 
       orch.handleBackgroundCommand("research pricing");
       await waitForProcessing();
 
       expect(responses[0].message).toBe('Background agent "research-pricing" started.');
-      expect((claude as any).run).toHaveBeenCalledTimes(1);
+      expect(claude.calls).toHaveLength(1);
     });
   });
 
   describe("background management (spawn/adopt)", () => {
     it("spawns background agent and feeds result back to queue", async () => {
-      let resolvePromise: (r: ClaudeResult) => void;
-      const claudePromise = new Promise<ClaudeResult>((r) => {
-        resolvePromise = r;
-      });
+      saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
+      let resolvePromise: (r: QueryResult<unknown>) => void;
+      const bgResult = new Promise<QueryResult<unknown>>((r) => { resolvePromise = r; });
+
       let callCount = 0;
-      const claude = mockClaude(async (): Promise<ClaudeResult> => {
+      const claude = mockClaude((): RunningQuery<unknown> => {
         callCount++;
-        if (callCount === 1) return claudePromise;
-        return successResult({ action: "send", message: "bg result processed", actionReason: "ok" });
+        if (callCount === 1) {
+          return {
+            sessionId: "bg-sid",
+            startedAt: new Date(),
+            result: bgResult,
+            kill: mock(async () => {}),
+          };
+        }
+        return resolvedQuery({ action: "send", message: "bg result processed", actionReason: "ok" });
       });
       const { orch, responses } = makeOrchestrator(claude);
 
@@ -639,8 +719,7 @@ describe("Orchestrator", () => {
 
       expect(responses[0].message).toContain('started.');
 
-      resolvePromise!(successResult({ action: "send", message: "done!", actionReason: "completed" }));
-      await claudePromise;
+      resolvePromise!(queryResult({ action: "send", message: "done!", actionReason: "completed" }));
       await waitForProcessing(100);
 
       // The bg result gets fed back to the queue and processed
@@ -648,15 +727,22 @@ describe("Orchestrator", () => {
     });
 
     it("feeds error back to queue on spawn failure", async () => {
+      saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
       let rejectPromise: (e: Error) => void;
-      const claudePromise = new Promise<ClaudeResult>((_, r) => {
-        rejectPromise = r;
-      });
+      const bgResult = new Promise<QueryResult<unknown>>((_, r) => { rejectPromise = r; });
+
       let callCount = 0;
-      const claude = mockClaude(async (): Promise<ClaudeResult> => {
+      const claude = mockClaude((): RunningQuery<unknown> => {
         callCount++;
-        if (callCount === 1) return claudePromise;
-        return successResult({ action: "send", message: "error processed", actionReason: "ok" });
+        if (callCount === 1) {
+          return {
+            sessionId: "bg-sid",
+            startedAt: new Date(),
+            result: bgResult,
+            kill: mock(async () => {}),
+          };
+        }
+        return resolvedQuery({ action: "send", message: "error processed", actionReason: "ok" });
       });
       const { orch, responses } = makeOrchestrator(claude);
 
@@ -664,7 +750,6 @@ describe("Orchestrator", () => {
       await waitForProcessing();
 
       rejectPromise!(new Error("spawn failed"));
-      try { await claudePromise; } catch {}
       await waitForProcessing(100);
 
       // Error should be fed back and processed
@@ -672,32 +757,72 @@ describe("Orchestrator", () => {
       expect(responses[responses.length - 1].message).toBe("error processed");
     });
 
-    it("adopt feeds result back when deferred resolves", async () => {
+    it("adopt feeds error back when deferred rejects", async () => {
       saveSessions({ mainSessionId: "adopted-session" }, tmpSettingsDir);
-      let resolveCompletion: (r: ClaudeResult) => void;
-      const completion = new Promise<ClaudeResult>((r) => { resolveCompletion = r; });
-      const claude = mockClaude(async (): Promise<ClaudeResult | ClaudeDeferredResult> =>
-        ({ deferred: true, sessionId: "adopted-session", completion }),
-      );
+      let rejectCompletion: (err: Error) => void;
+      const completion = new Promise<QueryResult<unknown>>((_, r) => { rejectCompletion = r; });
+
+      const origSetTimeout = globalThis.setTimeout;
+
+      const claude = mockClaude((): RunningQuery<unknown> => {
+        globalThis.setTimeout = ((fn: Function) => { fn(); return 0 as any; }) as any;
+        return {
+          sessionId: "adopted-session",
+          startedAt: new Date(),
+          result: completion,
+          kill: mock(async () => {}),
+        };
+      });
       const { orch, responses } = makeOrchestrator(claude);
 
       orch.handleMessage("slow");
+      await new Promise((r) => origSetTimeout(r, 10));
+      globalThis.setTimeout = origSetTimeout;
+      await waitForProcessing();
+
+      rejectCompletion!(new Error("process crashed"));
+      await waitForProcessing(100);
+
+      const messages = responses.map((r) => r.message);
+      expect(messages.some((m) => m.includes("[Error]"))).toBe(true);
+    });
+
+    it("adopt feeds result back when deferred resolves", async () => {
+      saveSessions({ mainSessionId: "adopted-session" }, tmpSettingsDir);
+      let resolveCompletion: (r: QueryResult<unknown>) => void;
+      const completion = new Promise<QueryResult<unknown>>((r) => { resolveCompletion = r; });
+
+      const origSetTimeout = globalThis.setTimeout;
+
+      const claude = mockClaude((): RunningQuery<unknown> => {
+        globalThis.setTimeout = ((fn: Function) => { fn(); return 0 as any; }) as any;
+        return {
+          sessionId: "adopted-session",
+          startedAt: new Date(),
+          result: completion,
+          kill: mock(async () => {}),
+        };
+      });
+      const { orch, responses } = makeOrchestrator(claude);
+
+      orch.handleMessage("slow");
+      await new Promise((r) => origSetTimeout(r, 10));
+      globalThis.setTimeout = origSetTimeout;
       await waitForProcessing();
 
       expect(responses[0].message).toContain("taking longer");
 
-      resolveCompletion!(successResult({ action: "send", message: "completed!", actionReason: "ok" }));
+      resolveCompletion!(queryResult({ action: "send", message: "completed!", actionReason: "ok" }));
       await waitForProcessing(100);
 
       const messages = responses.map((r) => r.message);
       expect(messages).toContain("completed!");
     });
-
   });
 
   describe("onResponse error handling", () => {
     it("logs error and does not throw when onResponse callback fails", async () => {
-      const claude = mockClaude(successResult({ action: "send", message: "hello", actionReason: "ok" }));
+      const claude = mockClaude({ action: "send", message: "hello", actionReason: "ok" });
       const failingOnResponse = mock(async (_r: OrchestratorResponse) => { throw new Error("send failed"); });
       const orch = new Orchestrator({
         workspace: TEST_WORKSPACE,
@@ -706,11 +831,9 @@ describe("Orchestrator", () => {
         claude,
       });
 
-      // handleBackgroundList and handleBackgroundCommand use #callOnResponse
       orch.handleBackgroundList();
       await waitForProcessing();
 
-      // Should not throw — error is caught internally
       expect(failingOnResponse).toHaveBeenCalled();
     });
   });

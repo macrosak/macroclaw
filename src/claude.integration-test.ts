@@ -1,108 +1,76 @@
 /**
  * Integration test for Claude CLI structured output.
- * Run manually: bun test src/claude.integration.test.ts --timeout 120000
+ * Run manually: bun test src/claude.integration-test.ts --timeout 120000
  */
 import { describe, expect, it } from "bun:test";
-import { randomUUID } from "node:crypto";
-import { Claude, type ClaudeResult, isDeferred } from "./claude";
+import { z } from "zod/v4";
+import { Claude } from "./claude";
 
 const WORKSPACE = "/tmp/macroclaw-integration-test";
-const SIMPLE_SCHEMA = JSON.stringify({
-  type: "object",
-  properties: {
-    action: { type: "string", enum: ["send", "silent"] },
-    actionReason: { type: "string" },
-    message: { type: "string" },
-  },
-  required: ["action", "actionReason"],
-  additionalProperties: false,
+
+const simpleSchema = z.object({
+  action: z.enum(["send", "silent"]),
+  actionReason: z.string(),
+  message: z.string().optional(),
 });
 
-const FULL_SCHEMA = JSON.stringify({
-  type: "object",
-  properties: {
-    action: { type: "string", enum: ["send", "silent"], description: "'send' to reply to the user, 'silent' to do nothing" },
-    actionReason: { type: "string", description: "Why the agent chose this action (logged, not sent)" },
-    message: { type: "string", description: "The message to send to Telegram (required when action is 'send')" },
-    files: { type: "array", items: { type: "string" }, description: "Absolute paths to files to send to Telegram" },
-    backgroundAgents: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          name: { type: "string" },
-          prompt: { type: "string" },
-          model: { type: "string", enum: ["haiku", "sonnet", "opus"] },
-        },
-        required: ["name", "prompt"],
-        additionalProperties: false,
-      },
-    },
-  },
-  required: ["action", "actionReason"],
-  additionalProperties: false,
+const fullSchema = z.object({
+  action: z.enum(["send", "silent"]),
+  actionReason: z.string(),
+  message: z.string().optional(),
+  files: z.array(z.string()).optional(),
+  backgroundAgents: z.array(z.object({
+    name: z.string(),
+    prompt: z.string(),
+    model: z.enum(["haiku", "sonnet", "opus"]).optional(),
+  })).optional(),
 });
 
-async function runSync(claude: Claude, ...args: Parameters<Claude["run"]>): Promise<ClaudeResult> {
-  const result = await claude.run(...args);
-  if (isDeferred(result)) throw new Error("Expected sync result, got deferred");
-  return result;
-}
+const objectResultType = (schema: z.ZodType) => ({ type: "object" as const, schema });
 
 describe("claude CLI structured output", () => {
   it("simple schema without system prompt", async () => {
-    const claude = new Claude({ workspace: WORKSPACE, jsonSchema: SIMPLE_SCHEMA });
-    const result = await runSync(claude, {
-      prompt: "Say hello",
-      resume: false,
-      sessionId: randomUUID(),
-      model: "haiku",
-    });
+    const claude = new Claude({ workspace: WORKSPACE });
+    const { value } = await claude.newSession("Say hello", objectResultType(simpleSchema), { model: "haiku" }).result;
 
-    console.log("Simple (no sysprompt):", JSON.stringify(result, null, 2));
-    expect(result.structuredOutput).not.toBeNull();
+    console.log("Simple (no sysprompt):", JSON.stringify(value, null, 2));
+    expect(value).not.toBeNull();
   }, 60_000);
 
   it("simple schema with system prompt", async () => {
-    const claude = new Claude({ workspace: WORKSPACE, jsonSchema: SIMPLE_SCHEMA });
-    const result = await runSync(claude, {
-      prompt: "Say hello",
-      resume: false,
-      sessionId: randomUUID(),
-      model: "haiku",
-      systemPrompt: "You are a helpful assistant. This is a direct message from the user.",
-    });
+    const claude = new Claude({ workspace: WORKSPACE });
+    const { value } = await claude.newSession(
+      "Say hello",
+      objectResultType(simpleSchema),
+      { model: "haiku", systemPrompt: "You are a helpful assistant. This is a direct message from the user." },
+    ).result;
 
-    console.log("Simple (with sysprompt):", JSON.stringify(result, null, 2));
-    expect(result.structuredOutput).not.toBeNull();
+    console.log("Simple (with sysprompt):", JSON.stringify(value, null, 2));
+    expect(value).not.toBeNull();
   }, 60_000);
 
   it("full schema with system prompt", async () => {
-    const claude = new Claude({ workspace: WORKSPACE, jsonSchema: FULL_SCHEMA });
-    const result = await runSync(claude, {
-      prompt: "Say hello",
-      resume: false,
-      sessionId: randomUUID(),
-      model: "haiku",
-      systemPrompt: "You are a helpful assistant. This is a direct message from the user.",
-    });
+    const claude = new Claude({ workspace: WORKSPACE });
+    const { value } = await claude.newSession(
+      "Say hello",
+      objectResultType(fullSchema),
+      { model: "haiku", systemPrompt: "You are a helpful assistant. This is a direct message from the user." },
+    ).result;
 
-    console.log("Full (with sysprompt):", JSON.stringify(result, null, 2));
-    expect(result.structuredOutput).not.toBeNull();
+    console.log("Full (with sysprompt):", JSON.stringify(value, null, 2));
+    expect(value).not.toBeNull();
   }, 60_000);
 
   it("full schema with real system prompt and workspace", async () => {
     const workspace = process.env.MACROCLAW_WORKSPACE ?? WORKSPACE;
-    const claude = new Claude({ workspace, jsonSchema: FULL_SCHEMA });
-    const result = await runSync(claude, {
-      prompt: "Say hello",
-      resume: false,
-      sessionId: randomUUID(),
-      model: "sonnet",
-      systemPrompt: `You are an AI assistant running inside macroclaw. This is a direct message from the user.`,
-    });
+    const claude = new Claude({ workspace });
+    const { value } = await claude.newSession(
+      "Say hello",
+      objectResultType(fullSchema),
+      { model: "sonnet", systemPrompt: "You are an AI assistant running inside macroclaw. This is a direct message from the user." },
+    ).result;
 
-    console.log("Full (real workspace):", JSON.stringify(result, null, 2));
-    expect(result.structuredOutput).not.toBeNull();
+    console.log("Full (real workspace):", JSON.stringify(value, null, 2));
+    expect(value).not.toBeNull();
   }, 120_000);
 });
