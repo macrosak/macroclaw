@@ -112,16 +112,19 @@ describe("Claude", () => {
   });
 
   describe("forkSession", () => {
-    it("uses --resume and --fork-session with the provided sessionId", async () => {
+    it("generates a new session ID and passes parent via --resume", async () => {
       mockSpawn({ stdout: envelope({ result: "forked" }), exitCode: 0 });
       const claude = makeClaude();
       const query = claude.forkSession("parent-sid", "bg task", textResult);
 
-      expect(query.sessionId).toBe("parent-sid");
+      expect(query.sessionId).toMatch(/^[0-9a-f-]{36}$/);
+      expect(query.sessionId).not.toBe("parent-sid");
       const args = spawnArgs();
       expect(args).toContain("--resume");
       expect(args).toContain("parent-sid");
       expect(args).toContain("--fork-session");
+      expect(args).toContain("--session-id");
+      expect(args).toContain(query.sessionId);
 
       await query.result;
     });
