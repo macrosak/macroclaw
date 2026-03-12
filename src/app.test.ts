@@ -516,6 +516,51 @@ describe("App", () => {
       expect(opts.prompt).toBe('[Context: button-click] User tapped "Yes"');
     });
 
+    it("handles _dismiss callback by removing reply markup", async () => {
+      const config = makeConfig();
+      const app = new App(config);
+      const bot = app.bot as any;
+      const handler = bot.filterHandlers.get("callback_query:data")![0];
+
+      const ctx = {
+        chat: { id: 12345 },
+        callbackQuery: { data: "_dismiss" },
+        answerCallbackQuery: mock(async () => {}),
+        editMessageReplyMarkup: mock(async () => {}),
+      };
+
+      await handler(ctx);
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(ctx.answerCallbackQuery).toHaveBeenCalled();
+      expect(ctx.editMessageReplyMarkup).toHaveBeenCalledWith({ reply_markup: undefined });
+      expect((config.claude as any).run).not.toHaveBeenCalled();
+    });
+
+    it("handles peek: callback by routing to orchestrator.handlePeek", async () => {
+      const config = makeConfig();
+      const app = new App(config);
+      const bot = app.bot as any;
+      const handler = bot.filterHandlers.get("callback_query:data")![0];
+
+      const ctx = {
+        chat: { id: 12345 },
+        callbackQuery: { data: "peek:test-session-123" },
+        answerCallbackQuery: mock(async () => {}),
+        editMessageReplyMarkup: mock(async () => {}),
+      };
+
+      await handler(ctx);
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(ctx.answerCallbackQuery).toHaveBeenCalled();
+      expect(ctx.editMessageReplyMarkup).toHaveBeenCalledWith({ reply_markup: { inline_keyboard: [[{ text: "✓ Peeked", callback_data: "_noop" }]] } });
+      // handlePeek sends "Agent not found" since no active agents
+      const calls = (bot.api.sendMessage as any).mock.calls;
+      const text = calls[calls.length - 1][1];
+      expect(text).toBe("Agent not found or already finished.");
+    });
+
     it("ignores callback_query from unauthorized chats", async () => {
       const config = makeConfig();
       const app = new App(config);

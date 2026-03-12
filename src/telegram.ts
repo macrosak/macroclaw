@@ -4,6 +4,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Bot, InlineKeyboard, InputFile } from "grammy";
 import { createLogger } from "./logger";
+import type { ButtonSpec } from "./orchestrator";
 
 const log = createLogger("telegram");
 
@@ -15,11 +16,16 @@ export function createBot(token: string) {
   return new Bot(token);
 }
 
-export function buildInlineKeyboard(buttons: string[]): InlineKeyboard {
+export function buildInlineKeyboard(buttons: ButtonSpec[]): InlineKeyboard {
   const kb = new InlineKeyboard();
   for (let i = 0; i < buttons.length; i++) {
     if (i > 0) kb.row();
-    kb.text(buttons[i], buttons[i]);
+    const b = buttons[i];
+    if (typeof b === "string") {
+      kb.text(b, b);
+    } else {
+      kb.text(b.text, b.data);
+    }
   }
   return kb;
 }
@@ -28,7 +34,7 @@ export async function sendResponse(
   bot: Bot,
   chatId: string,
   text: string,
-  buttons?: string[],
+  buttons?: ButtonSpec[],
 ): Promise<void> {
   const opts = { parse_mode: "HTML" as const };
   const replyMarkup = buttons?.length ? buildInlineKeyboard(buttons) : undefined;

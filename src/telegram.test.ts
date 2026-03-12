@@ -136,6 +136,20 @@ describe("buildInlineKeyboard", () => {
     expect(btn.callback_data).toBe("A");
     expect((kb.inline_keyboard[2][0] as any).text).toBe("C");
   });
+
+  it("supports object buttons with separate text and data", () => {
+    const kb = buildInlineKeyboard([
+      { text: "Peek agent-1 (30s)", data: "peek:session-123" },
+      "_dismiss",
+    ]);
+    expect(kb.inline_keyboard.length).toBe(2);
+    const peekBtn = kb.inline_keyboard[0][0] as any;
+    expect(peekBtn.text).toBe("Peek agent-1 (30s)");
+    expect(peekBtn.callback_data).toBe("peek:session-123");
+    const dismissBtn = kb.inline_keyboard[1][0] as any;
+    expect(dismissBtn.text).toBe("_dismiss");
+    expect(dismissBtn.callback_data).toBe("_dismiss");
+  });
 });
 
 describe("downloadFile", () => {
