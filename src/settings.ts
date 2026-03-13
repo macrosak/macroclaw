@@ -7,8 +7,8 @@ const log = createLogger("settings");
 
 export const settingsSchema = z.object({
   botToken: z.string(),
-  chatId: z.string(),
-  model: z.string().default("sonnet"),
+  chatId: z.string().regex(/^-?\d+$/, "Must be a numeric Telegram chat ID"),
+  model: z.enum(["haiku", "sonnet", "opus"]).default("sonnet"),
   workspace: z.string().default("~/.macroclaw-workspace"),
   openaiApiKey: z.string().optional(),
   logLevel: z.enum(["debug", "info", "warn", "error"]).default("info"),

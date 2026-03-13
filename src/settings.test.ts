@@ -129,7 +129,7 @@ describe("saveSettings", () => {
 
   it("overwrites existing file", () => {
     saveSettings(validSettings, tmpDir);
-    const updated = { ...validSettings, model: "opus" };
+    const updated = { ...validSettings, model: "opus" as const };
     saveSettings(updated, tmpDir);
     expect(loadSettings(tmpDir)).toEqual(updated);
   });

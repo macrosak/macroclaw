@@ -118,7 +118,7 @@ describe("runSetupWizard", () => {
 
   it("uses defaults from env vars when user presses enter", async () => {
     process.env.TELEGRAM_BOT_TOKEN = "env-token";
-    process.env.AUTHORIZED_CHAT_ID = "env-chat";
+    process.env.AUTHORIZED_CHAT_ID = "99887766";
     process.env.MODEL = "haiku";
     process.env.WORKSPACE = "/env/ws";
     process.env.OPENAI_API_KEY = "sk-env";
@@ -135,7 +135,7 @@ describe("runSetupWizard", () => {
     const settings = await runSetupWizard(io);
 
     expect(settings.botToken).toBe("env-token");
-    expect(settings.chatId).toBe("env-chat");
+    expect(settings.chatId).toBe("99887766");
     expect(settings.model).toBe("haiku");
     expect(settings.workspace).toBe("/env/ws");
     expect(settings.openaiApiKey).toBe("sk-env");
@@ -228,6 +228,40 @@ describe("runSetupWizard", () => {
     const settings = await runSetupWizard(io);
 
     expect(settings.chatId).toBe("456");
+  });
+
+  it("re-prompts when chat ID is not numeric", async () => {
+    const io = createMockIO([
+      "tok",
+      "not-a-number",  // invalid — re-prompt
+      "456",
+      "",
+      "",
+      "",
+      "",  // no service install
+    ]);
+
+    const settings = await runSetupWizard(io);
+
+    expect(settings.chatId).toBe("456");
+    expect(io.written).toContainEqual(expect.stringContaining("Invalid value"));
+  });
+
+  it("re-prompts when model is invalid", async () => {
+    const io = createMockIO([
+      "tok",
+      "123",
+      "xxx",     // invalid — re-prompt
+      "opus",    // valid
+      "",
+      "",
+      "",  // no service install
+    ]);
+
+    const settings = await runSetupWizard(io);
+
+    expect(settings.model).toBe("opus");
+    expect(io.written).toContainEqual(expect.stringContaining("Invalid value"));
   });
 
   it("registers and uses catch handler on setup bot", async () => {

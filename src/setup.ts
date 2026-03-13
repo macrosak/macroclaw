@@ -3,6 +3,20 @@ import { Bot } from "grammy";
 import { createLogger } from "./logger";
 import { maskValue, type Settings, settingsSchema } from "./settings";
 
+type SetupField = keyof typeof settingsSchema.shape;
+
+async function askValidated(io: SetupIO, field: SetupField, prompt: string, fallback: string): Promise<string> {
+  const schema = settingsSchema.shape[field];
+  let value = await io.ask(prompt) || fallback;
+  while (true) {
+    const result = schema.safeParse(value);
+    if (result.success) return value;
+    const issue = result.error?.issues?.[0];
+    io.write(`Invalid value: ${issue?.message ?? "validation failed"}. Please try again.\n`);
+    value = await io.ask(prompt);
+  }
+}
+
 const log = createLogger("setup");
 
 export interface SetupIO {
@@ -89,10 +103,7 @@ export async function runSetupWizard(io: SetupIO, opts?: { defaults?: SetupDefau
   // Chat ID
   const defaultChatId = prev.chatId || process.env.AUTHORIZED_CHAT_ID || "";
   const chatIdPrompt = defaultChatId ? `Chat ID [${defaultChatId}]: ` : "Chat ID: ";
-  let chatId = await ask(chatIdPrompt) || defaultChatId;
-  while (!chatId) {
-    chatId = await ask("Chat ID (required): ");
-  }
+  const chatId = await askValidated(io, "chatId", chatIdPrompt, defaultChatId);
 
   // Stop setup bot
   if (setupBot) {
@@ -101,11 +112,11 @@ export async function runSetupWizard(io: SetupIO, opts?: { defaults?: SetupDefau
 
   // Model
   const defaultModel = prev.model || process.env.MODEL || "sonnet";
-  const model = await ask(`Model [${defaultModel}]: `) || defaultModel;
+  const model = await askValidated(io, "model", `Model [${defaultModel}]: `, defaultModel);
 
   // Workspace
   const defaultWorkspace = prev.workspace || process.env.WORKSPACE || "~/.macroclaw-workspace";
-  const workspace = await ask(`Workspace [${defaultWorkspace}]: `) || defaultWorkspace;
+  const workspace = await askValidated(io, "workspace", `Workspace [${defaultWorkspace}]: `, defaultWorkspace);
 
   // OpenAI API key
   write("\nMacroclaw uses OpenAI's Whisper API to transcribe voice messages.\n");
