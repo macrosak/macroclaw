@@ -3,18 +3,13 @@ import { existsSync, rmSync } from "node:fs";
 import { App, type AppConfig } from "./app";
 import { type Claude, QueryProcessError, type QueryResult, type RunningQuery } from "./claude";
 import { saveSessions } from "./sessions";
+import type { SpeechToText } from "./speech-to-text";
 
-const mockOpenAICreate = mock(async () => ({ text: "transcribed text" }));
+const mockTranscribe = mock(async (_filePath: string) => "transcribed text");
 
-mock.module("openai", () => ({
-  default: class MockOpenAI {
-    audio = {
-      transcriptions: {
-        create: mockOpenAICreate,
-      },
-    };
-  },
-}));
+function mockStt(): SpeechToText {
+  return { transcribe: mockTranscribe } as unknown as SpeechToText;
+}
 
 // Mock Grammy Bot
 mock.module("grammy", () => ({
@@ -59,17 +54,14 @@ mock.module("grammy", () => ({
 
 const tmpSettingsDir = "/tmp/macroclaw-test-settings";
 
-const savedOpenAIKey = process.env.OPENAI_API_KEY;
-
 beforeEach(() => {
-  process.env.OPENAI_API_KEY = "test-key";
+  mockTranscribe.mockReset();
+  mockTranscribe.mockImplementation(async () => "transcribed text");
   if (existsSync(tmpSettingsDir)) rmSync(tmpSettingsDir, { recursive: true });
   saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
 });
 
 afterEach(() => {
-  if (savedOpenAIKey) process.env.OPENAI_API_KEY = savedOpenAIKey;
-  else delete process.env.OPENAI_API_KEY;
   if (existsSync(tmpSettingsDir)) rmSync(tmpSettingsDir, { recursive: true });
 });
 
@@ -128,6 +120,7 @@ function makeConfig(overrides?: Partial<AppConfig>): AppConfig {
     workspace: "/tmp/macroclaw-test-workspace",
     settingsDir: tmpSettingsDir,
     claude: defaultMockClaude(),
+    stt: mockStt(),
     ...overrides,
   };
 }
@@ -350,7 +343,7 @@ describe("App", () => {
       globalThis.fetch = mock(() =>
         Promise.resolve(new Response("fake-audio", { status: 200 })),
       ) as any;
-      mockOpenAICreate.mockImplementationOnce(async () => ({ text: "hello from voice" }));
+      mockTranscribe.mockImplementationOnce(async () => "hello from voice");
 
       const config = makeConfig();
       const app = new App(config);
@@ -380,7 +373,7 @@ describe("App", () => {
       globalThis.fetch = mock(() =>
         Promise.resolve(new Response("fake-audio", { status: 200 })),
       ) as any;
-      mockOpenAICreate.mockImplementationOnce(async () => { throw new Error("API error"); });
+      mockTranscribe.mockImplementationOnce(async () => { throw new Error("API error"); });
 
       const config = makeConfig();
       const app = new App(config);
@@ -406,7 +399,7 @@ describe("App", () => {
       globalThis.fetch = mock(() =>
         Promise.resolve(new Response("fake-audio", { status: 200 })),
       ) as any;
-      mockOpenAICreate.mockImplementationOnce(async () => ({ text: "  " }));
+      mockTranscribe.mockImplementationOnce(async () => "  ");
 
       const config = makeConfig();
       const app = new App(config);
@@ -442,9 +435,8 @@ describe("App", () => {
       expect((config.claude as Claude & { calls: CallInfo[] }).calls).toHaveLength(0);
     });
 
-    it("responds with unavailable message when OPENAI_API_KEY is not set", async () => {
-      delete process.env.OPENAI_API_KEY;
-      const config = makeConfig();
+    it("responds with unavailable message when stt is not configured", async () => {
+      const config = makeConfig({ stt: undefined });
       const app = new App(config);
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:voice")![0];
