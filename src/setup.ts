@@ -128,7 +128,7 @@ export class SetupWizard {
       }
 
       try {
-        const svc = this.#serviceInstaller ?? new (await import("./service")).ServiceManager();
+        const svc = this.#serviceInstaller ?? new (await import("./system-service")).SystemServiceManager();
         const logCmd = svc.install(oauthToken);
         this.#io.write(`Service installed and started. Check logs:\n  ${logCmd}\n`);
       } catch (err) {

@@ -2,20 +2,20 @@ import {execSync} from "node:child_process";
 import {createInterface} from "node:readline";
 import {defineCommand} from "citty";
 import pkg from "../package.json" with {type: "json"};
-import {ServiceManager, type SystemService} from "./service";
 import {loadSessions} from "./sessions";
 import {SettingsManager} from "./settings";
 import {type SetupIo, SetupWizard} from "./setup";
+import {SystemServiceManager} from "./system-service";
 
 export class Cli {
 	readonly #settingsManager: SettingsManager;
 	readonly #setupWizard: SetupWizard;
-	readonly #serviceManager: SystemService;
+	readonly #serviceManager: SystemServiceManager;
 
-	constructor(opts?: { wizard?: SetupWizard; settings?: SettingsManager; systemService?: SystemService }) {
+	constructor(opts?: { wizard?: SetupWizard; settings?: SettingsManager; systemService?: SystemServiceManager }) {
 		this.#settingsManager = opts?.settings ?? new SettingsManager();
 		this.#setupWizard = opts?.wizard ?? new SetupWizard(createReadlineIo());
-		this.#serviceManager = opts?.systemService ?? new ServiceManager();
+		this.#serviceManager = opts?.systemService ?? new SystemServiceManager();
 	}
 
 	async setup(): Promise<void> {

@@ -10,40 +10,6 @@ const LAUNCHD_LABEL = "com.macroclaw";
 
 export type Platform = "launchd" | "systemd";
 
-export interface ServiceDeps {
-	existsSync: (path: string) => boolean;
-	writeFileSync: (path: string, data: string) => void;
-	mkdirSync: (path: string, opts?: { recursive: boolean }) => void;
-	rmSync: (path: string) => void;
-	execSync: (cmd: string, opts?: object) => string;
-	tmpdir: () => string;
-	randomUUID: () => string;
-	userInfo: () => { username: string; homedir: string };
-	platform: string;
-	home: string;
-}
-
-function defaultDeps(): ServiceDeps {
-	return {
-		existsSync,
-		writeFileSync,
-		mkdirSync: (path, opts) => mkdirSync(path, opts),
-		rmSync,
-		execSync: (cmd, opts) => execSync(cmd, { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], ...opts }).toString(),
-		tmpdir,
-		randomUUID,
-		userInfo: () => ({ username: osUserInfo().username, homedir: osUserInfo().homedir }),
-		platform: process.platform,
-		home: process.env.HOME || "~",
-	};
-}
-
-function detectPlatform(platform: string): Platform {
-	if (platform === "darwin") return "launchd";
-	if (platform === "linux") return "systemd";
-	throw new Error("Unsupported platform. Only macOS (launchd) and Linux (systemd) are supported.");
-}
-
 interface LinuxUser {
 	user: string;
 	group: string;
@@ -58,23 +24,19 @@ export interface ServiceStatus {
 	uptime?: string;
 }
 
-export interface SystemService {
-	install: (oauthToken?: string) => string;
-	uninstall: () => void;
-	start: () => string;
-	stop: () => void;
-	update: () => string;
-	status: () => ServiceStatus;
-	logs: (follow?: boolean) => string;
-}
-
-export class ServiceManager implements SystemService {
-	readonly #deps: ServiceDeps;
+export class SystemServiceManager {
 	readonly #platform: Platform;
+	readonly #home: string;
 
-	constructor(deps?: Partial<ServiceDeps>) {
-		this.#deps = { ...defaultDeps(), ...deps };
-		this.#platform = detectPlatform(this.#deps.platform);
+	constructor(opts?: { platform?: string; home?: string }) {
+		this.#platform = SystemServiceManager.#detectPlatform(opts?.platform ?? process.platform);
+		this.#home = opts?.home ?? process.env.HOME ?? "~";
+	}
+
+	static #detectPlatform(platform: string): Platform {
+		if (platform === "darwin") return "launchd";
+		if (platform === "linux") return "systemd";
+		throw new Error("Unsupported platform. Only macOS (launchd) and Linux (systemd) are supported.");
 	}
 
 	get platform(): Platform {
@@ -83,26 +45,25 @@ export class ServiceManager implements SystemService {
 
 	get serviceFilePath(): string {
 		return this.#platform === "launchd"
-			? resolve(this.#deps.home, "Library/LaunchAgents/com.macroclaw.plist")
+			? resolve(this.#home, "Library/LaunchAgents/com.macroclaw.plist")
 			: "/etc/systemd/system/macroclaw.service";
 	}
 
 	get isInstalled(): boolean {
-		return this.#deps.existsSync(this.serviceFilePath);
+		return existsSync(this.serviceFilePath);
 	}
 
 	get isRunning(): boolean {
 		if (this.#platform === "launchd") {
 			try {
-				const out = this.#deps.execSync(`launchctl list ${LAUNCHD_LABEL}`);
-				// If the PID line shows a number (not "-"), the service is running
+				const out = this.#exec(`launchctl list ${LAUNCHD_LABEL}`);
 				return /"PID"\s*=\s*\d+/.test(out);
 			} catch {
 				return false;
 			}
 		}
 		try {
-			const out = this.#deps.execSync("systemctl is-active macroclaw");
+			const out = this.#exec("systemctl is-active macroclaw");
 			return out.trim() === "active";
 		} catch {
 			return false;
@@ -120,27 +81,27 @@ export class ServiceManager implements SystemService {
 	}
 
 	#installLaunchd(oauthToken?: string): void {
-		const settingsPath = resolve(this.#deps.home, ".macroclaw/settings.json");
-		if (!this.#deps.existsSync(settingsPath)) {
+		const settingsPath = resolve(this.#home, ".macroclaw/settings.json");
+		if (!existsSync(settingsPath)) {
 			throw new Error("Settings not found. Run `macroclaw setup` first.");
 		}
 
-		this.#deps.execSync("bun install -g macroclaw");
+		this.#exec("bun install -g macroclaw");
 		const bunPath = this.#resolvePath("bun");
 		const claudePath = this.#resolvePath("claude");
 		const macroclawPath = this.#resolveGlobalBinPath("macroclaw");
 
 		const pathDirs = [...new Set([dirname(bunPath), dirname(claudePath), dirname(macroclawPath)])];
 
-		const logDir = resolve(this.#deps.home, ".macroclaw/logs");
-		this.#deps.mkdirSync(logDir, { recursive: true });
+		const logDir = resolve(this.#home, ".macroclaw/logs");
+		mkdirSync(logDir, { recursive: true });
 		if (this.isRunning) {
-			this.#deps.execSync(`launchctl unload ${this.serviceFilePath}`);
+			this.#exec(`launchctl unload ${this.serviceFilePath}`);
 		}
 
-		this.#deps.writeFileSync(this.serviceFilePath, this.#generateLaunchdPlist(bunPath, macroclawPath, pathDirs, oauthToken));
+		writeFileSync(this.serviceFilePath, this.#generateLaunchdPlist(bunPath, macroclawPath, pathDirs, oauthToken));
 		log.debug({ filePath: this.serviceFilePath }, "Wrote launchd plist");
-		this.#deps.execSync(`launchctl load ${this.serviceFilePath}`);
+		this.#exec(`launchctl load ${this.serviceFilePath}`);
 	}
 
 	#installSystemd(): void {
@@ -150,7 +111,7 @@ export class ServiceManager implements SystemService {
 			this.#sudo("systemctl stop macroclaw");
 		}
 
-		this.#deps.execSync("bun install -g macroclaw");
+		this.#exec("bun install -g macroclaw");
 		const bunPath = this.#resolvePath("bun");
 		const claudePath = this.#resolvePath("claude");
 		const macroclawPath = this.#resolveGlobalBinPath("macroclaw");
@@ -170,9 +131,9 @@ export class ServiceManager implements SystemService {
 
 		if (this.#platform === "launchd") {
 			if (this.isRunning) {
-				this.#deps.execSync(`launchctl unload ${this.serviceFilePath}`);
+				this.#exec(`launchctl unload ${this.serviceFilePath}`);
 			}
-			this.#deps.rmSync(this.serviceFilePath);
+			rmSync(this.serviceFilePath);
 		} else {
 			if (this.isRunning) {
 				this.#sudo("systemctl stop macroclaw");
@@ -193,7 +154,7 @@ export class ServiceManager implements SystemService {
 		}
 
 		if (this.#platform === "launchd") {
-			this.#deps.execSync(`launchctl load ${this.serviceFilePath}`);
+			this.#exec(`launchctl load ${this.serviceFilePath}`);
 		} else {
 			this.#sudo("systemctl start macroclaw");
 		}
@@ -210,7 +171,7 @@ export class ServiceManager implements SystemService {
 		}
 
 		if (this.#platform === "launchd") {
-			this.#deps.execSync(`launchctl unload ${this.serviceFilePath}`);
+			this.#exec(`launchctl unload ${this.serviceFilePath}`);
 		} else {
 			this.#sudo("systemctl stop macroclaw");
 		}
@@ -223,15 +184,15 @@ export class ServiceManager implements SystemService {
 
 		if (this.#platform === "launchd") {
 			if (this.isRunning) {
-				this.#deps.execSync(`launchctl unload ${this.serviceFilePath}`);
+				this.#exec(`launchctl unload ${this.serviceFilePath}`);
 			}
-			this.#deps.execSync("bun install -g macroclaw@latest");
-			this.#deps.execSync(`launchctl load ${this.serviceFilePath}`);
+			this.#exec("bun install -g macroclaw@latest");
+			this.#exec(`launchctl load ${this.serviceFilePath}`);
 		} else {
 			if (this.isRunning) {
 				this.#sudo("systemctl stop macroclaw");
 			}
-			this.#deps.execSync("bun install -g macroclaw@latest");
+			this.#exec("bun install -g macroclaw@latest");
 			this.#sudo("systemctl start macroclaw");
 		}
 
@@ -249,13 +210,13 @@ export class ServiceManager implements SystemService {
 		if (result.running) {
 			if (this.#platform === "launchd") {
 				try {
-					const out = this.#deps.execSync(`launchctl list ${LAUNCHD_LABEL}`);
+					const out = this.#exec(`launchctl list ${LAUNCHD_LABEL}`);
 					const pidMatch = /"PID"\s*=\s*(\d+)/.exec(out);
 					if (pidMatch) result.pid = Number(pidMatch[1]);
 				} catch { /* best effort */ }
 			} else {
 				try {
-					const out = this.#deps.execSync("systemctl show macroclaw --property=MainPID,ActiveEnterTimestamp --no-pager");
+					const out = this.#exec("systemctl show macroclaw --property=MainPID,ActiveEnterTimestamp --no-pager");
 					const pidMatch = /MainPID=(\d+)/.exec(out);
 					if (pidMatch && pidMatch[1] !== "0") result.pid = Number(pidMatch[1]);
 					const tsMatch = /ActiveEnterTimestamp=(.+)/.exec(out);
@@ -269,7 +230,7 @@ export class ServiceManager implements SystemService {
 
 	logs(follow = false): string {
 		if (this.#platform === "launchd") {
-			const logDir = resolve(this.#deps.home, ".macroclaw/logs");
+			const logDir = resolve(this.#home, ".macroclaw/logs");
 			return follow
 				? `tail -f ${logDir}/stdout.log ${logDir}/stderr.log`
 				: `tail -n 50 ${logDir}/stdout.log`;
@@ -279,23 +240,26 @@ export class ServiceManager implements SystemService {
 			: "journalctl -u macroclaw -n 50 --no-pager";
 	}
 
+	#exec(cmd: string): string {
+		return execSync(cmd, { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).toString();
+	}
+
 	#resolvePath(binary: string): string {
 		try {
-			return this.#deps.execSync(`which ${binary}`).trim();
+			return this.#exec(`which ${binary}`).trim();
 		} catch {
 			throw new Error(`Could not resolve ${binary} path. Is it installed?`);
 		}
 	}
 
 	#resolveGlobalBinPath(binary: string): string {
-		const binDir = this.#deps.execSync("bun pm bin -g").trim();
+		const binDir = this.#exec("bun pm bin -g").trim();
 		const binPath = join(binDir, binary);
-		if (!this.#deps.existsSync(binPath)) {
+		if (!existsSync(binPath)) {
 			throw new Error(`Could not find ${binary} in ${binDir}. Is it installed?`);
 		}
 		return binPath;
 	}
-
 
 	#requireInstalled(): void {
 		if (!this.isInstalled) {
@@ -305,43 +269,43 @@ export class ServiceManager implements SystemService {
 
 	#logTailCommand(): string {
 		if (this.#platform === "launchd") {
-			const logDir = resolve(this.#deps.home, ".macroclaw/logs");
+			const logDir = resolve(this.#home, ".macroclaw/logs");
 			return `tail -f ${logDir}/*.log`;
 		}
 		return "journalctl -u macroclaw -f";
 	}
 
 	#sudo(cmd: string): void {
-		this.#deps.execSync(`sudo ${cmd}`);
+		this.#exec(`sudo ${cmd}`);
 	}
 
 	/** Write unit content to a temp file, then sudo-copy it into /etc/systemd/system/. */
 	#writeSystemdUnit(content: string): void {
-		const tmpPath = join(this.#deps.tmpdir(), `macroclaw-${this.#deps.randomUUID()}.service`);
-		this.#deps.writeFileSync(tmpPath, content);
+		const tmpPath = join(tmpdir(), `macroclaw-${randomUUID()}.service`);
+		writeFileSync(tmpPath, content);
 		try {
 			this.#sudo(`cp ${tmpPath} ${this.serviceFilePath}`);
 		} finally {
-			try { this.#deps.rmSync(tmpPath); } catch { /* best-effort cleanup */ }
+			try { rmSync(tmpPath); } catch { /* best-effort cleanup */ }
 		}
 	}
 
 	#resolveLinuxUser(): LinuxUser {
-		const info = this.#deps.userInfo();
+		const info = osUserInfo();
 		const user = info.username;
 		const home = info.homedir;
-		const group = this.#deps.execSync(`id -gn ${user}`).trim();
+		const group = this.#exec(`id -gn ${user}`).trim();
 
 		const settingsPath = resolve(home, ".macroclaw/settings.json");
-		if (!this.#deps.existsSync(settingsPath)) {
-			throw new Error(`Settings not found. Run \`macroclaw setup\` first.`);
+		if (!existsSync(settingsPath)) {
+			throw new Error("Settings not found. Run `macroclaw setup` first.");
 		}
 
 		return { user, group, home };
 	}
 
 	#generateLaunchdPlist(bunPath: string, macroclawPath: string, pathDirs: string[], oauthToken?: string): string {
-		const logDir = resolve(this.#deps.home, ".macroclaw/logs");
+		const logDir = resolve(this.#home, ".macroclaw/logs");
 		const tokenEnv = oauthToken ? `\n\t\t<key>CLAUDE_CODE_OAUTH_TOKEN</key>\n\t\t<string>${oauthToken}</string>` : "";
 		return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -364,7 +328,7 @@ export class ServiceManager implements SystemService {
 	<key>EnvironmentVariables</key>
 	<dict>
 		<key>HOME</key>
-		<string>${this.#deps.home}</string>
+		<string>${this.#home}</string>
 		<key>PATH</key>
 		<string>${pathDirs.join(":")}</string>${tokenEnv}
 	</dict>
