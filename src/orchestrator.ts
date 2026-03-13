@@ -67,8 +67,9 @@ function escapeHtml(text: string): string {
 
 interface BackgroundInfo {
   name: string;
-  sessionId: string;
-  startTime: Date;
+  prompt: string;
+  model?: string;
+  query: RunningQuery<AgentOutput>;
 }
 
 export interface OrchestratorConfig {
@@ -123,15 +124,39 @@ export class Orchestrator {
       return;
     }
     const lines = agents.map((a) => {
-      const elapsed = Math.round((Date.now() - a.startTime.getTime()) / 1000);
+      const elapsed = Math.round((Date.now() - a.query.startedAt.getTime()) / 1000);
       return `- ${escapeHtml(a.name)} (${elapsed}s)`;
     });
     const buttons: ButtonSpec[] = agents.map((a) => {
-      const elapsed = Math.round((Date.now() - a.startTime.getTime()) / 1000);
+      const elapsed = Math.round((Date.now() - a.query.startedAt.getTime()) / 1000);
       const text = `${a.name} (${elapsed}s)`.slice(0, 27);
-      return { text, data: `peek:${a.sessionId}` };
+      return { text, data: `detail:${a.query.sessionId}` };
     });
     buttons.push({text: "Dismiss", data: "_dismiss"});
+    this.#callOnResponse({ message: lines.join("\n"), buttons });
+  }
+
+  handleDetail(sessionId: string): void {
+    const agent = this.#backgroundAgents.get(sessionId);
+    if (!agent) {
+      this.#callOnResponse({ message: "Agent not found or already finished." });
+      return;
+    }
+
+    const elapsed = Math.round((Date.now() - agent.query.startedAt.getTime()) / 1000);
+    const truncatedPrompt = agent.prompt.length > 300 ? `${agent.prompt.slice(0, 300)}…` : agent.prompt;
+    const lines = [
+      `<b>${escapeHtml(agent.name)}</b>`,
+      `Prompt: ${escapeHtml(truncatedPrompt)}`,
+      `Model: ${agent.model ?? "default"}`,
+      `Elapsed: ${elapsed}s`,
+      "Status: running",
+    ];
+    const buttons: ButtonSpec[] = [
+      { text: "Peek", data: `peek:${sessionId}` },
+      { text: "Kill", data: `kill:${sessionId}` },
+      { text: "Dismiss", data: "_dismiss" },
+    ];
     this.#callOnResponse({ message: lines.join("\n"), buttons });
   }
 
@@ -156,6 +181,24 @@ export class Orchestrator {
     } catch (err) {
       this.#callOnResponse({ message: `Couldn't peek at ${escapeHtml(agent.name)}: ${err}` });
     }
+  }
+
+  async handleKill(sessionId: string): Promise<void> {
+    const agent = this.#backgroundAgents.get(sessionId);
+    if (!agent) {
+      this.#callOnResponse({ message: "Agent not found or already finished." });
+      return;
+    }
+
+    this.#backgroundAgents.delete(sessionId);
+
+    try {
+      await agent.query.kill();
+    } catch (err) {
+      log.error({ err, name: agent.name }, "Kill failed");
+    }
+
+    this.#callOnResponse({ message: `Killed <b>${escapeHtml(agent.name)}</b>.` });
   }
 
   handleSessionCommand(): void {
@@ -298,9 +341,11 @@ export class Orchestrator {
     const name = request.type === "user" ? request.message.slice(0, 30).replace(/\s+/g, "-")
       : request.type === "cron" ? `cron-${request.name}`
       : "task";
+    const prompt = this.#formatPrompt(request);
+    const model = request.type === "cron" ? (request.model ?? this.#config.model) : this.#config.model;
     log.info({ name, sessionId: query.sessionId }, "Request backgrounded due to timeout");
     this.#callOnResponse({ message: "This is taking longer, continuing in the background." });
-    this.#adoptBackground(name, query.sessionId, query.startedAt, query.result);
+    this.#adoptBackground(name, prompt, model, query);
     return null;
   }
 
@@ -327,18 +372,20 @@ export class Orchestrator {
       ? this.#claude.forkSession(this.#mainSessionId, bgPrompt, responseResultType, { model })
       : this.#claude.newSession(bgPrompt, responseResultType, { model });
     const sessionId = query.sessionId;
-    const info: BackgroundInfo = { name, sessionId, startTime: query.startedAt };
+    const info: BackgroundInfo = { name, prompt, model, query };
     this.#backgroundAgents.set(sessionId, info);
 
     log.debug({ name, sessionId }, "Starting background agent");
 
     query.result.then(
       async ({ value: response }) => {
+        if (!this.#backgroundAgents.has(sessionId)) return;
         this.#backgroundAgents.delete(sessionId);
         log.debug({ name, message: response.message }, "Background agent finished");
         this.#queue.push({ type: "background-agent-result", name, response });
       },
       (err) => {
+        if (!this.#backgroundAgents.has(sessionId)) return;
         this.#backgroundAgents.delete(sessionId);
         log.error({ name, err }, "Background agent failed");
         this.#queue.push({ type: "background-agent-result", name, response: { action: "send", message: `[Error] ${err}`, actionReason: "bg-agent-failed" } });
@@ -346,19 +393,22 @@ export class Orchestrator {
     );
   }
 
-  #adoptBackground(name: string, sessionId: string, startTime: Date, completion: Promise<QueryResult<AgentOutput>>) {
-    const info: BackgroundInfo = { name, sessionId, startTime };
+  #adoptBackground(name: string, prompt: string, model: string | undefined, query: RunningQuery<AgentOutput>) {
+    const sessionId = query.sessionId;
+    const info: BackgroundInfo = { name, prompt, model, query };
     this.#backgroundAgents.set(sessionId, info);
 
     log.debug({ name, sessionId }, "Adopting backgrounded task");
 
-    completion.then(
+    query.result.then(
       ({ value: response }) => {
+        if (!this.#backgroundAgents.has(sessionId)) return;
         this.#backgroundAgents.delete(sessionId);
         log.debug({ name }, "Adopted task finished");
         this.#queue.push({ type: "background-agent-result", name, response, sessionId });
       },
       (err) => {
+        if (!this.#backgroundAgents.has(sessionId)) return;
         this.#backgroundAgents.delete(sessionId);
         log.error({ name, err }, "Adopted task failed");
         this.#queue.push({ type: "background-agent-result", name, response: { action: "send", message: `[Error] ${err}`, actionReason: "deferred-failed" }, sessionId });

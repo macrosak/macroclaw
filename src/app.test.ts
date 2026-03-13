@@ -556,6 +556,29 @@ describe("App", () => {
       expect((config.claude as Claude & { calls: CallInfo[] }).calls).toHaveLength(0);
     });
 
+    it("handles detail: callback by routing to orchestrator.handleDetail", async () => {
+      const config = makeConfig();
+      const app = new App(config);
+      const bot = app.bot as any;
+      const handler = bot.filterHandlers.get("callback_query:data")![0];
+
+      const ctx = {
+        chat: { id: 12345 },
+        callbackQuery: { data: "detail:test-session-123" },
+        answerCallbackQuery: mock(async () => {}),
+        editMessageReplyMarkup: mock(async () => {}),
+      };
+
+      await handler(ctx);
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(ctx.answerCallbackQuery).toHaveBeenCalled();
+      expect(ctx.editMessageReplyMarkup).toHaveBeenCalledWith({ reply_markup: { inline_keyboard: [[{ text: "✓ Opened", callback_data: "_noop" }]] } });
+      const calls = (bot.api.sendMessage as any).mock.calls;
+      const text = calls[calls.length - 1][1];
+      expect(text).toBe("Agent not found or already finished.");
+    });
+
     it("handles peek: callback by routing to orchestrator.handlePeek", async () => {
       const config = makeConfig();
       const app = new App(config);
@@ -574,6 +597,29 @@ describe("App", () => {
 
       expect(ctx.answerCallbackQuery).toHaveBeenCalled();
       expect(ctx.editMessageReplyMarkup).toHaveBeenCalledWith({ reply_markup: { inline_keyboard: [[{ text: "✓ Peeked", callback_data: "_noop" }]] } });
+      const calls = (bot.api.sendMessage as any).mock.calls;
+      const text = calls[calls.length - 1][1];
+      expect(text).toBe("Agent not found or already finished.");
+    });
+
+    it("handles kill: callback by routing to orchestrator.handleKill", async () => {
+      const config = makeConfig();
+      const app = new App(config);
+      const bot = app.bot as any;
+      const handler = bot.filterHandlers.get("callback_query:data")![0];
+
+      const ctx = {
+        chat: { id: 12345 },
+        callbackQuery: { data: "kill:test-session-123" },
+        answerCallbackQuery: mock(async () => {}),
+        editMessageReplyMarkup: mock(async () => {}),
+      };
+
+      await handler(ctx);
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(ctx.answerCallbackQuery).toHaveBeenCalled();
+      expect(ctx.editMessageReplyMarkup).toHaveBeenCalledWith({ reply_markup: { inline_keyboard: [[{ text: "✓ Killed", callback_data: "_noop" }]] } });
       const calls = (bot.api.sendMessage as any).mock.calls;
       const text = calls[calls.length - 1][1];
       expect(text).toBe("Agent not found or already finished.");
