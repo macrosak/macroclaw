@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
-import type { SetupIO } from "./setup";
+import type { SetupIo } from "./setup";
 
 // Mock child_process so resolveClaudePath doesn't hit real `which`
 mock.module("node:child_process", () => ({
@@ -8,7 +8,7 @@ mock.module("node:child_process", () => ({
 
 // Mock Grammy Bot
 const mockBotInit = mock(async () => {});
-const mockBotStart = mock(() => {});
+const mockBotStart = mock(async () => {});
 const mockBotStop = mock(async () => {});
 const mockSetMyCommands = mock(async () => {});
 let mockBotCatchHandler: Function | null = null;
@@ -37,8 +37,8 @@ mock.module("grammy", () => ({
       await mockBotInit();
     }
 
-    start() {
-      mockBotStart();
+    async start() {
+      await mockBotStart();
     }
 
     async stop() {
@@ -55,23 +55,30 @@ function createMockServiceInstaller() {
   };
 }
 
-const { resolveClaudePath, runSetupWizard } = await import("./setup");
+const { resolveClaudePath, SetupWizard } = await import("./setup");
 
-function createMockIO(inputs: string[]): SetupIO & { written: string[]; closed: boolean } {
+async function runSetup(io: SetupIo, opts?: ConstructorParameters<typeof SetupWizard>[1]) {
+  const wizard = new SetupWizard(io, opts);
+  const settings = await wizard.collectSettings();
+  await wizard.installService();
+  return settings;
+}
+
+function createMockIO(inputs: string[]): SetupIo & { written: string[] } {
   let index = 0;
   const written: string[] = [];
   const io = {
+    open: () => {},
+    close: () => {},
     ask: async () => inputs[index++] ?? "",
     write: (msg: string) => { written.push(msg); },
-    close: () => { io.closed = true; },
     written,
-    closed: false,
   };
   return io;
 }
 
 // Save/restore env vars
-const envVars = ["TELEGRAM_BOT_TOKEN", "AUTHORIZED_CHAT_ID", "MODEL", "WORKSPACE", "OPENAI_API_KEY"];
+const envVars = ["TELEGRAM_BOT_TOKEN", "AUTHORIZED_CHAT_ID", "MODEL", "WORKSPACE", "OPENAI_API_KEY", "LOG_LEVEL"];
 const savedEnv: Record<string, string | undefined> = {};
 
 beforeEach(() => {
@@ -95,7 +102,7 @@ afterEach(() => {
   }
 });
 
-describe("runSetupWizard", () => {
+describe("SetupWizard", () => {
   it("collects all required fields via prompts", async () => {
     const io = createMockIO([
       "123:ABC",   // bot token
@@ -106,14 +113,14 @@ describe("runSetupWizard", () => {
       "",          // no service install
     ]);
 
-    const settings = await runSetupWizard(io);
+    const settings = await runSetup(io);
 
     expect(settings.botToken).toBe("123:ABC");
     expect(settings.chatId).toBe("12345678");
     expect(settings.model).toBe("opus");
     expect(settings.workspace).toBe("/my/ws");
     expect(settings.openaiApiKey).toBe("sk-test");
-    expect(settings.logLevel).toBe("debug");
+    expect(settings.logLevel).toBe("info");
   });
 
   it("uses defaults from env vars when user presses enter", async () => {
@@ -132,7 +139,7 @@ describe("runSetupWizard", () => {
       "",  // no service install
     ]);
 
-    const settings = await runSetupWizard(io);
+    const settings = await runSetup(io);
 
     expect(settings.botToken).toBe("env-token");
     expect(settings.chatId).toBe("99887766");
@@ -151,7 +158,7 @@ describe("runSetupWizard", () => {
       "",       // no service install
     ]);
 
-    const settings = await runSetupWizard(io);
+    const settings = await runSetup(io);
 
     expect(settings.model).toBe("sonnet");
     expect(settings.workspace).toBe("~/.macroclaw-workspace");
@@ -168,7 +175,7 @@ describe("runSetupWizard", () => {
       "",  // no service install
     ]);
 
-    await runSetupWizard(io);
+    await runSetup(io);
 
     expect(mockBotInit).toHaveBeenCalled();
     expect(mockBotStart).toHaveBeenCalled();
@@ -192,7 +199,7 @@ describe("runSetupWizard", () => {
       "",  // no service install
     ]);
 
-    const settings = await runSetupWizard(io);
+    const settings = await runSetup(io);
 
     expect(settings.botToken).toBe("good-token");
     expect(callCount).toBe(2);
@@ -209,7 +216,7 @@ describe("runSetupWizard", () => {
       "",  // no service install
     ]);
 
-    const settings = await runSetupWizard(io);
+    const settings = await runSetup(io);
 
     expect(settings.botToken).toBe("actual-token");
   });
@@ -225,7 +232,7 @@ describe("runSetupWizard", () => {
       "",  // no service install
     ]);
 
-    const settings = await runSetupWizard(io);
+    const settings = await runSetup(io);
 
     expect(settings.chatId).toBe("456");
   });
@@ -241,7 +248,7 @@ describe("runSetupWizard", () => {
       "",  // no service install
     ]);
 
-    const settings = await runSetupWizard(io);
+    const settings = await runSetup(io);
 
     expect(settings.chatId).toBe("456");
     expect(io.written).toContainEqual(expect.stringContaining("Invalid value"));
@@ -258,7 +265,7 @@ describe("runSetupWizard", () => {
       "",  // no service install
     ]);
 
-    const settings = await runSetupWizard(io);
+    const settings = await runSetup(io);
 
     expect(settings.model).toBe("opus");
     expect(io.written).toContainEqual(expect.stringContaining("Invalid value"));
@@ -274,7 +281,7 @@ describe("runSetupWizard", () => {
       "",  // no service install
     ]);
 
-    await runSetupWizard(io);
+    await runSetup(io);
 
     // The catch handler was registered
     expect(mockBotCatchHandler).not.toBeNull();
@@ -292,7 +299,7 @@ describe("runSetupWizard", () => {
       "",  // no service install
     ]);
 
-    await runSetupWizard(io);
+    await runSetup(io);
 
     expect(mockBotCommandHandler).not.toBeNull();
     const mockReply = mock(() => {});
@@ -300,44 +307,7 @@ describe("runSetupWizard", () => {
     expect(mockReply).toHaveBeenCalledWith("12345");
   });
 
-  it("calls onSettingsReady before service install prompt", async () => {
-    const order: string[] = [];
-    const installer = { install: () => { order.push("install"); return ""; } };
-    const onSettingsReady = () => { order.push("save"); };
-    const io = createMockIO([
-      "tok",
-      "123",
-      "",
-      "",
-      "",
-      "y",
-      "sk-test-token",  // oauth token (macOS)
-    ]);
-
-    await runSetupWizard(io, { serviceInstaller: installer, onSettingsReady, platform: "darwin" });
-
-    expect(order).toEqual(["save", "install"]);
-  });
-
-  it("closes io before running service install", async () => {
-    let closedBeforeInstall = false;
-    const io = createMockIO([
-      "tok",
-      "123",
-      "",
-      "",
-      "",
-      "y",
-      "sk-test-token",  // oauth token (macOS)
-    ]);
-    const installer = { install: () => { closedBeforeInstall = io.closed; return ""; } };
-
-    await runSetupWizard(io, { serviceInstaller: installer, platform: "darwin" });
-
-    expect(closedBeforeInstall).toBe(true);
-  });
-
-  it("installs service when user answers yes", async () => {
+it("installs service when user answers yes", async () => {
     mockInstall.mockClear();
     const installer = createMockServiceInstaller();
     const io = createMockIO([
@@ -350,7 +320,7 @@ describe("runSetupWizard", () => {
       "sk-test-token",  // oauth token (macOS)
     ]);
 
-    await runSetupWizard(io, { serviceInstaller: installer, platform: "darwin" });
+    await runSetup(io, { serviceInstaller: installer, platform: "darwin" });
 
     expect(mockInstall).toHaveBeenCalled();
     expect(io.written).toContainEqual(expect.stringContaining("Service installed and started."));
@@ -368,10 +338,9 @@ describe("runSetupWizard", () => {
       "n",  // no to service install
     ]);
 
-    await runSetupWizard(io, { serviceInstaller: installer });
+    await runSetup(io, { serviceInstaller: installer });
 
     expect(mockInstall).not.toHaveBeenCalled();
-    expect(io.closed).toBe(true);
   });
 
   it("skips service install when oauth token is empty on macOS", async () => {
@@ -387,7 +356,7 @@ describe("runSetupWizard", () => {
       "",  // empty oauth token
     ]);
 
-    const settings = await runSetupWizard(io, { serviceInstaller: installer, platform: "darwin" });
+    const settings = await runSetup(io, { serviceInstaller: installer, platform: "darwin" });
 
     expect(mockInstall).not.toHaveBeenCalled();
     expect(io.written).toContainEqual(expect.stringContaining("No token provided"));
@@ -407,7 +376,7 @@ describe("runSetupWizard", () => {
       "sk-test-token",  // oauth token (macOS)
     ]);
 
-    await runSetupWizard(io, { serviceInstaller: installer, platform: "darwin" });
+    await runSetup(io, { serviceInstaller: installer, platform: "darwin" });
 
     expect(io.written).toContainEqual(expect.stringContaining("Service installation failed: Permission denied"));
   });
@@ -415,7 +384,7 @@ describe("runSetupWizard", () => {
   it("fails fast when claude CLI is not found", async () => {
     const io = createMockIO([]);
     await expect(
-      runSetupWizard(io, { resolveClaude: () => { throw new Error("Claude Code CLI not found."); } }),
+      runSetup(io, { resolveClaude: () => { throw new Error("Claude Code CLI not found."); } }),
     ).rejects.toThrow("Claude Code CLI not found.");
   });
 

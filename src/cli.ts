@@ -1,82 +1,33 @@
 import {execSync} from "node:child_process";
-import {existsSync, readFileSync} from "node:fs";
-import {join, resolve} from "node:path";
 import {createInterface} from "node:readline";
 import {defineCommand} from "citty";
-import pkg from "../package.json" with { type: "json" };
-import {initLogger} from "./logger";
+import pkg from "../package.json" with {type: "json"};
 import {ServiceManager, type SystemService} from "./service";
 import {loadSessions} from "./sessions";
-import {loadSettings, saveSettings} from "./settings";
-import {runSetupWizard} from "./setup";
-
-export interface SetupDeps {
-	initLogger: () => Promise<void>;
-	saveSettings: (settings: unknown, dir: string) => void;
-	loadRawSettings: (dir: string) => Record<string, unknown> | null;
-	runSetupWizard: (io: { ask: (q: string) => Promise<string>; write: (m: string) => void; close?: () => void }, opts?: { defaults?: Record<string, unknown>; onSettingsReady?: (settings: unknown) => void }) => Promise<unknown>;
-	createReadlineInterface: () => { question: (q: string, cb: (a: string) => void) => void; close: () => void };
-	resolveDir: () => string;
-}
-
-export function loadRawSettings(dir: string): Record<string, unknown> | null {
-	const path = join(dir, "settings.json");
-	if (!existsSync(path)) return null;
-	try {
-		const raw = JSON.parse(readFileSync(path, "utf-8"));
-		return typeof raw === "object" && raw !== null ? raw : null;
-	} catch {
-		return null;
-	}
-}
-
-function defaultSetupDeps(): SetupDeps {
-	return {
-		initLogger,
-		saveSettings: saveSettings as (settings: unknown, dir: string) => void,
-		loadRawSettings,
-		runSetupWizard: runSetupWizard as SetupDeps["runSetupWizard"],
-		createReadlineInterface: () => createInterface({ input: process.stdin, output: process.stdout }),
-		resolveDir: () => resolve(process.env.HOME || "~", ".macroclaw"),
-	};
-}
-
-function defaultSystemService(): SystemService {
-	return new ServiceManager();
-}
+import {SettingsManager} from "./settings";
+import {type SetupIo, SetupWizard} from "./setup";
 
 export class Cli {
-	readonly #setupDeps: SetupDeps;
-	readonly #systemService: SystemService;
+	readonly #settingsManager: SettingsManager;
+	readonly #setupWizard: SetupWizard;
+	readonly #serviceManager: SystemService;
 
-	constructor(setupDeps?: Partial<SetupDeps>, systemService?: SystemService) {
-		this.#setupDeps = { ...defaultSetupDeps(), ...setupDeps };
-		this.#systemService = systemService ?? defaultSystemService();
+	constructor(wizard?: SetupWizard, settings?: SettingsManager, systemService?: SystemService) {
+		this.#settingsManager = settings ?? new SettingsManager();
+		this.#setupWizard = wizard ?? new SetupWizard(createReadlineIo());
+		this.#serviceManager = systemService ?? new ServiceManager();
 	}
 
 	async setup(): Promise<void> {
-		await this.#setupDeps.initLogger();
-		const rl = this.#setupDeps.createReadlineInterface();
-		const io = {
-			ask: (question: string): Promise<string> =>
-				new Promise((res) => rl.question(question, (answer: string) => res(answer.trim()))),
-			write: (msg: string) => process.stdout.write(msg),
-			close: () => rl.close(),
-		};
-		const dir = this.#setupDeps.resolveDir();
-		const defaults = this.#setupDeps.loadRawSettings(dir) ?? undefined;
-		const settings = await this.#setupDeps.runSetupWizard(io, {
-			defaults,
-			onSettingsReady: (s) => this.#setupDeps.saveSettings(s, dir),
-		});
-		this.#setupDeps.saveSettings(settings, dir);
+		const defaults = this.#settingsManager.loadRaw() ?? undefined;
+		const settings = await this.#setupWizard.collectSettings(defaults);
+		this.#settingsManager.save(settings);
+		await this.#setupWizard.installService();
 	}
 
 	claude(exec: (cmd: string, opts: object) => void = (cmd, opts) => execSync(cmd, opts)): void {
-		const dir = this.#setupDeps.resolveDir();
-		const settings = loadSettings(dir);
-		if (!settings) throw new Error("Settings not found. Run `macroclaw setup` first.");
-		const sessions = loadSessions(dir);
+		const settings = this.#settingsManager.load();
+		const sessions = loadSessions(this.#settingsManager.dir);
 		const args = ["claude"];
 		if (sessions.mainSessionId) args.push("--resume", sessions.mainSessionId);
 		args.push("--model", settings.model);
@@ -86,30 +37,30 @@ export class Cli {
 	service(action: string, token?: string, follow?: boolean): void {
 		switch (action) {
 			case "install": {
-				const logCmd = this.#systemService.install(token);
+				const logCmd = this.#serviceManager.install(token);
 				console.log(`Service installed and started. Check logs:\n  ${logCmd}`);
 				break;
 			}
 			case "uninstall":
-				this.#systemService.uninstall();
+				this.#serviceManager.uninstall();
 				console.log("Service uninstalled.");
 				break;
 			case "start": {
-				const logCmd = this.#systemService.start();
+				const logCmd = this.#serviceManager.start();
 				console.log(`Service started. Check logs:\n  ${logCmd}`);
 				break;
 			}
 			case "stop":
-				this.#systemService.stop();
+				this.#serviceManager.stop();
 				console.log("Service stopped.");
 				break;
 			case "update": {
-				const logCmd = this.#systemService.update();
+				const logCmd = this.#serviceManager.update();
 				console.log(`Service updated. Check logs:\n  ${logCmd}`);
 				break;
 			}
 			case "status": {
-				const s = this.#systemService.status();
+				const s = this.#serviceManager.status();
 				const lines = [
 					`Platform: ${s.platform}`,
 					`Installed: ${s.installed ? "yes" : "no"}`,
@@ -121,7 +72,7 @@ export class Cli {
 				break;
 			}
 			case "logs": {
-				const cmd = this.#systemService.logs(follow);
+				const cmd = this.#serviceManager.logs(follow);
 				console.log(cmd);
 				break;
 			}
@@ -129,6 +80,17 @@ export class Cli {
 				throw new Error(`Unknown service action: ${action}`);
 		}
 	}
+}
+
+export function createReadlineIo(): SetupIo {
+	let rl: ReturnType<typeof createInterface> | null = null;
+	return {
+		open: () => { rl = createInterface({ input: process.stdin, output: process.stdout }); },
+		close: () => { rl?.close(); rl = null; },
+		ask: (question: string): Promise<string> =>
+			new Promise((res) => rl?.question(question, (answer: string) => res(answer.trim()))),
+		write: (msg: string) => process.stdout.write(msg),
+	};
 }
 
 export function handleError(err: unknown): never {
@@ -216,4 +178,3 @@ export const main = defineCommand({
 	meta: { name: pkg.name, description: pkg.description, version: pkg.version },
 	subCommands: { start: startCommand, setup: setupCommand, claude: claudeCommand, service: serviceCommand },
 });
-

@@ -1,7 +1,9 @@
 import { describe, expect, it, mock } from "bun:test";
 import { runCommand } from "citty";
-import { Cli, handleError, loadRawSettings, type SetupDeps } from "./cli";
+import { Cli, createReadlineIo, handleError } from "./cli";
 import type { SystemService } from "./service";
+import { SettingsManager } from "./settings";
+import type { SetupWizard } from "./setup";
 
 // Only mock ./index — safe since no other test imports it
 const mockStart = mock(async () => {});
@@ -9,26 +11,22 @@ mock.module("./index", () => ({ start: mockStart }));
 
 const { main } = await import("./cli");
 
-function createMockSetupDeps(): SetupDeps & { saved: { settings: unknown; dir: string } | null } {
-	const result: SetupDeps & { saved: { settings: unknown; dir: string } | null } = {
-		saved: null,
-		initLogger: async () => {},
-		saveSettings: () => {},
-		loadRawSettings: () => null,
-		runSetupWizard: async (io) => {
-			await io.ask("test?");
-			io.write("done");
-			io.close?.();
-			return { botToken: "tok", chatId: "123" };
-		},
-		createReadlineInterface: () => ({
-			question: (_q: string, cb: (a: string) => void) => cb("answer"),
-			close: () => {},
-		}),
-		resolveDir: () => "/home/test/.macroclaw",
-	};
-	result.saveSettings = (settings: unknown, dir: string) => { result.saved = { settings, dir }; };
-	return result;
+function createMockWizard(overrides?: { collectSettings?: (defaults?: Record<string, unknown>) => Promise<unknown>; installService?: () => Promise<void> }) {
+	return {
+		collectSettings: overrides?.collectSettings ?? mock(async () => ({ botToken: "tok", chatId: "123" })),
+		installService: overrides?.installService ?? mock(async () => {}),
+	} as unknown as SetupWizard;
+}
+
+function createMockSettings(overrides?: Partial<SettingsManager>) {
+	return {
+		load: mock(() => ({ botToken: "tok", chatId: "123", model: "sonnet", workspace: "/tmp" })),
+		loadRaw: mock(() => null),
+		save: mock(() => {}),
+		applyEnvOverrides: mock((s: unknown) => ({ settings: s, overrides: new Set() })),
+		print: mock(() => {}),
+		...overrides,
+	} as unknown as SettingsManager;
 }
 
 describe("CLI routing", () => {
@@ -62,49 +60,45 @@ describe("CLI routing", () => {
 
 describe("Cli.setup", () => {
 	it("runs wizard and saves settings", async () => {
-		const deps = createMockSetupDeps();
-		const cli = new Cli(deps);
+		const wizard = createMockWizard();
+		const settings = createMockSettings();
+		const cli = new Cli(wizard, settings);
 		await cli.setup();
-		expect(deps.saved).toEqual({
-			settings: { botToken: "tok", chatId: "123" },
-			dir: "/home/test/.macroclaw",
-		});
-	});
-
-	it("calls initLogger", async () => {
-		const deps = createMockSetupDeps();
-		const mockInit = mock(async () => {});
-		deps.initLogger = mockInit;
-		const cli = new Cli(deps);
-		await cli.setup();
-		expect(mockInit).toHaveBeenCalled();
+		expect((settings.save as ReturnType<typeof mock>)).toHaveBeenCalledWith({ botToken: "tok", chatId: "123" });
 	});
 
 	it("passes existing settings as defaults to wizard", async () => {
 		const existing = { botToken: "old-tok", chatId: "999" };
 		let receivedDefaults: unknown = null;
-		const deps = createMockSetupDeps();
-		deps.loadRawSettings = () => existing;
-		deps.runSetupWizard = async (io, opts) => {
-			receivedDefaults = opts?.defaults;
-			io.close?.();
-			return { botToken: "tok", chatId: "123" };
-		};
-		const cli = new Cli(deps);
+		const wizard = createMockWizard({
+			collectSettings: async (defaults) => { receivedDefaults = defaults; return { botToken: "tok", chatId: "123" }; },
+		});
+		const settings = createMockSettings({ loadRaw: () => existing } as unknown as Partial<SettingsManager>);
+		const cli = new Cli(wizard, settings);
 		await cli.setup();
 		expect(receivedDefaults).toEqual(existing);
 	});
 
-	it("closes readline after wizard completes", async () => {
-		const deps = createMockSetupDeps();
-		const mockClose = mock(() => {});
-		deps.createReadlineInterface = () => ({
-			question: (_q: string, cb: (a: string) => void) => cb("answer"),
-			close: mockClose,
-		});
-		const cli = new Cli(deps);
+	it("wizard manages io lifecycle internally", async () => {
+		const wizard = createMockWizard();
+		const cli = new Cli(wizard, createMockSettings());
 		await cli.setup();
-		expect(mockClose).toHaveBeenCalled();
+		expect((wizard.collectSettings as ReturnType<typeof mock>)).toHaveBeenCalled();
+		expect((wizard.installService as ReturnType<typeof mock>)).toHaveBeenCalled();
+	});
+
+	it("creates default wizard when none provided", () => {
+		const cli = new Cli(undefined, createMockSettings());
+		expect(cli).toBeDefined();
+	});
+
+	it("createReadlineIo creates functional io", async () => {
+		const io = createReadlineIo();
+		io.open();
+		const answer = io.ask("test? ");
+		process.stdin.push("hello\n");
+		expect(await answer).toBe("hello");
+		io.close();
 	});
 });
 
@@ -124,67 +118,67 @@ function mockService(overrides?: Partial<SystemService>): SystemService {
 describe("Cli.service", () => {
 	it("runs install action", () => {
 		const install = mock(() => "tail -f /logs");
-		const cli = new Cli(undefined, mockService({ install }));
+		const cli = new Cli(undefined, undefined, mockService({ install }));
 		cli.service("install");
 		expect(install).toHaveBeenCalled();
 	});
 
 	it("runs uninstall action", () => {
 		const uninstall = mock(() => {});
-		const cli = new Cli(undefined, mockService({ uninstall }));
+		const cli = new Cli(undefined, undefined, mockService({ uninstall }));
 		cli.service("uninstall");
 		expect(uninstall).toHaveBeenCalled();
 	});
 
 	it("runs start action", () => {
 		const start = mock(() => "tail -f /logs");
-		const cli = new Cli(undefined, mockService({ start }));
+		const cli = new Cli(undefined, undefined, mockService({ start }));
 		cli.service("start");
 		expect(start).toHaveBeenCalled();
 	});
 
 	it("runs stop action", () => {
 		const stop = mock(() => {});
-		const cli = new Cli(undefined, mockService({ stop }));
+		const cli = new Cli(undefined, undefined, mockService({ stop }));
 		cli.service("stop");
 		expect(stop).toHaveBeenCalled();
 	});
 
 	it("runs update action", () => {
 		const update = mock(() => "tail -f /logs");
-		const cli = new Cli(undefined, mockService({ update }));
+		const cli = new Cli(undefined, undefined, mockService({ update }));
 		cli.service("update");
 		expect(update).toHaveBeenCalled();
 	});
 
 	it("runs status action", () => {
 		const status = mock(() => ({ installed: true, running: true, platform: "systemd" as const, pid: 42, uptime: "Thu 2026-03-12 10:00:00 UTC" }));
-		const cli = new Cli(undefined, mockService({ status }));
+		const cli = new Cli(undefined, undefined, mockService({ status }));
 		cli.service("status");
 		expect(status).toHaveBeenCalled();
 	});
 
 	it("runs logs action", () => {
 		const logs = mock(() => "journalctl -u macroclaw -n 50 --no-pager");
-		const cli = new Cli(undefined, mockService({ logs }));
+		const cli = new Cli(undefined, undefined, mockService({ logs }));
 		cli.service("logs");
 		expect(logs).toHaveBeenCalledWith(undefined);
 	});
 
 	it("passes follow flag to logs action", () => {
 		const logs = mock(() => "journalctl -u macroclaw -f");
-		const cli = new Cli(undefined, mockService({ logs }));
+		const cli = new Cli(undefined, undefined, mockService({ logs }));
 		cli.service("logs", undefined, true);
 		expect(logs).toHaveBeenCalledWith(true);
 	});
 
 	it("throws for unknown action", () => {
-		const cli = new Cli(undefined, mockService());
+		const cli = new Cli(undefined, undefined, mockService());
 		expect(() => cli.service("bogus")).toThrow("Unknown service action: bogus");
 	});
 
 	it("throws service errors", () => {
-		const cli = new Cli(undefined, mockService({ install: () => { throw new Error("Settings not found."); } }));
+		const cli = new Cli(undefined, undefined, mockService({ install: () => { throw new Error("Settings not found."); } }));
 		expect(() => cli.service("install")).toThrow("Settings not found.");
 	});
 });
@@ -201,9 +195,7 @@ describe("Cli.claude", () => {
 		let capturedOpts: any = {};
 		const exec = mock((cmd: string, opts: object) => { capturedCmd = cmd; capturedOpts = opts; });
 
-		const deps = createMockSetupDeps();
-		deps.resolveDir = () => dir;
-		const cli = new Cli(deps);
+		const cli = new Cli(undefined, new SettingsManager(dir));
 		cli.claude(exec);
 
 		fs.rmSync(dir, { recursive: true });
@@ -224,9 +216,7 @@ describe("Cli.claude", () => {
 		let capturedCmd = "";
 		const exec = mock((cmd: string, _opts: object) => { capturedCmd = cmd; });
 
-		const deps = createMockSetupDeps();
-		deps.resolveDir = () => dir;
-		const cli = new Cli(deps);
+		const cli = new Cli(undefined, new SettingsManager(dir));
 		cli.claude(exec);
 
 		fs.rmSync(dir, { recursive: true });
@@ -234,51 +224,14 @@ describe("Cli.claude", () => {
 		expect(capturedCmd).toBe("claude --model sonnet");
 	});
 
-	it("throws when settings are missing", () => {
-		const deps = createMockSetupDeps();
-		deps.resolveDir = () => "/nonexistent/path";
-		const cli = new Cli(deps);
-		expect(() => cli.claude(mock())).toThrow("Settings not found");
-	});
-});
-
-describe("loadRawSettings", () => {
-	it("returns null when file does not exist", () => {
-		expect(loadRawSettings("/nonexistent/path")).toBeNull();
-	});
-
-	it("reads and parses valid settings file", async () => {
-		const dir = await import("node:fs").then(fs => {
-			const d = `/tmp/macroclaw-test-${Date.now()}`;
-			fs.mkdirSync(d, { recursive: true });
-			fs.writeFileSync(`${d}/settings.json`, JSON.stringify({ botToken: "tok", chatId: "123" }));
-			return d;
-		});
-		const result = loadRawSettings(dir);
-		expect(result).toEqual({ botToken: "tok", chatId: "123" });
-		await import("node:fs").then(fs => fs.rmSync(dir, { recursive: true }));
-	});
-
-	it("returns null for invalid JSON", async () => {
-		const dir = await import("node:fs").then(fs => {
-			const d = `/tmp/macroclaw-test-${Date.now()}`;
-			fs.mkdirSync(d, { recursive: true });
-			fs.writeFileSync(`${d}/settings.json`, "not json");
-			return d;
-		});
-		expect(loadRawSettings(dir)).toBeNull();
-		await import("node:fs").then(fs => fs.rmSync(dir, { recursive: true }));
-	});
-
-	it("returns null for non-object JSON", async () => {
-		const dir = await import("node:fs").then(fs => {
-			const d = `/tmp/macroclaw-test-${Date.now()}`;
-			fs.mkdirSync(d, { recursive: true });
-			fs.writeFileSync(`${d}/settings.json`, '"just a string"');
-			return d;
-		});
-		expect(loadRawSettings(dir)).toBeNull();
-		await import("node:fs").then(fs => fs.rmSync(dir, { recursive: true }));
+	it("exits when settings are missing", () => {
+		const mockExit = mock((_code?: number) => { throw new Error("exit"); });
+		const origExit = process.exit;
+		process.exit = mockExit as typeof process.exit;
+		const cli = new Cli(undefined, new SettingsManager("/nonexistent/path"));
+		expect(() => cli.claude(mock())).toThrow("exit");
+		process.exit = origExit;
+		expect(mockExit).toHaveBeenCalledWith(1);
 	});
 });
 

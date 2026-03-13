@@ -47,7 +47,7 @@ export function saveSettings(settings: Settings, dir: string = defaultDir): void
 
 // --- Env var overrides ---
 
-const envMapping: Record<keyof Settings, string> = {
+export const settingsEnvMapping: Record<keyof Settings, string> = {
   botToken: "TELEGRAM_BOT_TOKEN",
   chatId: "AUTHORIZED_CHAT_ID",
   model: "MODEL",
@@ -61,7 +61,7 @@ export function applyEnvOverrides(settings: Settings): { settings: Settings; ove
   const merged = { ...settings };
   const overrides = new Set<string>();
 
-  for (const [key, envVar] of Object.entries(envMapping)) {
+  for (const [key, envVar] of Object.entries(settingsEnvMapping)) {
     const value = process.env[envVar];
     if (value !== undefined) {
       (merged as Record<string, unknown>)[key] = value;
@@ -84,7 +84,7 @@ export function maskValue(key: string, value: string | undefined): string {
 
 export function printSettings(settings: Settings, overrides: Set<string>): void {
   const lines = ["Settings:"];
-  for (const key of Object.keys(envMapping) as (keyof Settings)[]) {
+  for (const key of Object.keys(settingsEnvMapping) as (keyof Settings)[]) {
     const value = settings[key];
     const masked = maskValue(key, value);
     const suffix = overrides.has(key) ? " (env)" : "";

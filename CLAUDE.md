@@ -18,9 +18,10 @@ bun run lint       # Run biome linter
 bun run lint:fix   # Auto-fix lint issues
 ```
 
-`bun run check` chains `tsc && biome check && bun test && depcheck`. It exits
-non-zero if **any** step fails — including coverage thresholds. Always check the
-actual output to identify which step failed rather than assuming tests broke.
+`bun run check` chains `tsc && biome check && bun test && depcheck`. **You must
+verify exit code 0** — a non-zero exit means something failed (typecheck, lint,
+tests, coverage threshold, or dependency rules). Check the output to identify
+which step failed. Do not commit if exit code is non-zero.
 
 ## Debugging
 
