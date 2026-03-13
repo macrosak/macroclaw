@@ -120,7 +120,7 @@ export class App {
     this.#bot.on("message:voice", async (ctx) => {
       if (ctx.chat.id.toString() !== this.#config.authorizedChatId) return;
       if (!this.#config.stt) {
-        await sendResponse(this.#bot, this.#config.authorizedChatId, "[Voice messages not available — set OPENAI_API_KEY to enable]");
+        await sendResponse(this.#bot, this.#config.authorizedChatId, "[Voice messages not available — set openaiApiKey in settings to enable]");
         return;
       }
       try {

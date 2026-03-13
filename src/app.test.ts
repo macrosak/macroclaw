@@ -447,7 +447,7 @@ describe("App", () => {
       });
 
       const sendCalls = (bot.api.sendMessage as any).mock.calls;
-      const call = sendCalls.find((c: any) => c[1].includes("OPENAI_API_KEY"));
+      const call = sendCalls.find((c: any) => c[1].includes("openaiApiKey"));
       expect(call).toBeDefined();
       expect((config.claude as Claude & { calls: CallInfo[] }).calls).toHaveLength(0);
     });
