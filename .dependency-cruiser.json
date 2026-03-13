@@ -15,11 +15,11 @@
       "to": { "path": "^src/claude\\.ts$" }
     },
     {
-      "name": "no-stt-outside-app",
-      "comment": "STT is an I/O detail — only app.ts may import stt.ts",
+      "name": "no-stt-outside-app-index",
+      "comment": "STT is an I/O detail — only app.ts and index.ts may import speech-to-text.ts",
       "severity": "error",
-      "from": { "path": "^src/(?!app\\.ts$)", "pathNot": "\\.test\\.ts$" },
-      "to": { "path": "^src/stt\\.ts$" }
+      "from": { "path": "^src/(?!app\\.ts$|index\\.ts$)", "pathNot": "\\.test\\.ts$" },
+      "to": { "path": "^src/speech-to-text\\.ts$" }
     },
     {
       "name": "no-import-from-entrypoints",

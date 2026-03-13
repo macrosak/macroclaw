@@ -3,6 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { App, type AppConfig } from "./app";
 import { createLogger, initLogger } from "./logger";
 import { applyEnvOverrides, loadSettings, printSettings } from "./settings";
+import { SpeechToText } from "./speech-to-text";
 
 export async function start(): Promise<void> {
   const log = createLogger("index");
@@ -42,6 +43,7 @@ export async function start(): Promise<void> {
     authorizedChatId: resolved.chatId,
     workspace,
     model: resolved.model,
+    stt: resolved.openaiApiKey ? new SpeechToText(resolved.openaiApiKey) : undefined,
   };
 
   new App(config).start();

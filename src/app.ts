@@ -2,7 +2,7 @@ import type { Bot } from "grammy";
 import { CronScheduler } from "./cron";
 import { createLogger } from "./logger";
 import { type Claude, Orchestrator, type OrchestratorResponse } from "./orchestrator";
-import { isAvailable as isSttAvailable, transcribe } from "./stt";
+import type { SpeechToText } from "./speech-to-text";
 import { createBot, downloadFile, sendFile, sendResponse } from "./telegram";
 
 const log = createLogger("app");
@@ -14,6 +14,7 @@ export interface AppConfig {
   model?: string;
   settingsDir?: string;
   claude?: Claude;
+  stt?: SpeechToText;
 }
 
 export class App {
@@ -118,13 +119,13 @@ export class App {
 
     this.#bot.on("message:voice", async (ctx) => {
       if (ctx.chat.id.toString() !== this.#config.authorizedChatId) return;
-      if (!isSttAvailable()) {
+      if (!this.#config.stt) {
         await sendResponse(this.#bot, this.#config.authorizedChatId, "[Voice messages not available — set OPENAI_API_KEY to enable]");
         return;
       }
       try {
         const path = await downloadFile(this.#bot, ctx.message.voice.file_id, this.#config.botToken, "voice.ogg");
-        const text = await transcribe(path);
+        const text = await this.#config.stt.transcribe(path);
         if (!text.trim()) {
           await sendResponse(this.#bot, this.#config.authorizedChatId, "[Could not understand audio]");
           return;
