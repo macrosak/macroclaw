@@ -54,9 +54,15 @@ export async function runSetupWizard(io: SetupIO, opts?: { defaults?: SetupDefau
   const resolve = opts?.resolveClaude ?? resolveClaudePath;
   resolve();
 
-  write("\n=== Macroclaw Setup ===\n\n");
+  write("\n=== Macroclaw ===\n\n");
+  write("Personal AI assistant, powered by Claude Code, delivered through Telegram.\n\n");
+  write("=== Setup ===\n\n");
 
   // Bot token
+  write("First, set up a Telegram bot:\n");
+  write("  1. Open Telegram and message @BotFather\n");
+  write("  2. Send /newbot and follow the instructions\n");
+  write("  3. Copy the token it gives you (looks like 123456:ABC-DEF...)\n\n");
   const defaultToken = prev.botToken || process.env.TELEGRAM_BOT_TOKEN || "";
   const tokenPrompt = defaultToken ? `Bot token [${maskValue("botToken", defaultToken)}]: ` : "Bot token: ";
   let botToken = await ask(tokenPrompt) || defaultToken;
@@ -100,8 +106,8 @@ export async function runSetupWizard(io: SetupIO, opts?: { defaults?: SetupDefau
   const workspace = await ask(`Workspace [${defaultWorkspace}]: `) || defaultWorkspace;
 
   // OpenAI API key
-  write("\nOpenAI API key is used for voice message transcription (Whisper).\n");
-  write("Without it, voice messages will be ignored.\n\n");
+  write("\nMacroclaw uses OpenAI's Whisper API to transcribe voice messages.\n");
+  write("Without this key, voice messages will be ignored.\n\n");
   const defaultOpenai = prev.openaiApiKey || process.env.OPENAI_API_KEY || "";
   const openaiPrompt = defaultOpenai ? `OpenAI API key [${maskValue("openaiApiKey", defaultOpenai)}] (optional): ` : "OpenAI API key (optional): ";
   const openaiApiKey = await ask(openaiPrompt) || defaultOpenai || undefined;
