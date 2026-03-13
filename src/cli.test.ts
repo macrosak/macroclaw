@@ -1,9 +1,9 @@
 import { describe, expect, it, mock } from "bun:test";
 import { runCommand } from "citty";
 import { Cli, createReadlineIo, handleError } from "./cli";
-import type { SystemService } from "./service";
 import { SettingsManager } from "./settings";
 import type { SetupWizard } from "./setup";
+import type { SystemServiceManager } from "./system-service";
 
 // Only mock ./index — safe since no other test imports it
 const mockStart = mock(async () => {});
@@ -109,7 +109,7 @@ describe("Cli.setup", () => {
 	});
 });
 
-function mockService(overrides?: Partial<SystemService>): SystemService {
+function mockService(overrides?: Record<string, unknown>): SystemServiceManager {
 	return {
 		install: mock(() => ""),
 		uninstall: mock(() => {}),
@@ -119,7 +119,7 @@ function mockService(overrides?: Partial<SystemService>): SystemService {
 		status: mock(() => ({ installed: false, running: false, platform: "systemd" as const })),
 		logs: mock(() => "journalctl -u macroclaw -n 50 --no-pager"),
 		...overrides,
-	};
+	} as unknown as SystemServiceManager;
 }
 
 describe("Cli.service", () => {
