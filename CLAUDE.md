@@ -12,11 +12,15 @@ Telegram-to-Claude-Code bridge. Bun + Grammy.
 bun install        # Install dependencies
 bun run dev        # Start with watch mode
 bun run start      # Start normally
-bun run check      # Typecheck + lint + tests (run before committing)
-bun test           # Run tests (100% coverage enforced)
+bun run check      # Typecheck + lint + tests + depcheck (run before committing)
+bun test           # Run tests (100% line coverage enforced)
 bun run lint       # Run biome linter
 bun run lint:fix   # Auto-fix lint issues
 ```
+
+`bun run check` chains `tsc && biome check && bun test && depcheck`. It exits
+non-zero if **any** step fails — including coverage thresholds. Always check the
+actual output to identify which step failed rather than assuming tests broke.
 
 ## Debugging
 
@@ -91,3 +95,4 @@ App (app.ts)                        — I/O layer: Telegram + Cron
 - Follow-up fixes can happen after the main implementation
 - Always run `bun run check` before committing (typecheck + lint + tests)
 - **Always use PRs.** Never commit directly to `main`. Before implementing anything, ensure `main` is clean and up to date with `origin/main`, then create a feature branch off it. Open a PR when the work is ready.
+- **Always read all comments** when viewing a GitHub issue or PR — comments often contain the actual implementation spec or important context not in the original description.
