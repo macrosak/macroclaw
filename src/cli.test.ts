@@ -9,6 +9,13 @@ import type { SetupWizard } from "./setup";
 const mockStart = mock(async () => {});
 mock.module("./index", () => ({ start: mockStart }));
 
+// Mock child_process so cli.claude() doesn't spawn real processes
+const mockExecSync = mock((_cmd: string, _opts?: object) => "");
+mock.module("node:child_process", () => ({
+	execSync: mockExecSync,
+	execFileSync: () => "",
+}));
+
 const { main } = await import("./cli");
 
 function createMockWizard(overrides?: { collectSettings?: (defaults?: Record<string, unknown>) => Promise<unknown>; installService?: () => Promise<void> }) {
@@ -191,19 +198,18 @@ describe("Cli.claude", () => {
 		fs.writeFileSync(`${dir}/settings.json`, JSON.stringify({ botToken: "tok", chatId: "123", model: "opus", workspace: "/tmp" }));
 		fs.writeFileSync(`${dir}/sessions.json`, JSON.stringify({ mainSessionId: "sess-123" }));
 
-		let capturedCmd = "";
-		let capturedOpts: any = {};
-		const exec = mock((cmd: string, opts: object) => { capturedCmd = cmd; capturedOpts = opts; });
-
+		mockExecSync.mockClear();
 		const cli = new Cli({ settings: new SettingsManager(dir) });
-		cli.claude(exec);
+		cli.claude();
 
 		fs.rmSync(dir, { recursive: true });
 
-		expect(capturedCmd).toBe("claude --resume sess-123 --model opus");
-		expect(capturedOpts.cwd).toBe("/tmp");
-		expect(capturedOpts.stdio).toBe("inherit");
-		expect(capturedOpts.env.CLAUDECODE).toBe("");
+		expect(mockExecSync).toHaveBeenCalledWith(
+			"claude --resume sess-123 --model opus",
+			expect.objectContaining({ cwd: "/tmp", stdio: "inherit" }),
+		);
+		const opts = mockExecSync.mock.calls[0][1] as { env: Record<string, string> };
+		expect(opts.env.CLAUDECODE).toBe("");
 	});
 
 	it("omits --resume when no session exists", async () => {
@@ -213,15 +219,16 @@ describe("Cli.claude", () => {
 		fs.writeFileSync(`${dir}/settings.json`, JSON.stringify({ botToken: "tok", chatId: "123", model: "sonnet", workspace: "/tmp" }));
 		fs.writeFileSync(`${dir}/sessions.json`, JSON.stringify({}));
 
-		let capturedCmd = "";
-		const exec = mock((cmd: string, _opts: object) => { capturedCmd = cmd; });
-
+		mockExecSync.mockClear();
 		const cli = new Cli({ settings: new SettingsManager(dir) });
-		cli.claude(exec);
+		cli.claude();
 
 		fs.rmSync(dir, { recursive: true });
 
-		expect(capturedCmd).toBe("claude --model sonnet");
+		expect(mockExecSync).toHaveBeenCalledWith(
+			"claude --model sonnet",
+			expect.objectContaining({ cwd: "/tmp", stdio: "inherit" }),
+		);
 	});
 
 	it("exits when settings are missing", () => {
@@ -229,7 +236,7 @@ describe("Cli.claude", () => {
 		const origExit = process.exit;
 		process.exit = mockExit as typeof process.exit;
 		const cli = new Cli({ settings: new SettingsManager("/nonexistent/path") });
-		expect(() => cli.claude(mock())).toThrow("exit");
+		expect(() => cli.claude()).toThrow("exit");
 		process.exit = origExit;
 		expect(mockExit).toHaveBeenCalledWith(1);
 	});

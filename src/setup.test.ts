@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import type { SetupIo } from "./setup";
 
 // Mock child_process so resolveClaudePath doesn't hit real `which`
+const mockExecSync = mock((_cmd: string, _opts?: object) => "/mock/bin/claude\n");
 mock.module("node:child_process", () => ({
-  execSync: (_cmd: string) => "/mock/bin/claude\n",
+  execSync: mockExecSync,
 }));
 
 // Mock Grammy Bot
@@ -55,7 +56,7 @@ function createMockServiceInstaller() {
   };
 }
 
-const { resolveClaudePath, SetupWizard } = await import("./setup");
+const { SetupWizard } = await import("./setup");
 
 async function runSetup(io: SetupIo, opts?: ConstructorParameters<typeof SetupWizard>[1]) {
   const wizard = new SetupWizard(io, opts);
@@ -86,6 +87,7 @@ beforeEach(() => {
     savedEnv[v] = process.env[v];
     delete process.env[v];
   }
+  mockExecSync.mockImplementation((_cmd: string, _opts?: object) => "/mock/bin/claude\n");
   mockBotInit.mockImplementation(async () => {});
   mockBotStart.mockClear();
   mockBotStop.mockClear();
@@ -382,20 +384,11 @@ it("installs service when user answers yes", async () => {
   });
 
   it("fails fast when claude CLI is not found", async () => {
+    mockExecSync.mockImplementation(() => { throw new Error("not found"); });
     const io = createMockIO([]);
     await expect(
-      runSetup(io, { resolveClaude: () => { throw new Error("Claude Code CLI not found."); } }),
+      runSetup(io),
     ).rejects.toThrow("Claude Code CLI not found.");
   });
 
-  it("resolveClaudePath returns trimmed path on success", () => {
-    const result = resolveClaudePath(() => "/usr/local/bin/claude\n");
-    expect(result).toBe("/usr/local/bin/claude");
-  });
-
-  it("resolveClaudePath throws when claude is not found", () => {
-    expect(() => resolveClaudePath(() => { throw new Error("not found"); })).toThrow(
-      "Claude Code CLI not found.",
-    );
-  });
 });

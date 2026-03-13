@@ -25,13 +25,13 @@ export class Cli {
 		await this.#setupWizard.installService();
 	}
 
-	claude(exec: (cmd: string, opts: object) => void = (cmd, opts) => execSync(cmd, opts)): void {
+	claude(): void {
 		const settings = this.#settingsManager.load();
 		const sessions = loadSessions(this.#settingsManager.dir);
 		const args = ["claude"];
 		if (sessions.mainSessionId) args.push("--resume", sessions.mainSessionId);
 		args.push("--model", settings.model);
-		exec(args.join(" "), { cwd: settings.workspace, stdio: "inherit", env: { ...process.env, CLAUDECODE: "" } });
+		execSync(args.join(" "), { cwd: settings.workspace, stdio: "inherit", env: { ...process.env, CLAUDECODE: "" } });
 	}
 
 	service(action: string, token?: string, follow?: boolean): void {
