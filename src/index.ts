@@ -1,7 +1,7 @@
 import { cpSync, existsSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { App, type AppConfig } from "./app";
-import { createLogger, initLogger } from "./logger";
+import { configureLogger, createLogger } from "./logger";
 import { SettingsManager } from "./settings";
 import { SpeechToText } from "./speech-to-text";
 
@@ -12,7 +12,7 @@ export async function start(): Promise<void> {
   const settings = mgr.load();
   const { settings: resolved, overrides } = mgr.applyEnvOverrides(settings);
 
-  await initLogger({ level: resolved.logLevel, pinoramaUrl: resolved.pinoramaUrl });
+  await configureLogger({ level: resolved.logLevel, pinoramaUrl: resolved.pinoramaUrl });
   mgr.print(resolved, overrides);
 
   const workspace = resolve(resolved.workspace.replace(/^~/, process.env.HOME || "~"));

@@ -23,7 +23,7 @@ export interface LoggerOptions {
 
 let pinoramaAdded = false;
 
-export async function initLogger(opts?: LoggerOptions): Promise<void> {
+export async function configureLogger(opts?: LoggerOptions): Promise<void> {
 	if (opts?.level) logger.level = opts.level;
 
 	if (opts?.pinoramaUrl && !pinoramaAdded) {

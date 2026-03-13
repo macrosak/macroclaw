@@ -6,7 +6,7 @@ mock.module("pinorama-transport", () => ({
   default: mockPinoramaTransport,
 }));
 
-const { createLogger, initLogger } = await import("./logger");
+const { createLogger, configureLogger } = await import("./logger");
 
 describe("createLogger", () => {
   it("returns a pino child logger with module field", () => {
@@ -16,29 +16,29 @@ describe("createLogger", () => {
   });
 });
 
-describe("initLogger", () => {
+describe("configureLogger", () => {
   it("does nothing when called without opts", async () => {
     mockPinoramaTransport.mockClear();
-    await initLogger();
+    await configureLogger();
     expect(mockPinoramaTransport).not.toHaveBeenCalled();
   });
 
   it("sets log level from opts", async () => {
     const log = createLogger("opts-level");
-    await initLogger({ level: "warn" });
+    await configureLogger({ level: "warn" });
     expect(log.level).toBe("warn");
-    await initLogger({ level: "info" }); // restore
+    await configureLogger({ level: "info" }); // restore
   });
 
   it("adds pinorama transport from opts", async () => {
     mockPinoramaTransport.mockClear();
-    await initLogger({ pinoramaUrl: "http://example.com/pinorama" });
+    await configureLogger({ pinoramaUrl: "http://example.com/pinorama" });
     expect(mockPinoramaTransport).toHaveBeenCalledWith({ url: "http://example.com/pinorama" });
   });
 
   it("does not add duplicate pinorama transport on second call", async () => {
     mockPinoramaTransport.mockClear();
-    await initLogger({ pinoramaUrl: "http://example.com/pinorama" });
+    await configureLogger({ pinoramaUrl: "http://example.com/pinorama" });
     expect(mockPinoramaTransport).not.toHaveBeenCalled();
   });
 });
