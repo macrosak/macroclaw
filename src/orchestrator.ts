@@ -170,9 +170,10 @@ export class Orchestrator {
     this.#callOnResponse({ message: `Peeking at <b>${escapeHtml(agent.name)}</b>...` });
 
     try {
+      const startedAt = agent.query.startedAt.toISOString();
       const query = this.#claude.forkSession(
         sessionId,
-        "Give a brief status update: what has been done so far, what's currently happening, and what's remaining. 2-3 sentences max.",
+        `This session started at ${startedAt}. Only consider events after that time. Give a brief status update: what has been done so far, what's currently happening, and what's remaining. 2-3 sentences max.`,
         textResultType,
         { model: "haiku" },
       );
