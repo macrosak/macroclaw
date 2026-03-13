@@ -118,7 +118,7 @@ Macroclaw follows a **thin platform, rich workspace** design:
 **Workspace** — the intelligence layer, initialized from [`workspace-template/`](workspace-template/):
 - [`CLAUDE.md`](workspace-template/CLAUDE.md) — agent behavior, conventions, response style
 - [`.claude/skills/`](workspace-template/.claude/skills/) — teachable capabilities
-- [`.macroclaw/cron.json`](workspace-template/.macroclaw/cron.json) — scheduled job definitions
+- [`.macroclaw/schedule.json`](workspace-template/.macroclaw/schedule.json) — scheduled event definitions
 - [`MEMORY.md`](workspace-template/MEMORY.md) — persistent memory
 
 ### Where does a new feature belong?
