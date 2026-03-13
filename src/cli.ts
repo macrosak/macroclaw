@@ -12,10 +12,10 @@ export class Cli {
 	readonly #setupWizard: SetupWizard;
 	readonly #serviceManager: SystemService;
 
-	constructor(wizard?: SetupWizard, settings?: SettingsManager, systemService?: SystemService) {
-		this.#settingsManager = settings ?? new SettingsManager();
-		this.#setupWizard = wizard ?? new SetupWizard(createReadlineIo());
-		this.#serviceManager = systemService ?? new ServiceManager();
+	constructor(opts?: { wizard?: SetupWizard; settings?: SettingsManager; systemService?: SystemService }) {
+		this.#settingsManager = opts?.settings ?? new SettingsManager();
+		this.#setupWizard = opts?.wizard ?? new SetupWizard(createReadlineIo());
+		this.#serviceManager = opts?.systemService ?? new ServiceManager();
 	}
 
 	async setup(): Promise<void> {

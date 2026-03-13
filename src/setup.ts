@@ -18,13 +18,6 @@ export interface ServiceInstaller {
   install: (oauthToken?: string) => string;
 }
 
-export interface SetupOpts {
-  serviceInstaller?: ServiceInstaller;
-  resolveClaude?: () => string;
-  platform?: string;
-  startBot?: (token: string) => Promise<Bot>;
-}
-
 async function startSetupBot(token: string): Promise<Bot> {
   const bot = new Bot(token);
   bot.command("chatid", (ctx) => {
@@ -57,7 +50,12 @@ export class SetupWizard {
   readonly #startBot: (token: string) => Promise<Bot>;
   #defaults: Record<string, unknown> = {};
 
-  constructor(io: SetupIo, opts?: SetupOpts) {
+  constructor(io: SetupIo, opts?: {
+    serviceInstaller?: ServiceInstaller;
+    resolveClaude?: () => string;
+    platform?: string;
+    startBot?: (token: string) => Promise<Bot>;
+  }) {
     this.#io = io;
     this.#resolveClaude = opts?.resolveClaude ?? resolveClaudePath;
     this.#serviceInstaller = opts?.serviceInstaller;

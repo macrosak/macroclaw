@@ -62,7 +62,7 @@ describe("Cli.setup", () => {
 	it("runs wizard and saves settings", async () => {
 		const wizard = createMockWizard();
 		const settings = createMockSettings();
-		const cli = new Cli(wizard, settings);
+		const cli = new Cli({ wizard, settings });
 		await cli.setup();
 		expect((settings.save as ReturnType<typeof mock>)).toHaveBeenCalledWith({ botToken: "tok", chatId: "123" });
 	});
@@ -74,21 +74,21 @@ describe("Cli.setup", () => {
 			collectSettings: async (defaults) => { receivedDefaults = defaults; return { botToken: "tok", chatId: "123" }; },
 		});
 		const settings = createMockSettings({ loadRaw: () => existing } as unknown as Partial<SettingsManager>);
-		const cli = new Cli(wizard, settings);
+		const cli = new Cli({ wizard, settings });
 		await cli.setup();
 		expect(receivedDefaults).toEqual(existing);
 	});
 
 	it("wizard manages io lifecycle internally", async () => {
 		const wizard = createMockWizard();
-		const cli = new Cli(wizard, createMockSettings());
+		const cli = new Cli({ wizard, settings: createMockSettings() });
 		await cli.setup();
 		expect((wizard.collectSettings as ReturnType<typeof mock>)).toHaveBeenCalled();
 		expect((wizard.installService as ReturnType<typeof mock>)).toHaveBeenCalled();
 	});
 
 	it("creates default wizard when none provided", () => {
-		const cli = new Cli(undefined, createMockSettings());
+		const cli = new Cli({ settings: createMockSettings() });
 		expect(cli).toBeDefined();
 	});
 
@@ -118,67 +118,67 @@ function mockService(overrides?: Partial<SystemService>): SystemService {
 describe("Cli.service", () => {
 	it("runs install action", () => {
 		const install = mock(() => "tail -f /logs");
-		const cli = new Cli(undefined, undefined, mockService({ install }));
+		const cli = new Cli({ systemService: mockService({ install }) });
 		cli.service("install");
 		expect(install).toHaveBeenCalled();
 	});
 
 	it("runs uninstall action", () => {
 		const uninstall = mock(() => {});
-		const cli = new Cli(undefined, undefined, mockService({ uninstall }));
+		const cli = new Cli({ systemService: mockService({ uninstall }) });
 		cli.service("uninstall");
 		expect(uninstall).toHaveBeenCalled();
 	});
 
 	it("runs start action", () => {
 		const start = mock(() => "tail -f /logs");
-		const cli = new Cli(undefined, undefined, mockService({ start }));
+		const cli = new Cli({ systemService: mockService({ start }) });
 		cli.service("start");
 		expect(start).toHaveBeenCalled();
 	});
 
 	it("runs stop action", () => {
 		const stop = mock(() => {});
-		const cli = new Cli(undefined, undefined, mockService({ stop }));
+		const cli = new Cli({ systemService: mockService({ stop }) });
 		cli.service("stop");
 		expect(stop).toHaveBeenCalled();
 	});
 
 	it("runs update action", () => {
 		const update = mock(() => "tail -f /logs");
-		const cli = new Cli(undefined, undefined, mockService({ update }));
+		const cli = new Cli({ systemService: mockService({ update }) });
 		cli.service("update");
 		expect(update).toHaveBeenCalled();
 	});
 
 	it("runs status action", () => {
 		const status = mock(() => ({ installed: true, running: true, platform: "systemd" as const, pid: 42, uptime: "Thu 2026-03-12 10:00:00 UTC" }));
-		const cli = new Cli(undefined, undefined, mockService({ status }));
+		const cli = new Cli({ systemService: mockService({ status }) });
 		cli.service("status");
 		expect(status).toHaveBeenCalled();
 	});
 
 	it("runs logs action", () => {
 		const logs = mock(() => "journalctl -u macroclaw -n 50 --no-pager");
-		const cli = new Cli(undefined, undefined, mockService({ logs }));
+		const cli = new Cli({ systemService: mockService({ logs }) });
 		cli.service("logs");
 		expect(logs).toHaveBeenCalledWith(undefined);
 	});
 
 	it("passes follow flag to logs action", () => {
 		const logs = mock(() => "journalctl -u macroclaw -f");
-		const cli = new Cli(undefined, undefined, mockService({ logs }));
+		const cli = new Cli({ systemService: mockService({ logs }) });
 		cli.service("logs", undefined, true);
 		expect(logs).toHaveBeenCalledWith(true);
 	});
 
 	it("throws for unknown action", () => {
-		const cli = new Cli(undefined, undefined, mockService());
+		const cli = new Cli({ systemService: mockService() });
 		expect(() => cli.service("bogus")).toThrow("Unknown service action: bogus");
 	});
 
 	it("throws service errors", () => {
-		const cli = new Cli(undefined, undefined, mockService({ install: () => { throw new Error("Settings not found."); } }));
+		const cli = new Cli({ systemService: mockService({ install: () => { throw new Error("Settings not found."); } }) });
 		expect(() => cli.service("install")).toThrow("Settings not found.");
 	});
 });
@@ -195,7 +195,7 @@ describe("Cli.claude", () => {
 		let capturedOpts: any = {};
 		const exec = mock((cmd: string, opts: object) => { capturedCmd = cmd; capturedOpts = opts; });
 
-		const cli = new Cli(undefined, new SettingsManager(dir));
+		const cli = new Cli({ settings: new SettingsManager(dir) });
 		cli.claude(exec);
 
 		fs.rmSync(dir, { recursive: true });
@@ -216,7 +216,7 @@ describe("Cli.claude", () => {
 		let capturedCmd = "";
 		const exec = mock((cmd: string, _opts: object) => { capturedCmd = cmd; });
 
-		const cli = new Cli(undefined, new SettingsManager(dir));
+		const cli = new Cli({ settings: new SettingsManager(dir) });
 		cli.claude(exec);
 
 		fs.rmSync(dir, { recursive: true });
@@ -228,7 +228,7 @@ describe("Cli.claude", () => {
 		const mockExit = mock((_code?: number) => { throw new Error("exit"); });
 		const origExit = process.exit;
 		process.exit = mockExit as typeof process.exit;
-		const cli = new Cli(undefined, new SettingsManager("/nonexistent/path"));
+		const cli = new Cli({ settings: new SettingsManager("/nonexistent/path") });
 		expect(() => cli.claude(mock())).toThrow("exit");
 		process.exit = origExit;
 		expect(mockExit).toHaveBeenCalledWith(1);
