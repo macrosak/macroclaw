@@ -57,14 +57,14 @@ Don't ask permission. Just do it.
   - bullet points (plain text bullet character)
   - No markdown syntax. No # headings. No [links](url). No *stars*.
 
-## Cron Jobs
+## Scheduled Events
 
-Messages prefixed with `[Tool: cron/<name>]` are automated. The agent decides whether to respond:
+Messages prefixed with `[Context: cron/<name>]` are automated scheduled events. The agent decides whether to respond:
 
 - **action: "send"** — the response goes to Telegram
 - **action: "silent"** — the response is logged but not sent
 
-Use `silent` when a cron check finds nothing new. Only send when there's something worth reading.
+Use `silent` when a scheduled check finds nothing new. Only send when there's something worth reading.
 
 ## Skills
 
@@ -86,7 +86,7 @@ When creating new skills, always put them in `.claude/skills/` within this works
 Structure:
 - `.claude/skills/` — local agent skills
 - `memory/` — daily logs (YYYY-MM-DD.md)
-- `.macroclaw/cron.json` — scheduled jobs (hot-reloaded, no restart needed) (use add-cron skill to modify)
+- `.macroclaw/schedule.json` — scheduled events and reminders (hot-reloaded, no restart needed) (use schedule skill to modify)
 
 ## Safety
 

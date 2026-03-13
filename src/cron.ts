@@ -25,15 +25,16 @@ export interface CronSchedulerConfig {
 }
 
 const TICK_INTERVAL = 10_000; // 10 seconds
+const MISSED_THRESHOLD = 3_600_000; // 60 minutes
 
 export class CronScheduler {
   #lastMinute = -1;
-  #cronPath: string;
+  #schedulePath: string;
   #config: CronSchedulerConfig;
   #timer: Timer | null = null;
 
   constructor(workspace: string, config: CronSchedulerConfig) {
-    this.#cronPath = join(workspace, ".macroclaw", "cron.json");
+    this.#schedulePath = join(workspace, ".macroclaw", "schedule.json");
     this.#config = config;
   }
 
@@ -59,16 +60,16 @@ export class CronScheduler {
 
     let config: CronConfig;
     try {
-      const raw = readFileSync(this.#cronPath, "utf-8");
+      const raw = readFileSync(this.#schedulePath, "utf-8");
       const parsed = cronConfigSchema.safeParse(JSON.parse(raw));
       if (!parsed.success) {
-        log.warn("cron.json: 'jobs' is not an array");
+        log.warn("schedule.json: 'jobs' is not an array");
         return;
       }
       config = parsed.data;
     } catch (err) {
       if (err instanceof Error && "code" in err && err.code === "ENOENT") return;
-      log.warn({ err: err instanceof Error ? err.message : err }, "Failed to read cron.json");
+      log.warn({ err: err instanceof Error ? err.message : err }, "Failed to read schedule.json");
       return;
     }
 
@@ -87,6 +88,14 @@ export class CronScheduler {
           if (job.recurring === false) {
             firedNonRecurring.push(i);
           }
+        } else if (job.recurring === false && diff < MISSED_THRESHOLD) {
+          // Non-recurring job missed (service was down) — fire with missed prefix
+          const missedMinutes = Math.round(diff / 60_000);
+          const firedAt = prev.toISOString();
+          const missedPrompt = `[missed event, should have fired ${missedMinutes} min ago at ${firedAt}] ${job.prompt}`;
+          log.info({ name: job.name, missedMinutes, firedAt }, "Firing missed non-recurring job");
+          this.#config.onJob(job.name, missedPrompt, job.model);
+          firedNonRecurring.push(i);
         }
       } catch (err) {
         log.warn({ cron: job.cron, err: err instanceof Error ? err.message : err }, "Invalid cron expression");
@@ -99,9 +108,9 @@ export class CronScheduler {
         config.jobs.splice(firedNonRecurring[i], 1);
       }
       try {
-        writeFileSync(this.#cronPath, `${JSON.stringify(config, null, 2)}\n`);
+        writeFileSync(this.#schedulePath, `${JSON.stringify(config, null, 2)}\n`);
       } catch (err) {
-        log.warn({ err: err instanceof Error ? err.message : err }, "Failed to write cron.json");
+        log.warn({ err: err instanceof Error ? err.message : err }, "Failed to write schedule.json");
       }
     }
   }

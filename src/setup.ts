@@ -80,7 +80,7 @@ export class SetupWizard {
 
       // Workspace
       this.#io.write("\nThe workspace directory where Claude Code runs — instructions, skills,\n");
-      this.#io.write("memory, and cron definitions all live here.\n\n");
+      this.#io.write("memory, and scheduled events all live here.\n\n");
       const defaultWorkspace = this.#default("workspace", "~/.macroclaw-workspace");
       const workspace = await this.#askValidated("workspace", `Workspace [${defaultWorkspace}]: `, defaultWorkspace);
 
