@@ -115,7 +115,8 @@ function mockService(overrides?: Record<string, unknown>): SystemServiceManager 
 		uninstall: mock(() => {}),
 		start: mock(() => ""),
 		stop: mock(() => {}),
-		update: mock(() => ""),
+		update: mock(() => ({ previousVersion: "0.6.0", currentVersion: "0.7.0" })),
+		isRunning: false,
 		status: mock(() => ({ installed: false, running: false, platform: "systemd" as const })),
 		logs: mock(() => "journalctl -u macroclaw -n 50 --no-pager"),
 		...overrides,
@@ -151,11 +152,26 @@ describe("Cli.service", () => {
 		expect(stop).toHaveBeenCalled();
 	});
 
-	it("runs update action", () => {
-		const update = mock(() => "tail -f /logs");
-		const cli = new Cli({ systemService: mockService({ update }) });
+	it("runs update action — stops and starts when running", () => {
+		const stop = mock(() => {});
+		const start = mock(() => "tail -f /logs");
+		const update = mock(() => ({ previousVersion: "0.6.0", currentVersion: "0.7.0" }));
+		const cli = new Cli({ systemService: mockService({ stop, start, update, isRunning: true }) });
 		cli.service("update");
+		expect(stop).toHaveBeenCalled();
 		expect(update).toHaveBeenCalled();
+		expect(start).toHaveBeenCalled();
+	});
+
+	it("runs update action — skips stop but still starts when not running", () => {
+		const stop = mock(() => {});
+		const start = mock(() => "tail -f /logs");
+		const update = mock(() => ({ previousVersion: "0.6.0", currentVersion: "0.7.0" }));
+		const cli = new Cli({ systemService: mockService({ stop, start, update, isRunning: false }) });
+		cli.service("update");
+		expect(stop).not.toHaveBeenCalled();
+		expect(update).toHaveBeenCalled();
+		expect(start).toHaveBeenCalled();
 	});
 
 	it("runs status action", () => {

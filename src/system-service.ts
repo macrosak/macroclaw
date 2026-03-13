@@ -24,6 +24,11 @@ export interface ServiceStatus {
 	uptime?: string;
 }
 
+export interface UpdateResult {
+	previousVersion: string;
+	currentVersion: string;
+}
+
 export class SystemServiceManager {
 	readonly #platform: Platform;
 	readonly #home: string;
@@ -179,25 +184,15 @@ export class SystemServiceManager {
 		log.debug("Service stopped");
 	}
 
-	update(): string {
+	update(): UpdateResult {
 		this.#requireInstalled();
 
-		if (this.#platform === "launchd") {
-			if (this.isRunning) {
-				this.#exec(`launchctl unload ${this.serviceFilePath}`);
-			}
-			this.#exec("bun install -g macroclaw@latest");
-			this.#exec(`launchctl load ${this.serviceFilePath}`);
-		} else {
-			if (this.isRunning) {
-				this.#sudo("systemctl stop macroclaw");
-			}
-			this.#exec("bun install -g macroclaw@latest");
-			this.#sudo("systemctl start macroclaw");
-		}
+		const previousVersion = this.#getInstalledVersion();
+		this.#exec("bun install -g macroclaw@latest");
+		const currentVersion = this.#getInstalledVersion();
 
-		log.debug("Service updated (reinstalled, restarted)");
-		return this.#logTailCommand();
+		log.debug({ previousVersion, currentVersion }, "Service updated");
+		return { previousVersion, currentVersion };
 	}
 
 	status(): ServiceStatus {
@@ -259,6 +254,17 @@ export class SystemServiceManager {
 			throw new Error(`Could not find ${binary} in ${binDir}. Is it installed?`);
 		}
 		return binPath;
+	}
+
+
+	#getInstalledVersion(): string {
+		try {
+			const output = this.#exec("bun pm ls -g");
+			const match = /macroclaw@(\S+)/.exec(output);
+			return match?.[1] ?? "unknown";
+		} catch {
+			return "unknown";
+		}
 	}
 
 	#requireInstalled(): void {
