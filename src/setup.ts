@@ -76,7 +76,9 @@ export async function runSetupWizard(io: SetupIO, opts?: { defaults?: SetupDefau
     }
     try {
       setupBot = await startSetupBot(botToken);
-      write(`Bot @${setupBot.botInfo.username} connected. Send /chatid to the bot to get your chat ID.\n`);
+      write(`\nBot @${setupBot.botInfo.username} connected.\n\n`);
+      write("Next, we need a chat ID. Macroclaw only accepts messages from a single\n");
+      write("authorized chat — send /chatid to the bot in Telegram to get yours.\n\n");
       break;
     } catch {
       write("Invalid bot token. Please try again.\n");
