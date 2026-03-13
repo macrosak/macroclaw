@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { applyEnvOverrides, loadSettings, printSettings, type Settings, saveSettings } from "./settings";
+import { type Settings, SettingsManager } from "./settings";
 
 const tmpDir = "/tmp/macroclaw-settings-test";
 
@@ -17,9 +17,14 @@ afterEach(() => {
   if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true });
 });
 
-describe("loadSettings", () => {
-  it("returns null when file does not exist", () => {
-    expect(loadSettings(tmpDir)).toBeNull();
+describe("SettingsManager.load", () => {
+  it("exits when file does not exist", () => {
+    const mockExit = mock((_code?: number) => { throw new Error("exit"); });
+    const origExit = process.exit;
+    process.exit = mockExit as typeof process.exit;
+    expect(() => new SettingsManager(tmpDir).load()).toThrow("exit");
+    process.exit = origExit;
+    expect(mockExit).toHaveBeenCalledWith(1);
   });
 
   it("reads and validates settings from file", () => {
@@ -28,7 +33,7 @@ describe("loadSettings", () => {
       botToken: "123:ABC",
       chatId: "12345678",
     }));
-    const settings = loadSettings(tmpDir);
+    const settings = new SettingsManager(tmpDir).load();
     expect(settings).toEqual({
       botToken: "123:ABC",
       chatId: "12345678",
@@ -49,7 +54,7 @@ describe("loadSettings", () => {
       logLevel: "info",
       pinoramaUrl: "http://localhost:6200",
     }));
-    const settings = loadSettings(tmpDir);
+    const settings = new SettingsManager(tmpDir).load();
     expect(settings).toEqual({
       botToken: "tok",
       chatId: "123",
@@ -70,7 +75,7 @@ describe("loadSettings", () => {
     process.exit = mockExit as any;
 
     try {
-      loadSettings(tmpDir);
+      new SettingsManager(tmpDir).load();
     } catch {
       // expected
     }
@@ -88,7 +93,7 @@ describe("loadSettings", () => {
     process.exit = mockExit as any;
 
     try {
-      loadSettings(tmpDir);
+      new SettingsManager(tmpDir).load();
     } catch {
       // expected
     }
@@ -110,7 +115,7 @@ describe("loadSettings", () => {
     process.exit = mockExit as any;
 
     try {
-      loadSettings(tmpDir);
+      new SettingsManager(tmpDir).load();
     } catch {
       // expected
     }
@@ -120,22 +125,48 @@ describe("loadSettings", () => {
   });
 });
 
-describe("saveSettings", () => {
+describe("SettingsManager.save", () => {
   it("creates directory and writes file", () => {
-    saveSettings(validSettings, tmpDir);
-    const saved = loadSettings(tmpDir);
+    const mgr = new SettingsManager(tmpDir);
+    mgr.save(validSettings);
+    const saved = mgr.load();
     expect(saved).toEqual(validSettings);
   });
 
   it("overwrites existing file", () => {
-    saveSettings(validSettings, tmpDir);
+    const mgr = new SettingsManager(tmpDir);
+    mgr.save(validSettings);
     const updated = { ...validSettings, model: "opus" as const };
-    saveSettings(updated, tmpDir);
-    expect(loadSettings(tmpDir)).toEqual(updated);
+    mgr.save(updated);
+    expect(mgr.load()).toEqual(updated);
   });
 });
 
-describe("applyEnvOverrides", () => {
+describe("SettingsManager.loadRaw", () => {
+  it("returns null when file does not exist", () => {
+    expect(new SettingsManager("/nonexistent/path").loadRaw()).toBeNull();
+  });
+
+  it("reads and parses valid settings file", () => {
+    mkdirSync(tmpDir, { recursive: true });
+    writeFileSync(join(tmpDir, "settings.json"), JSON.stringify({ botToken: "tok", chatId: "123" }));
+    expect(new SettingsManager(tmpDir).loadRaw()).toEqual({ botToken: "tok", chatId: "123" });
+  });
+
+  it("returns null for invalid JSON", () => {
+    mkdirSync(tmpDir, { recursive: true });
+    writeFileSync(join(tmpDir, "settings.json"), "not json");
+    expect(new SettingsManager(tmpDir).loadRaw()).toBeNull();
+  });
+
+  it("returns null for non-object JSON", () => {
+    mkdirSync(tmpDir, { recursive: true });
+    writeFileSync(join(tmpDir, "settings.json"), '"just a string"');
+    expect(new SettingsManager(tmpDir).loadRaw()).toBeNull();
+  });
+});
+
+describe("SettingsManager.applyEnvOverrides", () => {
   const envVars = [
     "TELEGRAM_BOT_TOKEN", "AUTHORIZED_CHAT_ID", "MODEL",
     "WORKSPACE", "OPENAI_API_KEY", "LOG_LEVEL", "PINORAMA_URL",
@@ -157,14 +188,14 @@ describe("applyEnvOverrides", () => {
   });
 
   it("returns original settings when no env vars set", () => {
-    const { settings, overrides } = applyEnvOverrides(validSettings);
+    const { settings, overrides } = new SettingsManager(tmpDir).applyEnvOverrides(validSettings);
     expect(settings).toEqual(validSettings);
     expect(overrides.size).toBe(0);
   });
 
   it("overrides model from MODEL env var", () => {
     process.env.MODEL = "opus";
-    const { settings, overrides } = applyEnvOverrides(validSettings);
+    const { settings, overrides } = new SettingsManager(tmpDir).applyEnvOverrides(validSettings);
     expect(settings.model).toBe("opus");
     expect(overrides.has("model")).toBe(true);
   });
@@ -173,7 +204,7 @@ describe("applyEnvOverrides", () => {
     process.env.TELEGRAM_BOT_TOKEN = "override-token";
     process.env.AUTHORIZED_CHAT_ID = "99999";
     process.env.OPENAI_API_KEY = "sk-override";
-    const { settings, overrides } = applyEnvOverrides(validSettings);
+    const { settings, overrides } = new SettingsManager(tmpDir).applyEnvOverrides(validSettings);
     expect(settings.botToken).toBe("override-token");
     expect(settings.chatId).toBe("99999");
     expect(settings.openaiApiKey).toBe("sk-override");
@@ -184,7 +215,7 @@ describe("applyEnvOverrides", () => {
     process.env.WORKSPACE = "/override/path";
     process.env.LOG_LEVEL = "error";
     process.env.PINORAMA_URL = "http://override:6200";
-    const { settings, overrides } = applyEnvOverrides(validSettings);
+    const { settings, overrides } = new SettingsManager(tmpDir).applyEnvOverrides(validSettings);
     expect(settings.workspace).toBe("/override/path");
     expect(settings.logLevel).toBe("error");
     expect(settings.pinoramaUrl).toBe("http://override:6200");
@@ -194,13 +225,13 @@ describe("applyEnvOverrides", () => {
   });
 });
 
-describe("printSettings", () => {
+describe("SettingsManager.print", () => {
   it("does not throw", () => {
-    expect(() => printSettings(validSettings, new Set())).not.toThrow();
+    expect(() => new SettingsManager(tmpDir).print(validSettings, new Set())).not.toThrow();
   });
 
   it("does not throw with overrides", () => {
-    expect(() => printSettings(validSettings, new Set(["model"]))).not.toThrow();
+    expect(() => new SettingsManager(tmpDir).print(validSettings, new Set(["model"]))).not.toThrow();
   });
 
   it("does not throw with optional fields set", () => {
@@ -209,12 +240,18 @@ describe("printSettings", () => {
       openaiApiKey: "sk-1234567890",
       pinoramaUrl: "http://localhost:6200",
     };
-    expect(() => printSettings(full, new Set(["model", "openaiApiKey"]))).not.toThrow();
+    expect(() => new SettingsManager(tmpDir).print(full, new Set(["model", "openaiApiKey"]))).not.toThrow();
   });
 
   it("masks botToken showing only last 4 chars", () => {
-    // We test the masking indirectly — printSettings shouldn't throw
-    // and the function exists primarily for the startup log
-    expect(() => printSettings({ ...validSettings, botToken: "ab" }, new Set())).not.toThrow();
+    expect(() => new SettingsManager(tmpDir).print({ ...validSettings, botToken: "ab" }, new Set())).not.toThrow();
+  });
+});
+
+describe("SettingsManager.envMapping", () => {
+  it("is a static property with all settings keys", () => {
+    expect(SettingsManager.envMapping.botToken).toBe("TELEGRAM_BOT_TOKEN");
+    expect(SettingsManager.envMapping.chatId).toBe("AUTHORIZED_CHAT_ID");
+    expect(SettingsManager.envMapping.model).toBe("MODEL");
   });
 });
