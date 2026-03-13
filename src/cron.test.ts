@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { CronScheduler } from "./cron";
 
 const TEST_DIR = join(import.meta.dir, "..", ".test-workspace-cron");
-const SCHEDULE_DIR = join(TEST_DIR, ".macroclaw");
+const SCHEDULE_DIR = join(TEST_DIR, "data");
 const SCHEDULE_FILE = join(SCHEDULE_DIR, "schedule.json");
 
 function writeScheduleConfig(config: any) {
@@ -270,7 +270,7 @@ describe("CronScheduler", () => {
 describe("missed non-recurring events", () => {
   it("fires missed non-recurring job with missed prefix", () => {
     writeScheduleConfig({
-      jobs: [{ name: "reminder", cron: minutesAgoCron(10), prompt: "buy milk", recurring: false }],
+      jobs: [{ name: "reminder", cron: minutesAgoCron(3), prompt: "buy milk", recurring: false }],
     });
 
     const onJob = makeOnJob();
@@ -289,7 +289,7 @@ describe("missed non-recurring events", () => {
   it("removes missed non-recurring job after firing", () => {
     writeScheduleConfig({
       jobs: [
-        { name: "missed", cron: minutesAgoCron(5), prompt: "do it", recurring: false },
+        { name: "missed", cron: minutesAgoCron(3), prompt: "do it", recurring: false },
         { name: "keeper", cron: nonMatchingCron(), prompt: "stay" },
       ],
     });
@@ -307,7 +307,7 @@ describe("missed non-recurring events", () => {
 
   it("does not fire missed recurring jobs", () => {
     writeScheduleConfig({
-      jobs: [{ name: "recurring", cron: minutesAgoCron(10), prompt: "repeat" }],
+      jobs: [{ name: "recurring", cron: minutesAgoCron(3), prompt: "repeat" }],
     });
 
     const onJob = makeOnJob();
@@ -320,7 +320,7 @@ describe("missed non-recurring events", () => {
 
   it("does not fire non-recurring jobs older than threshold", () => {
     writeScheduleConfig({
-      jobs: [{ name: "old", cron: minutesAgoCron(90), prompt: "too late", recurring: false }],
+      jobs: [{ name: "old", cron: minutesAgoCron(10), prompt: "too late", recurring: false }],
     });
 
     const onJob = makeOnJob();

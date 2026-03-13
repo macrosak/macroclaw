@@ -7,7 +7,7 @@ description: >
   one-time or repeating event at a specific time.
 ---
 
-Schedule a new event by adding it to `.macroclaw/schedule.json`.
+Schedule a new event by adding it to `data/schedule.json`.
 
 ## When to use this
 
@@ -20,9 +20,9 @@ Schedule a new event by adding it to `.macroclaw/schedule.json`.
 
 ## How to schedule
 
-1. Read `.macroclaw/schedule.json` (create with `{"jobs": []}` if missing)
+1. Read `data/schedule.json` (create with `{"jobs": []}` if missing)
 2. Convert the user's request to a cron expression (see reference below)
-3. **Be proactive about timing**: if the user says "next week" or "tomorrow" without a specific time, pick the best time based on what you know (their routine, calendar, context) and confirm: "I'll remind you Wednesday at 9:00. Works for you?"
+3. **Be proactive about timing**: if the user says "next week" or "tomorrow" without a specific time, pick the best time based on what you know (their routine, calendar, context)
 4. Append the new job to the `jobs` array
 5. Write the updated file
 6. Confirm: what was scheduled, when it will fire, and offer to adjust
@@ -97,6 +97,6 @@ Common patterns:
 ## Notes
 
 - Changes are hot-reloaded — no restart needed
-- File location: `<workspace>/.macroclaw/schedule.json`
+- File location: `<workspace>/data/schedule.json`
 - One-shot events (`recurring: false`) are cleaned up automatically after firing
 - Missed one-shot events (e.g. service was down) are fired with a `[missed event]` prefix when the service restarts

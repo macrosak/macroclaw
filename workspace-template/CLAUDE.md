@@ -59,7 +59,7 @@ Don't ask permission. Just do it.
 
 ## Scheduled Events
 
-Messages prefixed with `[Context: cron/<name>]` are automated scheduled events. The agent decides whether to respond:
+Scheduled events are created by the `schedule` skill and stored in `data/schedule.json`. Messages prefixed with `[Context: cron/<name>]` are automated scheduled events. The agent decides whether to respond:
 
 - **action: "send"** — the response goes to Telegram
 - **action: "silent"** — the response is logged but not sent
@@ -86,7 +86,7 @@ When creating new skills, always put them in `.claude/skills/` within this works
 Structure:
 - `.claude/skills/` — local agent skills
 - `memory/` — daily logs (YYYY-MM-DD.md)
-- `.macroclaw/schedule.json` — scheduled events and reminders (hot-reloaded, no restart needed) (use schedule skill to modify)
+- `data/schedule.json` — scheduled events and reminders (hot-reloaded, no restart needed) (use schedule skill to modify)
 
 ## Safety
 
