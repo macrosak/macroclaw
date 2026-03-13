@@ -100,6 +100,8 @@ export async function runSetupWizard(io: SetupIO, opts?: { defaults?: SetupDefau
   const workspace = await ask(`Workspace [${defaultWorkspace}]: `) || defaultWorkspace;
 
   // OpenAI API key
+  write("\nOpenAI API key is used for voice message transcription (Whisper).\n");
+  write("Without it, voice messages will be ignored.\n\n");
   const defaultOpenai = prev.openaiApiKey || process.env.OPENAI_API_KEY || "";
   const openaiPrompt = defaultOpenai ? `OpenAI API key [${maskValue("openaiApiKey", defaultOpenai)}] (optional): ` : "OpenAI API key (optional): ";
   const openaiApiKey = await ask(openaiPrompt) || defaultOpenai || undefined;

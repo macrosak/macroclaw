@@ -1,9 +1,8 @@
 # Macroclaw
 
-Telegram-to-Claude-Code bridge. Bun + Grammy.
+Personal AI assistant, powered by Claude Code, delivered through Telegram.
 
-Uses the Claude Code CLI (`claude -p`) rather than the Agent SDK to avoid any possible
-ToS issues with using a Claude subscription programmatically.
+A lightweight bridge that turns a Telegram chat into a personal AI assistant — one that remembers context across conversations, runs background tasks, handles files and voice messages, and can also write and debug code. Built on the Claude Code CLI (`claude -p`) to stay **compliant with Anthropic's ToS**. The platform handles Telegram I/O, process orchestration, and scheduling; everything else — personality, skills, memory, behavior — lives in a customizable workspace.
 
 ## Security Model
 
@@ -47,6 +46,8 @@ Settings are stored in `~/.macroclaw/settings.json` and validated on startup.
 | `openaiApiKey` | `OPENAI_API_KEY`       | —                          | No       |
 | `logLevel`     | `LOG_LEVEL`            | `debug`                    | No       |
 | `pinoramaUrl`  | `PINORAMA_URL`         | —                          | No       |
+
+**`openaiApiKey`** is used for voice message transcription via [OpenAI Whisper](https://platform.openai.com/docs/guides/speech-to-text). Without it, voice messages are ignored.
 
 Env vars take precedence over settings file values. On startup, a masked settings summary is printed showing which values were overridden by env vars.
 
