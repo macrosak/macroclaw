@@ -1,0 +1,13 @@
+services:
+  macroclaw:
+    build: .
+    container_name: macroclaw
+    restart: unless-stopped
+    volumes:
+      - macroclaw-home:/home/macroclaw
+      - ~/.macroclaw-workspace:/workspace
+    environment:
+      - WORKSPACE=/workspace
+
+volumes:
+  macroclaw-home:

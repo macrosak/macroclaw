@@ -18,10 +18,15 @@ export class Cli {
 		this.#serviceManager = opts?.systemService ?? new SystemServiceManager();
 	}
 
-	async setup(): Promise<void> {
+	async setup(opts?: { skipService?: boolean; installService?: boolean }): Promise<void> {
 		const defaults = this.#settingsManager.loadRaw() ?? undefined;
 		const settings = await this.#setupWizard.collectSettings(defaults);
 		this.#settingsManager.save(settings);
+		if (opts?.skipService) return;
+		if (opts?.installService) {
+			await this.#setupWizard.forceInstallService();
+			return;
+		}
 		await this.#setupWizard.installService();
 	}
 
@@ -123,7 +128,11 @@ const startCommand = defineCommand({
 
 const setupCommand = defineCommand({
 	meta: { name: "setup", description: "Run the interactive setup wizard" },
-	run: () => defaultCli.setup().catch(handleError),
+	args: {
+		"skip-service": { type: "boolean", description: "Skip the service installation prompt" },
+		"install-service": { type: "boolean", description: "Install as a system service without prompting" },
+	},
+	run: ({ args }) => defaultCli.setup({ skipService: args["skip-service"], installService: args["install-service"] }).catch(handleError),
 });
 
 const claudeCommand = defineCommand({
