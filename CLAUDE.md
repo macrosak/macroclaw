@@ -45,7 +45,7 @@ Two layers with unidirectional dependency: App → Orchestrator. App knows nothi
 
 ```
 App (app.ts)                        — I/O layer: Telegram + Cron
-├── CronScheduler (cron.ts)         — reads .macroclaw/schedule.json, fires onJob callback
+├── CronScheduler (cron.ts)         — reads data/schedule.json, fires onJob callback
 └── Orchestrator (orchestrator.ts)  — processing layer: Claude, queue, sessions, background
     ├── Queue (queue.ts)            — serial FIFO processing (internal)
     └── Claude (claude.ts)          — spawns `claude` CLI, handles timeouts/deferred results

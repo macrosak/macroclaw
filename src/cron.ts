@@ -25,7 +25,7 @@ export interface CronSchedulerConfig {
 }
 
 const TICK_INTERVAL = 10_000; // 10 seconds
-const MISSED_THRESHOLD = 3_600_000; // 60 minutes
+const MISSED_THRESHOLD = 300_000; // 5 minutes
 
 export class CronScheduler {
   #lastMinute = -1;
@@ -34,7 +34,7 @@ export class CronScheduler {
   #timer: Timer | null = null;
 
   constructor(workspace: string, config: CronSchedulerConfig) {
-    this.#schedulePath = join(workspace, ".macroclaw", "schedule.json");
+    this.#schedulePath = join(workspace, "data", "schedule.json");
     this.#config = config;
   }
 
