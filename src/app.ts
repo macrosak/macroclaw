@@ -149,11 +149,27 @@ export class App {
         return;
       }
 
+      if (data.startsWith("detail:")) {
+        const sessionId = data.slice(7);
+        await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [[{ text: "✓ Opened", callback_data: "_noop" }]] } });
+        log.debug({ sessionId }, "Detail requested");
+        this.#orchestrator.handleDetail(sessionId);
+        return;
+      }
+
       if (data.startsWith("peek:")) {
         const sessionId = data.slice(5);
         await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [[{ text: "✓ Peeked", callback_data: "_noop" }]] } });
         log.debug({ sessionId }, "Peek requested");
         this.#orchestrator.handlePeek(sessionId);
+        return;
+      }
+
+      if (data.startsWith("kill:")) {
+        const sessionId = data.slice(5);
+        await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [[{ text: "✓ Killed", callback_data: "_noop" }]] } });
+        log.debug({ sessionId }, "Kill requested");
+        this.#orchestrator.handleKill(sessionId);
         return;
       }
 

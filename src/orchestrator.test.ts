@@ -559,7 +559,7 @@ describe("Orchestrator", () => {
       expect(responses[0].message).toBe("No background agents running.");
     });
 
-    it("includes peek buttons and dismiss when agents are running", async () => {
+    it("includes detail buttons and dismiss when agents are running", async () => {
       saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
       const claude = mockClaude((): RunningQuery<unknown> => ({
         sessionId: `bg-${Date.now()}`,
@@ -578,11 +578,11 @@ describe("Orchestrator", () => {
       const listResponse = responses[responses.length - 1];
       expect(listResponse.message).toContain("long-task");
       expect(listResponse.buttons).toBeDefined();
-      expect(listResponse.buttons!.length).toBe(2); // 1 peek + dismiss
-      const peekBtn = listResponse.buttons![0];
-      expect(typeof peekBtn).toBe("object");
-      expect((peekBtn as any).data).toMatch(/^peek:/);
-      expect((peekBtn as any).text).toContain("long-task");
+      expect(listResponse.buttons!.length).toBe(2); // 1 detail + dismiss
+      const detailBtn = listResponse.buttons![0];
+      expect(typeof detailBtn).toBe("object");
+      expect((detailBtn as any).data).toMatch(/^detail:/);
+      expect((detailBtn as any).text).toContain("long-task");
       expect(listResponse.buttons![1]).toEqual({ text: "Dismiss", data: "_dismiss" });
     });
   });
@@ -624,8 +624,8 @@ describe("Orchestrator", () => {
       orch.handleBackgroundList();
       await waitForProcessing();
       const listResponse = responses[responses.length - 1];
-      const peekBtn = listResponse.buttons![0] as { text: string; data: string };
-      const sessionId = peekBtn.data.slice(5); // strip "peek:"
+      const detailBtn = listResponse.buttons![0] as { text: string; data: string };
+      const sessionId = detailBtn.data.slice(7); // strip "detail:"
 
       await orch.handlePeek(sessionId);
       await waitForProcessing();
@@ -663,14 +663,196 @@ describe("Orchestrator", () => {
       orch.handleBackgroundList();
       await waitForProcessing();
       const listResponse = responses[responses.length - 1];
-      const peekBtn = listResponse.buttons![0] as { text: string; data: string };
-      const sessionId = peekBtn.data.slice(5);
+      const detailBtn = listResponse.buttons![0] as { text: string; data: string };
+      const sessionId = detailBtn.data.slice(7); // strip "detail:"
 
       await orch.handlePeek(sessionId);
       await waitForProcessing();
 
       const messages = responses.map((r) => r.message);
       expect(messages.some((m) => m.includes("Couldn't peek at"))).toBe(true);
+    });
+  });
+
+  describe("handleDetail", () => {
+    it("returns 'not found' for unknown sessionId", async () => {
+      const claude = mockClaude({ action: "send", message: "ok", actionReason: "ok" });
+      const { orch, responses } = makeOrchestrator(claude);
+
+      orch.handleDetail("nonexistent-session");
+      await waitForProcessing();
+
+      expect(responses[0].message).toBe("Agent not found or already finished.");
+    });
+
+    it("shows agent details with peek/kill/dismiss buttons", async () => {
+      saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
+      const claude = mockClaude((): RunningQuery<unknown> => ({
+        sessionId: "bg-sid",
+        startedAt: new Date(),
+        result: new Promise(() => {}),
+        kill: mock(async () => {}),
+      }));
+      const { orch, responses } = makeOrchestrator(claude);
+
+      orch.handleBackgroundCommand("research pricing");
+      await waitForProcessing();
+
+      orch.handleBackgroundList();
+      await waitForProcessing();
+      const listResponse = responses[responses.length - 1];
+      const detailBtn = listResponse.buttons![0] as { text: string; data: string };
+      const sessionId = detailBtn.data.slice(7);
+
+      orch.handleDetail(sessionId);
+      await waitForProcessing();
+
+      const detailResponse = responses[responses.length - 1];
+      expect(detailResponse.message).toContain("research-pricing");
+      expect(detailResponse.message).toContain("research pricing");
+      expect(detailResponse.message).toContain("default");
+      expect(detailResponse.message).toContain("Status: running");
+      expect(detailResponse.buttons).toHaveLength(3);
+      expect(detailResponse.buttons![0]).toEqual({ text: "Peek", data: `peek:${sessionId}` });
+      expect(detailResponse.buttons![1]).toEqual({ text: "Kill", data: `kill:${sessionId}` });
+      expect(detailResponse.buttons![2]).toEqual({ text: "Dismiss", data: "_dismiss" });
+    });
+
+    it("truncates prompt at 300 chars", async () => {
+      saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
+      const longPrompt = "a".repeat(500);
+      const claude = mockClaude((): RunningQuery<unknown> => ({
+        sessionId: "bg-sid",
+        startedAt: new Date(),
+        result: new Promise(() => {}),
+        kill: mock(async () => {}),
+      }));
+      const { orch, responses } = makeOrchestrator(claude);
+
+      orch.handleBackgroundCommand(longPrompt);
+      await waitForProcessing();
+
+      orch.handleBackgroundList();
+      await waitForProcessing();
+      const listResponse = responses[responses.length - 1];
+      const detailBtn = listResponse.buttons![0] as { text: string; data: string };
+      const sessionId = detailBtn.data.slice(7);
+
+      orch.handleDetail(sessionId);
+      await waitForProcessing();
+
+      const detailResponse = responses[responses.length - 1];
+      // 300 chars + ellipsis
+      expect(detailResponse.message).toContain("a".repeat(300));
+      expect(detailResponse.message).toContain("…");
+      expect(detailResponse.message).not.toContain("a".repeat(301));
+    });
+
+    it("shows model when specified", async () => {
+      saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
+      const claude = mockClaude((): RunningQuery<unknown> => ({
+        sessionId: "bg-sid",
+        startedAt: new Date(),
+        result: new Promise(() => {}),
+        kill: mock(async () => {}),
+      }));
+      const { orch, responses } = makeOrchestrator(claude, { model: "opus" });
+
+      orch.handleBackgroundCommand("research");
+      await waitForProcessing();
+
+      orch.handleBackgroundList();
+      await waitForProcessing();
+      const listResponse = responses[responses.length - 1];
+      const detailBtn = listResponse.buttons![0] as { text: string; data: string };
+      const sessionId = detailBtn.data.slice(7);
+
+      orch.handleDetail(sessionId);
+      await waitForProcessing();
+
+      const detailResponse = responses[responses.length - 1];
+      expect(detailResponse.message).toContain("Model: opus");
+    });
+  });
+
+  describe("handleKill", () => {
+    it("returns 'not found' for unknown sessionId", async () => {
+      const claude = mockClaude({ action: "send", message: "ok", actionReason: "ok" });
+      const { orch, responses } = makeOrchestrator(claude);
+
+      await orch.handleKill("nonexistent-session");
+      await waitForProcessing();
+
+      expect(responses[0].message).toBe("Agent not found or already finished.");
+    });
+
+    it("kills running agent and sends confirmation", async () => {
+      saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
+      const killMock = mock(async () => {});
+      const claude = mockClaude((): RunningQuery<unknown> => ({
+        sessionId: "bg-sid",
+        startedAt: new Date(),
+        result: new Promise(() => {}),
+        kill: killMock,
+      }));
+      const { orch, responses } = makeOrchestrator(claude);
+
+      orch.handleBackgroundCommand("research pricing");
+      await waitForProcessing();
+
+      orch.handleBackgroundList();
+      await waitForProcessing();
+      const listResponse = responses[responses.length - 1];
+      const detailBtn = listResponse.buttons![0] as { text: string; data: string };
+      const sessionId = detailBtn.data.slice(7);
+
+      await orch.handleKill(sessionId);
+      await waitForProcessing();
+
+      expect(killMock).toHaveBeenCalled();
+      const killResponse = responses[responses.length - 1];
+      expect(killResponse.message).toContain("Killed");
+      expect(killResponse.message).toContain("research-pricing");
+
+      // Agent should be removed from list
+      orch.handleBackgroundList();
+      await waitForProcessing();
+      expect(responses[responses.length - 1].message).toBe("No background agents running.");
+    });
+
+    it("does not feed error back to queue after kill", async () => {
+      saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
+      let rejectBg: (err: Error) => void;
+      const bgResult = new Promise<never>((_, r) => { rejectBg = r; });
+      const claude = mockClaude((): RunningQuery<unknown> => ({
+        sessionId: "bg-sid",
+        startedAt: new Date(),
+        result: bgResult,
+        kill: mock(async () => {}),
+      }));
+      const { orch, responses } = makeOrchestrator(claude);
+
+      orch.handleBackgroundCommand("task");
+      await waitForProcessing();
+
+      orch.handleBackgroundList();
+      await waitForProcessing();
+      const listResponse = responses[responses.length - 1];
+      const detailBtn = listResponse.buttons![0] as { text: string; data: string };
+      const sessionId = detailBtn.data.slice(7);
+
+      await orch.handleKill(sessionId);
+      await waitForProcessing();
+      const countAfterKill = responses.length;
+
+      // Simulate the bg process rejecting after kill
+      rejectBg!(new Error("process killed"));
+      await waitForProcessing(100);
+
+      // No additional error responses should have been added
+      // Only the "Killed" message, no "[Error]" from the bg handler
+      const newResponses = responses.slice(countAfterKill);
+      expect(newResponses.every((r) => !r.message.includes("[Error]"))).toBe(true);
     });
   });
 
