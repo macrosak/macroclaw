@@ -1,28 +1,28 @@
 import { execSync } from "node:child_process";
 import { Bot } from "grammy";
 import { createLogger } from "./logger";
-import { maskValue, type Settings, settingsSchema } from "./settings";
-
-type SetupField = keyof typeof settingsSchema.shape;
-
-async function askValidated(io: SetupIO, field: SetupField, prompt: string, fallback: string): Promise<string> {
-  const schema = settingsSchema.shape[field];
-  let value = await io.ask(prompt) || fallback;
-  while (true) {
-    const result = schema.safeParse(value);
-    if (result.success) return value;
-    const issue = result.error?.issues?.[0];
-    io.write(`Invalid value: ${issue?.message ?? "validation failed"}. Please try again.\n`);
-    value = await io.ask(prompt);
-  }
-}
+import { maskValue, type Settings, SettingsManager, settingsSchema } from "./settings";
 
 const log = createLogger("setup");
 
-export interface SetupIO {
+type SetupField = keyof typeof settingsSchema.shape;
+
+export interface SetupIo {
+  open: () => void;
+  close: () => void;
   ask: (question: string) => Promise<string>;
   write: (msg: string) => void;
-  close?: () => void;
+}
+
+export interface ServiceInstaller {
+  install: (oauthToken?: string) => string;
+}
+
+export interface SetupOpts {
+  serviceInstaller?: ServiceInstaller;
+  resolveClaude?: () => string;
+  platform?: string;
+  startBot?: (token: string) => Promise<Bot>;
 }
 
 async function startSetupBot(token: string): Promise<Bot> {
@@ -36,20 +36,9 @@ async function startSetupBot(token: string): Promise<Bot> {
 
   await bot.init();
   await bot.api.setMyCommands([{ command: "chatid", description: "Get your chat ID" }]);
-  bot.start();
+  // Fire-and-forget: long-polling loop, stop() aborts with "Aborted delay"
+  void bot.start().catch(() => {});
   return bot;
-}
-
-export interface ServiceInstaller {
-  install: (oauthToken?: string) => string;
-}
-
-export interface SetupDefaults {
-  botToken?: string;
-  chatId?: string;
-  model?: string;
-  workspace?: string;
-  openaiApiKey?: string;
 }
 
 export function resolveClaudePath(exec: (cmd: string) => string = (cmd) => execSync(cmd, { encoding: "utf-8" })): string {
@@ -60,111 +49,149 @@ export function resolveClaudePath(exec: (cmd: string) => string = (cmd) => execS
   }
 }
 
-export async function runSetupWizard(io: SetupIO, opts?: { defaults?: SetupDefaults; serviceInstaller?: ServiceInstaller; onSettingsReady?: (settings: Settings) => void; resolveClaude?: () => string; platform?: string }): Promise<Settings> {
-  const { ask, write } = io;
-  const prev = opts?.defaults ?? {};
+export class SetupWizard {
+  readonly #io: SetupIo;
+  readonly #resolveClaude: () => string;
+  readonly #serviceInstaller?: ServiceInstaller;
+  readonly #platform: string;
+  readonly #startBot: (token: string) => Promise<Bot>;
+  #defaults: Record<string, unknown> = {};
 
-  // Fail fast if claude CLI is not installed
-  const resolve = opts?.resolveClaude ?? resolveClaudePath;
-  resolve();
-
-  write("\n=== Macroclaw ===\n\n");
-  write("Personal AI assistant, powered by Claude Code, delivered through Telegram.\n\n");
-  write("=== Setup ===\n\n");
-
-  // Bot token
-  write("First, set up a Telegram bot:\n");
-  write("  1. Open Telegram and message @BotFather\n");
-  write("  2. Send /newbot and follow the instructions\n");
-  write("  3. Copy the token it gives you (looks like 123456:ABC-DEF...)\n\n");
-  const defaultToken = prev.botToken || process.env.TELEGRAM_BOT_TOKEN || "";
-  const tokenPrompt = defaultToken ? `Bot token [${maskValue("botToken", defaultToken)}]: ` : "Bot token: ";
-  let botToken = await ask(tokenPrompt) || defaultToken;
-
-  // Validate token by starting a temporary bot
-  let setupBot: Bot | null = null;
-  while (true) {
-    if (!botToken) {
-      botToken = await ask("Bot token (required): ");
-      continue;
-    }
-    try {
-      setupBot = await startSetupBot(botToken);
-      write(`\nBot @${setupBot.botInfo.username} connected.\n\n`);
-      write("Next, we need a chat ID. Macroclaw only accepts messages from a single\n");
-      write("authorized chat — send /chatid to the bot in Telegram to get yours.\n\n");
-      break;
-    } catch {
-      write("Invalid bot token. Please try again.\n");
-      botToken = await ask("Bot token: ");
-    }
+  constructor(io: SetupIo, opts?: SetupOpts) {
+    this.#io = io;
+    this.#resolveClaude = opts?.resolveClaude ?? resolveClaudePath;
+    this.#serviceInstaller = opts?.serviceInstaller;
+    this.#platform = opts?.platform ?? process.platform;
+    this.#startBot = opts?.startBot ?? startSetupBot;
   }
 
-  // Chat ID
-  const defaultChatId = prev.chatId || process.env.AUTHORIZED_CHAT_ID || "";
-  const chatIdPrompt = defaultChatId ? `Chat ID [${defaultChatId}]: ` : "Chat ID: ";
-  const chatId = await askValidated(io, "chatId", chatIdPrompt, defaultChatId);
-
-  // Stop setup bot
-  if (setupBot) {
-    await setupBot.stop();
+  #default(key: string, fallback?: string): string {
+    const envVar = SettingsManager.envMapping[key as keyof Settings];
+    return (this.#defaults[key] as string) || (envVar && process.env[envVar]) || fallback || "";
   }
 
-  // Model
-  const defaultModel = prev.model || process.env.MODEL || "sonnet";
-  const model = await askValidated(io, "model", `Model [${defaultModel}]: `, defaultModel);
+  async collectSettings(defaults?: Record<string, unknown>): Promise<Settings> {
+    this.#defaults = defaults ?? {};
+    this.#io.open();
+    this.#resolveClaude();
 
-  // Workspace
-  const defaultWorkspace = prev.workspace || process.env.WORKSPACE || "~/.macroclaw-workspace";
-  const workspace = await askValidated(io, "workspace", `Workspace [${defaultWorkspace}]: `, defaultWorkspace);
+    this.#io.write("\n=== Macroclaw ===\n\n");
+    this.#io.write("Personal AI assistant, powered by Claude Code, delivered through Telegram.\n\n");
+    this.#io.write("=== Setup ===\n\n");
 
-  // OpenAI API key
-  write("\nMacroclaw uses OpenAI's Whisper API to transcribe voice messages.\n");
-  write("Without this key, voice messages will be ignored.\n\n");
-  const defaultOpenai = prev.openaiApiKey || process.env.OPENAI_API_KEY || "";
-  const openaiPrompt = defaultOpenai ? `OpenAI API key [${maskValue("openaiApiKey", defaultOpenai)}] (optional): ` : "OpenAI API key (optional): ";
-  const openaiApiKey = await ask(openaiPrompt) || defaultOpenai || undefined;
+    // Bot token
+    this.#io.write("First, set up a Telegram bot:\n");
+    this.#io.write("  1. Open Telegram and message @BotFather\n");
+    this.#io.write("  2. Send /newbot and follow the instructions\n");
+    this.#io.write("  3. Copy the token it gives you (looks like 123456:ABC-DEF...)\n\n");
+    const { botToken, bot } = await this.#askBotToken();
 
-  const settings: Settings = settingsSchema.parse({
-    botToken,
-    chatId,
-    model,
-    workspace,
-    openaiApiKey,
-    logLevel: "debug",
-  });
+    // Chat ID
+    this.#io.write("Next, we need a chat ID. Macroclaw only accepts messages from a single\n");
+    this.#io.write("authorized chat — send /chatid to the bot in Telegram to get yours.\n\n");
+    const defaultChatId = this.#default("chatId");
+    const chatIdPrompt = defaultChatId ? `Chat ID [${defaultChatId}]: ` : "Chat ID: ";
+    const chatId = await this.#askValidated("chatId", chatIdPrompt, defaultChatId);
 
-  // Persist settings before service install prompt so ServiceManager can find them
-  opts?.onSettingsReady?.(settings);
+    // Stop setup bot after chat ID is collected
+    await bot.stop();
 
-  write("\nSetup complete!\n\n");
+    // Model
+    this.#io.write("\nThe default Claude model for conversations (haiku, sonnet, opus).\n\n");
+    const defaultModel = this.#default("model", "sonnet");
+    const model = await this.#askValidated("model", `Model [${defaultModel}]: `, defaultModel);
 
-  // Optional service installation
-  const installAnswer = await ask("Install as a system service? [Y/n]: ");
-  let oauthToken: string | undefined;
-  if (installAnswer.toLowerCase() !== "n" && installAnswer.toLowerCase() !== "no") {
-    if ((opts?.platform ?? process.platform) === "darwin") {
-      write("\nmacOS requires a long-lived OAuth token for the service.\n");
-      write("Run `claude setup-token` in another terminal, then paste the token here.\n\n");
-      oauthToken = await ask("OAuth token: ");
+    // Workspace
+    this.#io.write("\nThe workspace directory where Claude Code runs — instructions, skills,\n");
+    this.#io.write("memory, and cron definitions all live here.\n\n");
+    const defaultWorkspace = this.#default("workspace", "~/.macroclaw-workspace");
+    const workspace = await this.#askValidated("workspace", `Workspace [${defaultWorkspace}]: `, defaultWorkspace);
+
+    // OpenAI API key
+    this.#io.write("\nMacroclaw uses OpenAI's Whisper API to transcribe voice messages.\n");
+    this.#io.write("Without this key, voice messages will be ignored.\n\n");
+    const defaultOpenai = this.#default("openaiApiKey");
+    const openaiPrompt = defaultOpenai ? `OpenAI API key [${maskValue("openaiApiKey", defaultOpenai)}] (optional): ` : "OpenAI API key (optional): ";
+    const openaiApiKey = await this.#askValidated("openaiApiKey", openaiPrompt, defaultOpenai) || undefined;
+
+    // Log level (non interactive)
+    const logLevel = this.#default("logLevel");
+
+    const settings: Settings = settingsSchema.parse({
+      botToken,
+      chatId,
+      model,
+      workspace,
+      openaiApiKey,
+      ...(logLevel && { logLevel }),
+    });
+
+    this.#io.write("\nSetup complete!\n\n");
+    this.#io.close();
+    return settings;
+  }
+
+  async installService(): Promise<void> {
+    this.#io.open();
+    const installAnswer = await this.#io.ask("Install as a system service? [Y/n]: ");
+    if (installAnswer.toLowerCase() === "n" || installAnswer.toLowerCase() === "no") {
+      this.#io.close();
+      return;
+    }
+
+    let oauthToken: string | undefined;
+    if (this.#platform === "darwin") {
+      this.#io.write("\nmacOS requires a long-lived OAuth token for the service.\n");
+      this.#io.write("Run `claude setup-token` in another terminal, then paste the token here.\n\n");
+      oauthToken = await this.#io.ask("OAuth token: ");
       if (!oauthToken) {
-        write("No token provided. Skipping service installation.\n");
-        io.close?.();
-        return settings;
+        this.#io.write("No token provided. Skipping service installation.\n");
+        this.#io.close();
+        return;
+      }
+    }
+
+    try {
+      const svc = this.#serviceInstaller ?? new (await import("./service")).ServiceManager();
+      const logCmd = svc.install(oauthToken);
+      this.#io.write(`Service installed and started. Check logs:\n  ${logCmd}\n`);
+    } catch (err) {
+      this.#io.write(`Service installation failed: ${(err as Error).message}\n`);
+    }
+    this.#io.close();
+  }
+
+  async #askValidated(field: SetupField, prompt: string, fallback: string): Promise<string> {
+    const schema = settingsSchema.shape[field];
+    let value = await this.#io.ask(prompt) || fallback;
+    while (true) {
+      const result = schema.safeParse(value);
+      if (result.success) return value;
+      const issue = result.error?.issues?.[0];
+      this.#io.write(`Invalid value: ${issue?.message ?? "validation failed"}. Please try again.\n`);
+      value = await this.#io.ask(prompt) || fallback;
+    }
+  }
+
+  async #askBotToken(): Promise<{ botToken: string; bot: Bot }> {
+    const defaultToken = this.#default("botToken");
+    const tokenPrompt = defaultToken ? `Bot token [${maskValue("botToken", defaultToken)}]: ` : "Bot token: ";
+    let botToken = await this.#askValidated("botToken", tokenPrompt, defaultToken);
+
+    // Validate token by starting a temporary bot
+    while (true) {
+      if (!botToken) {
+        botToken = await this.#askValidated("botToken", "Bot token (required): ", "");
+        continue;
+      }
+      try {
+        const bot = await this.#startBot(botToken);
+        this.#io.write(`\nBot @${bot.botInfo.username} connected.\n\n`);
+        return { botToken, bot };
+      } catch {
+        this.#io.write("Invalid bot token. Please try again.\n");
+        botToken = await this.#io.ask("Bot token: ");
       }
     }
   }
-  // Release terminal control before sudo may prompt for a password
-  io.close?.();
-  if (installAnswer.toLowerCase() !== "n" && installAnswer.toLowerCase() !== "no") {
-    try {
-      const svc = opts?.serviceInstaller ?? new (await import("./service")).ServiceManager();
-      const logCmd = svc.install(oauthToken);
-      write(`Service installed and started. Check logs:\n  ${logCmd}\n`);
-    } catch (err) {
-      write(`Service installation failed: ${(err as Error).message}\n`);
-    }
-  }
-
-  return settings;
 }
