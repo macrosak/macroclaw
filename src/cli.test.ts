@@ -18,10 +18,11 @@ mock.module("node:child_process", () => ({
 
 const { main } = await import("./cli");
 
-function createMockWizard(overrides?: { collectSettings?: (defaults?: Record<string, unknown>) => Promise<unknown>; installService?: () => Promise<void> }) {
+function createMockWizard(overrides?: { collectSettings?: (defaults?: Record<string, unknown>) => Promise<unknown>; installService?: () => Promise<void>; forceInstallService?: () => Promise<void> }) {
 	return {
 		collectSettings: overrides?.collectSettings ?? mock(async () => ({ botToken: "tok", chatId: "123" })),
 		installService: overrides?.installService ?? mock(async () => {}),
+		forceInstallService: overrides?.forceInstallService ?? mock(async () => {}),
 	} as unknown as SetupWizard;
 }
 
@@ -92,6 +93,23 @@ describe("Cli.setup", () => {
 		await cli.setup();
 		expect((wizard.collectSettings as ReturnType<typeof mock>)).toHaveBeenCalled();
 		expect((wizard.installService as ReturnType<typeof mock>)).toHaveBeenCalled();
+	});
+
+	it("skips service install when --skip-service is set", async () => {
+		const wizard = createMockWizard();
+		const cli = new Cli({ wizard, settings: createMockSettings() });
+		await cli.setup({ skipService: true });
+		expect((wizard.collectSettings as ReturnType<typeof mock>)).toHaveBeenCalled();
+		expect((wizard.installService as ReturnType<typeof mock>)).not.toHaveBeenCalled();
+	});
+
+	it("force installs service when --install-service is set", async () => {
+		const forceInstallService = mock(async () => {});
+		const wizard = { ...createMockWizard(), forceInstallService } as unknown as SetupWizard;
+		const cli = new Cli({ wizard, settings: createMockSettings() });
+		await cli.setup({ installService: true });
+		expect(forceInstallService).toHaveBeenCalled();
+		expect((wizard.installService as ReturnType<typeof mock>)).not.toHaveBeenCalled();
 	});
 
 	it("creates default wizard when none provided", () => {

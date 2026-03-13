@@ -383,6 +383,31 @@ it("installs service when user answers yes", async () => {
     expect(io.written).toContainEqual(expect.stringContaining("Service installation failed: Permission denied"));
   });
 
+  it("forceInstallService installs without prompting", async () => {
+    mockInstall.mockClear();
+    const installer = createMockServiceInstaller();
+    const io = createMockIO([
+      "sk-test-token",  // oauth token (macOS)
+    ]);
+
+    const wizard = new SetupWizard(io, { serviceInstaller: installer, platform: "darwin" });
+    await wizard.forceInstallService();
+
+    expect(mockInstall).toHaveBeenCalled();
+    expect(io.written).toContainEqual(expect.stringContaining("Service installed and started."));
+  });
+
+  it("forceInstallService skips on Linux without prompting", async () => {
+    mockInstall.mockClear();
+    const installer = createMockServiceInstaller();
+    const io = createMockIO([]);
+
+    const wizard = new SetupWizard(io, { serviceInstaller: installer, platform: "linux" });
+    await wizard.forceInstallService();
+
+    expect(mockInstall).toHaveBeenCalled();
+  });
+
   it("fails fast when claude CLI is not found", async () => {
     mockExecSync.mockImplementation(() => { throw new Error("not found"); });
     const io = createMockIO([]);

@@ -9,7 +9,7 @@ A lightweight bridge that turns a Telegram chat into a personal AI assistant —
 Macroclaw runs with `dangerouslySkipPermissions` enabled. This is intentional — the bot
 is designed to run in an isolated environment (container or VM) where the workspace is
 the entire world. The single authorized chat ID ensures only one user can interact with
-the bot.
+the bot. See [Docker](#docker) for the recommended containerized setup.
 
 ## Requirements
 
@@ -55,6 +55,8 @@ Session state (Claude session IDs) is stored separately in `~/.macroclaw/session
 
 ## Commands
 
+Run `macroclaw --help` or `macroclaw <command> --help` for the complete reference.
+
 | Command | Description |
 |---------|-------------|
 | `macroclaw start` | Start the bridge |
@@ -79,6 +81,43 @@ macroclaw service install
 Both paths install macroclaw globally via `bun install -g`, register it as a **launchd** agent (macOS) or **systemd** unit (Linux) with auto-restart, and start the bridge.
 
 On Linux, the command runs as a normal user. Only the privileged operations (writing to `/etc/systemd/system/`, systemctl commands) are elevated via `sudo`, which prompts for a password when needed. Package installation and path resolution stay in the user's environment.
+
+## Docker
+
+Run macroclaw in a Docker container. The workspace is bind-mounted from the host; everything else (settings, Claude auth, sessions) lives in a named Docker volume.
+
+```bash
+# 1. Login to Claude Code (one-time, interactive — use /login inside the session)
+docker compose run --rm -w /workspace --entrypoint claude macroclaw
+
+# 2. Setup macroclaw (one-time, interactive — bot token, chat ID, model)
+docker compose run --rm macroclaw setup --skip-service
+
+# 3. Start the bridge
+docker compose up -d
+```
+
+The `WORKSPACE` env var is pre-set in `docker-compose.yml` so you don't need to configure the workspace path during setup. The `--skip-service` flag skips the service installation prompt (not applicable in Docker).
+
+To build a specific version:
+
+```bash
+docker compose build --build-arg VERSION=0.18.0
+```
+
+To reset everything (remove containers, volumes, and images):
+
+```bash
+docker compose down -v --rmi all
+```
+
+### Development with Docker
+
+Use `Dockerfile.dev` to build from local source instead of the published npm package:
+
+```bash
+docker compose -f docker-compose.dev.yml up -d
+```
 
 ## Development
 
