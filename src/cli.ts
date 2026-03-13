@@ -55,8 +55,19 @@ export class Cli {
 				console.log("Service stopped.");
 				break;
 			case "update": {
-				const logCmd = this.#serviceManager.update();
-				console.log(`Service updated. Check logs:\n  ${logCmd}`);
+				if (this.#serviceManager.isRunning) {
+					this.#serviceManager.stop();
+					console.log("Service stopped.");
+				}
+				const result = this.#serviceManager.update();
+				if (result.previousVersion === result.currentVersion) {
+					console.log(`macroclaw v${result.currentVersion} (already up to date)`);
+				} else {
+					console.log(`Updated macroclaw v${result.previousVersion} → v${result.currentVersion}`);
+				}
+
+				const logCmd = this.#serviceManager.start();
+				console.log(`Service started. Check logs:\n  ${logCmd}`);
 				break;
 			}
 			case "status": {
