@@ -82,6 +82,9 @@ App (app.ts)                        — I/O layer: Telegram + Cron
 - Messages are processed serially (FIFO queue)
 - When adding a new environment variable, document it in `.env.example` with a one-line comment
 - Use camelCase for acronyms in identifiers: `runCli`, `parseUrl`, `httpApi` (not `runCLI`, `parseURL`, `httpAPI`)
+- Module mocks for native/3rd-party modules: Use `mock.module("node:child_process", ...)` or `mock.module("grammy", ...)` instead of injecting wrapper params. Define the mock as a `mock()` at the top of the test file so individual tests can swap behavior via `mockImplementation`. Must be called before `await import()` of the module under test.
+- Constructor DI for internal collaborators: Use classes with interfaces. Mandatory dependencies are positional constructor args; optional overrides go in an `opts?` object. The constructor provides production defaults — tests pass mocks. Don't add DI params on individual methods just for testability.
+- Prefer private methods (`#`) over module-private functions: Keep helpers as `#privateMethod()` on the class (use `static` if `this` is not needed) rather than standalone functions outside the class.
 
 ## Design Docs
 

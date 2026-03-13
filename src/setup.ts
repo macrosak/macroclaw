@@ -18,49 +18,27 @@ export interface ServiceInstaller {
   install: (oauthToken?: string) => string;
 }
 
-async function startSetupBot(token: string): Promise<Bot> {
-  const bot = new Bot(token);
-  bot.command("chatid", (ctx) => {
-    ctx.reply(ctx.chat.id.toString());
-  });
-  bot.catch((err) => {
-    log.debug({ err }, "Setup bot error");
-  });
-
-  await bot.init();
-  await bot.api.setMyCommands([{ command: "chatid", description: "Get your chat ID" }]);
-  // Fire-and-forget: long-polling loop, stop() aborts with "Aborted delay"
-  void bot.start().catch(() => {});
-  return bot;
-}
-
-export function resolveClaudePath(exec: (cmd: string) => string = (cmd) => execSync(cmd, { encoding: "utf-8" })): string {
-  try {
-    return exec("which claude").trim();
-  } catch {
-    throw new Error("Claude Code CLI not found. Install it first: https://docs.anthropic.com/en/docs/claude-code");
-  }
-}
-
 export class SetupWizard {
   readonly #io: SetupIo;
-  readonly #resolveClaude: () => string;
   readonly #serviceInstaller?: ServiceInstaller;
   readonly #platform: string;
-  readonly #startBot: (token: string) => Promise<Bot>;
   #defaults: Record<string, unknown> = {};
 
   constructor(io: SetupIo, opts?: {
     serviceInstaller?: ServiceInstaller;
-    resolveClaude?: () => string;
     platform?: string;
-    startBot?: (token: string) => Promise<Bot>;
   }) {
     this.#io = io;
-    this.#resolveClaude = opts?.resolveClaude ?? resolveClaudePath;
     this.#serviceInstaller = opts?.serviceInstaller;
     this.#platform = opts?.platform ?? process.platform;
-    this.#startBot = opts?.startBot ?? startSetupBot;
+  }
+
+  #resolveClaudePath(): void {
+    try {
+      execSync("which claude", { encoding: "utf-8" });
+    } catch {
+      throw new Error("Claude Code CLI not found. Install it first: https://docs.anthropic.com/en/docs/claude-code");
+    }
   }
 
   #default(key: string, fallback?: string): string {
@@ -71,92 +49,94 @@ export class SetupWizard {
   async collectSettings(defaults?: Record<string, unknown>): Promise<Settings> {
     this.#defaults = defaults ?? {};
     this.#io.open();
-    this.#resolveClaude();
+    try {
+      this.#resolveClaudePath();
 
-    this.#io.write("\n=== Macroclaw ===\n\n");
-    this.#io.write("Personal AI assistant, powered by Claude Code, delivered through Telegram.\n\n");
-    this.#io.write("=== Setup ===\n\n");
+      this.#io.write("\n=== Macroclaw ===\n\n");
+      this.#io.write("Personal AI assistant, powered by Claude Code, delivered through Telegram.\n\n");
+      this.#io.write("=== Setup ===\n\n");
 
-    // Bot token
-    this.#io.write("First, set up a Telegram bot:\n");
-    this.#io.write("  1. Open Telegram and message @BotFather\n");
-    this.#io.write("  2. Send /newbot and follow the instructions\n");
-    this.#io.write("  3. Copy the token it gives you (looks like 123456:ABC-DEF...)\n\n");
-    const { botToken, bot } = await this.#askBotToken();
+      // Bot token
+      this.#io.write("First, set up a Telegram bot:\n");
+      this.#io.write("  1. Open Telegram and message @BotFather\n");
+      this.#io.write("  2. Send /newbot and follow the instructions\n");
+      this.#io.write("  3. Copy the token it gives you (looks like 123456:ABC-DEF...)\n\n");
+      const { botToken, bot } = await this.#askBotToken();
 
-    // Chat ID
-    this.#io.write("Next, we need a chat ID. Macroclaw only accepts messages from a single\n");
-    this.#io.write("authorized chat — send /chatid to the bot in Telegram to get yours.\n\n");
-    const defaultChatId = this.#default("chatId");
-    const chatIdPrompt = defaultChatId ? `Chat ID [${defaultChatId}]: ` : "Chat ID: ";
-    const chatId = await this.#askValidated("chatId", chatIdPrompt, defaultChatId);
+      // Chat ID
+      this.#io.write("Next, we need a chat ID. Macroclaw only accepts messages from a single\n");
+      this.#io.write("authorized chat — send /chatid to the bot in Telegram to get yours.\n\n");
+      const defaultChatId = this.#default("chatId");
+      const chatIdPrompt = defaultChatId ? `Chat ID [${defaultChatId}]: ` : "Chat ID: ";
+      const chatId = await this.#askValidated("chatId", chatIdPrompt, defaultChatId);
 
-    // Stop setup bot after chat ID is collected
-    await bot.stop();
+      // Stop setup bot after chat ID is collected
+      await bot.stop();
 
-    // Model
-    this.#io.write("\nThe default Claude model for conversations (haiku, sonnet, opus).\n\n");
-    const defaultModel = this.#default("model", "sonnet");
-    const model = await this.#askValidated("model", `Model [${defaultModel}]: `, defaultModel);
+      // Model
+      this.#io.write("\nThe default Claude model for conversations (haiku, sonnet, opus).\n\n");
+      const defaultModel = this.#default("model", "sonnet");
+      const model = await this.#askValidated("model", `Model [${defaultModel}]: `, defaultModel);
 
-    // Workspace
-    this.#io.write("\nThe workspace directory where Claude Code runs — instructions, skills,\n");
-    this.#io.write("memory, and cron definitions all live here.\n\n");
-    const defaultWorkspace = this.#default("workspace", "~/.macroclaw-workspace");
-    const workspace = await this.#askValidated("workspace", `Workspace [${defaultWorkspace}]: `, defaultWorkspace);
+      // Workspace
+      this.#io.write("\nThe workspace directory where Claude Code runs — instructions, skills,\n");
+      this.#io.write("memory, and cron definitions all live here.\n\n");
+      const defaultWorkspace = this.#default("workspace", "~/.macroclaw-workspace");
+      const workspace = await this.#askValidated("workspace", `Workspace [${defaultWorkspace}]: `, defaultWorkspace);
 
-    // OpenAI API key
-    this.#io.write("\nMacroclaw uses OpenAI's Whisper API to transcribe voice messages.\n");
-    this.#io.write("Without this key, voice messages will be ignored.\n\n");
-    const defaultOpenai = this.#default("openaiApiKey");
-    const openaiPrompt = defaultOpenai ? `OpenAI API key [${maskValue("openaiApiKey", defaultOpenai)}] (optional): ` : "OpenAI API key (optional): ";
-    const openaiApiKey = await this.#askValidated("openaiApiKey", openaiPrompt, defaultOpenai) || undefined;
+      // OpenAI API key
+      this.#io.write("\nMacroclaw uses OpenAI's Whisper API to transcribe voice messages.\n");
+      this.#io.write("Without this key, voice messages will be ignored.\n\n");
+      const defaultOpenai = this.#default("openaiApiKey");
+      const openaiPrompt = defaultOpenai ? `OpenAI API key [${maskValue("openaiApiKey", defaultOpenai)}] (optional): ` : "OpenAI API key (optional): ";
+      const openaiApiKey = await this.#askValidated("openaiApiKey", openaiPrompt, defaultOpenai) || undefined;
 
-    // Log level (non interactive)
-    const logLevel = this.#default("logLevel");
+      // Log level (non interactive)
+      const logLevel = this.#default("logLevel");
 
-    const settings: Settings = settingsSchema.parse({
-      botToken,
-      chatId,
-      model,
-      workspace,
-      openaiApiKey,
-      ...(logLevel && { logLevel }),
-    });
+      const settings: Settings = settingsSchema.parse({
+        botToken,
+        chatId,
+        model,
+        workspace,
+        openaiApiKey,
+        ...(logLevel && { logLevel }),
+      });
 
-    this.#io.write("\nSetup complete!\n\n");
-    this.#io.close();
-    return settings;
+      this.#io.write("\nSetup complete!\n\n");
+      return settings;
+    } finally {
+      this.#io.close();
+    }
   }
 
   async installService(): Promise<void> {
     this.#io.open();
-    const installAnswer = await this.#io.ask("Install as a system service? [Y/n]: ");
-    if (installAnswer.toLowerCase() === "n" || installAnswer.toLowerCase() === "no") {
-      this.#io.close();
-      return;
-    }
-
-    let oauthToken: string | undefined;
-    if (this.#platform === "darwin") {
-      this.#io.write("\nmacOS requires a long-lived OAuth token for the service.\n");
-      this.#io.write("Run `claude setup-token` in another terminal, then paste the token here.\n\n");
-      oauthToken = await this.#io.ask("OAuth token: ");
-      if (!oauthToken) {
-        this.#io.write("No token provided. Skipping service installation.\n");
-        this.#io.close();
-        return;
-      }
-    }
-
     try {
-      const svc = this.#serviceInstaller ?? new (await import("./service")).ServiceManager();
-      const logCmd = svc.install(oauthToken);
-      this.#io.write(`Service installed and started. Check logs:\n  ${logCmd}\n`);
-    } catch (err) {
-      this.#io.write(`Service installation failed: ${(err as Error).message}\n`);
+      const installAnswer = await this.#io.ask("Install as a system service? [Y/n]: ");
+      if (installAnswer.toLowerCase() === "n" || installAnswer.toLowerCase() === "no") return;
+
+      let oauthToken: string | undefined;
+      if (this.#platform === "darwin") {
+        this.#io.write("\nmacOS requires a long-lived OAuth token for the service.\n");
+        this.#io.write("Run `claude setup-token` in another terminal, then paste the token here.\n\n");
+        oauthToken = await this.#io.ask("OAuth token: ");
+        if (!oauthToken) {
+          this.#io.write("No token provided. Skipping service installation.\n");
+          return;
+        }
+      }
+
+      try {
+        const svc = this.#serviceInstaller ?? new (await import("./service")).ServiceManager();
+        const logCmd = svc.install(oauthToken);
+        this.#io.write(`Service installed and started. Check logs:\n  ${logCmd}\n`);
+      } catch (err) {
+        this.#io.write(`Service installation failed: ${(err as Error).message}\n`);
+      }
+    } finally {
+      this.#io.close();
     }
-    this.#io.close();
   }
 
   async #askValidated(field: SetupField, prompt: string, fallback: string): Promise<string> {
@@ -169,6 +149,22 @@ export class SetupWizard {
       this.#io.write(`Invalid value: ${issue?.message ?? "validation failed"}. Please try again.\n`);
       value = await this.#io.ask(prompt) || fallback;
     }
+  }
+
+  async #startBot(token: string): Promise<Bot> {
+    const bot = new Bot(token);
+    bot.command("chatid", (ctx) => {
+      ctx.reply(ctx.chat.id.toString());
+    });
+    bot.catch((err) => {
+      log.debug({ err }, "Setup bot error");
+    });
+
+    await bot.init();
+    await bot.api.setMyCommands([{ command: "chatid", description: "Get your chat ID" }]);
+    // Fire-and-forget: long-polling loop, stop() aborts with "Aborted delay"
+    void bot.start().catch(() => {});
+    return bot;
   }
 
   async #askBotToken(): Promise<{ botToken: string; bot: Bot }> {
