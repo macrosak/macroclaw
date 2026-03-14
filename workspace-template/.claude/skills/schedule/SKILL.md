@@ -1,10 +1,6 @@
 ---
 name: schedule
-description: >
-  Schedule events, reminders, and recurring tasks. Use when the user wants to:
-  set a reminder, schedule something for later, create a recurring task,
-  set up a periodic check, automate a prompt on a schedule, or plan a
-  one-time or repeating event at a specific time.
+description: "Schedule events, reminders, and recurring tasks. Use when the user wants to: set a reminder, schedule something for later, create a recurring task, set up a periodic check, automate a prompt on a schedule, or plan a one-time or repeating event at a specific time."
 ---
 
 Schedule a new event by adding it to `data/schedule.json`.
@@ -20,12 +16,13 @@ Schedule a new event by adding it to `data/schedule.json`.
 
 ## How to schedule
 
-1. Read `data/schedule.json` (create with `{"jobs": []}` if missing)
-2. Convert the user's request to a cron expression (see reference below)
-3. **Be proactive about timing**: if the user says "next week" or "tomorrow" without a specific time, pick the best time based on what you know (their routine, calendar, context)
-4. Append the new job to the `jobs` array
-5. Write the updated file
-6. Confirm: what was scheduled, when it will fire, and offer to adjust
+1. Run `date` to get the current date and time
+2. Read `data/schedule.json` (create with `{"jobs": []}` if missing)
+3. Convert the user's request to a cron expression (see reference below)
+4. **Be proactive about timing**: if the user says "next week" or "tomorrow" without a specific time, pick the best time based on what you know (their routine, calendar, context)
+5. Append the new job to the `jobs` array
+6. Write the updated file
+7. Confirm: what was scheduled, when it will fire, and offer to adjust
 
 ## Natural language → cron
 
