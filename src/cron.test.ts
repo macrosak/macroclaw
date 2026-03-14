@@ -254,7 +254,7 @@ describe("CronScheduler", () => {
 
   it("does not write file when no non-recurring jobs fired", () => {
     writeScheduleConfig({
-      jobs: [{ name: "recurring", cron: nonMatchingCron(), prompt: "nope", recurring: false }],
+      jobs: [{ name: "recurring", cron: nonMatchingCron(), prompt: "nope" }],
     });
 
     const onJob = makeOnJob();
@@ -318,9 +318,9 @@ describe("missed non-recurring events", () => {
     expect(onJob).not.toHaveBeenCalled();
   });
 
-  it("does not fire non-recurring jobs older than threshold", () => {
+  it("fires non-recurring job missed by more than 5 minutes", () => {
     writeScheduleConfig({
-      jobs: [{ name: "old", cron: minutesAgoCron(10), prompt: "too late", recurring: false }],
+      jobs: [{ name: "old", cron: minutesAgoCron(10), prompt: "still fires", recurring: false }],
     });
 
     const onJob = makeOnJob();
@@ -328,8 +328,13 @@ describe("missed non-recurring events", () => {
     cron.start();
     cron.stop();
 
-    expect(onJob).not.toHaveBeenCalled();
+    expect(onJob).toHaveBeenCalledTimes(1);
+    const call = onJob.mock.calls[0];
+    expect(call[0]).toBe("old");
+    expect(call[1]).toContain("[missed event, should have fired");
+    expect(call[1]).toContain("still fires");
+
     const updated = readScheduleConfig();
-    expect(updated.jobs).toHaveLength(1);
+    expect(updated.jobs).toHaveLength(0);
   });
 });

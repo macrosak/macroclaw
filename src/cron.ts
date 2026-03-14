@@ -25,7 +25,6 @@ export interface CronSchedulerConfig {
 }
 
 const TICK_INTERVAL = 10_000; // 10 seconds
-const MISSED_THRESHOLD = 300_000; // 5 minutes
 
 export class CronScheduler {
   #lastMinute = -1;
@@ -88,8 +87,8 @@ export class CronScheduler {
           if (job.recurring === false) {
             firedNonRecurring.push(i);
           }
-        } else if (job.recurring === false && diff < MISSED_THRESHOLD) {
-          // Non-recurring job missed (service was down) — fire with missed prefix
+        } else if (job.recurring === false && diff >= 60_000) {
+          // Non-recurring job in the past — fire regardless of how late
           const missedMinutes = Math.round(diff / 60_000);
           const firedAt = prev.toISOString();
           const missedPrompt = `[missed event, should have fired ${missedMinutes} min ago at ${firedAt}] ${job.prompt}`;
