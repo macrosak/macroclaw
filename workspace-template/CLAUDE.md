@@ -72,6 +72,8 @@ Skills live in `.claude/skills/`.
 
 When creating new skills, always put them in `.claude/skills/` within this workspace.
 
+**Before using a skill**, check `TOOLS.md` for operational notes — custom instructions, overrides, workarounds, and tips that supplement the skill's own SKILL.md. Update `TOOLS.md` when you discover new issues or tricks.
+
 ## Workspace Structure — Keep It Clean!
 
 **Root is sacred.** Only these belong in workspace root:
