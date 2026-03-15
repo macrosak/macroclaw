@@ -1,10 +1,15 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+
+// Capture real fs functions before mocking
+const realFs = await import("node:fs");
+const { existsSync: realExistsSync, mkdirSync, readFileSync, rmSync, writeFileSync } = realFs;
+const existsSync = realExistsSync;
 
 // Mock child_process and os — safe since no other tests depend on real execSync or userInfo
 const mockExecSync = mock((_cmd: string, _opts?: object) => "");
 const mockUserInfo = mock(() => ({ username: "testuser", homedir: "/home/testuser", uid: 1000, gid: 1000, shell: "/bin/bash" }));
+const mockExistsSync = mock((path: string) => realExistsSync(path));
 
 mock.module("node:child_process", () => ({
 	execSync: (...args: unknown[]) => mockExecSync(args[0] as string, args[1] as object),
@@ -14,6 +19,14 @@ mock.module("node:os", () => ({
 	userInfo: () => mockUserInfo(),
 	tmpdir: () => "/tmp",
 }));
+
+mock.module("node:fs", () => {
+	const result: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(realFs)) {
+		result[key] = key === "existsSync" ? (path: string) => mockExistsSync(path) : value;
+	}
+	return result;
+});
 
 const { SystemServiceManager } = await import("./system-service");
 
@@ -29,8 +42,10 @@ const SYSTEMD_INACTIVE = "inactive";
 beforeEach(() => {
 	mockExecSync.mockClear();
 	mockUserInfo.mockClear();
+	mockExistsSync.mockClear();
 	mockExecSync.mockImplementation((_cmd: string, _opts?: object) => "");
 	mockUserInfo.mockImplementation(() => ({ username: "testuser", homedir: "/home/testuser", uid: 1000, gid: 1000, shell: "/bin/bash" }));
+	mockExistsSync.mockImplementation((path: string) => realExistsSync(path));
 });
 
 describe("constructor", () => {
@@ -662,6 +677,7 @@ describe("status", () => {
 			if (cmd === "systemctl is-active macroclaw") throw new Error("not found");
 			return "";
 		});
+		mockExistsSync.mockReturnValue(false);
 		const mgr = createManager({ home: "/nonexistent" });
 		const s = mgr.status();
 		expect(s.installed).toBe(false);
