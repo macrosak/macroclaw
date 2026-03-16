@@ -6,116 +6,158 @@ import { createLogger } from "./logger";
 
 const log = createLogger("scheduler");
 
-const cronJobSchema = z.object({
-  name: z.string(),
-  cron: z.string(),
-  prompt: z.string(),
-  recurring: z.boolean().optional(),
-  model: z.string().optional(),
+const ISO_WITH_OFFSET = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?[+-]\d{2}:\d{2}$/;
+
+const jobSchema = z.object({
+	name: z.string(),
+	prompt: z.string(),
+	model: z.string().optional(),
+	cron: z.string().optional(),
+	fireAt: z.string().optional(),
 });
 
-const cronConfigSchema = z.object({
-  jobs: z.array(cronJobSchema),
+const scheduleConfigSchema = z.object({
+	jobs: z.array(jobSchema),
 });
 
-type CronConfig = z.infer<typeof cronConfigSchema>;
+type ScheduleConfig = z.infer<typeof scheduleConfigSchema>;
+type Job = z.infer<typeof jobSchema>;
 
 export interface SchedulerConfig {
-  onJob: (name: string, prompt: string, model?: string) => void;
+	onJob: (name: string, prompt: string, model?: string) => void;
 }
 
 const TICK_INTERVAL = 10_000; // 10 seconds
 const MAX_MISSED_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
 
 export class Scheduler {
-  #lastMinute = -1;
-  #schedulePath: string;
-  #config: SchedulerConfig;
-  #timer: Timer | null = null;
+	#lastMinute = -1;
+	#schedulePath: string;
+	#config: SchedulerConfig;
+	#timer: Timer | null = null;
 
-  constructor(workspace: string, config: SchedulerConfig) {
-    this.#schedulePath = join(workspace, "data", "schedule.json");
-    this.#config = config;
-  }
+	constructor(workspace: string, config: SchedulerConfig) {
+		this.#schedulePath = join(workspace, "data", "schedule.json");
+		this.#config = config;
+	}
 
-  start(): void {
-    this.#tick();
-    this.#timer = setInterval(() => this.#tick(), TICK_INTERVAL);
-  }
+	start(): void {
+		this.#tick();
+		this.#timer = setInterval(() => this.#tick(), TICK_INTERVAL);
+	}
 
-  stop(): void {
-    if (this.#timer) {
-      clearInterval(this.#timer);
-      this.#timer = null;
-    }
-  }
+	stop(): void {
+		if (this.#timer) {
+			clearInterval(this.#timer);
+			this.#timer = null;
+		}
+	}
 
-  #tick(): void {
-    const now = new Date();
-    const currentMinute = now.getMinutes() + now.getHours() * 60 + now.getDate() * 1440 + now.getMonth() * 43200;
+	#tick(): void {
+		const now = new Date();
+		const currentMinute =
+			now.getMinutes() + now.getHours() * 60 + now.getDate() * 1440 + now.getMonth() * 43200;
 
-    // Only evaluate once per minute
-    if (currentMinute === this.#lastMinute) return;
-    this.#lastMinute = currentMinute;
+		// Only evaluate once per minute
+		if (currentMinute === this.#lastMinute) return;
+		this.#lastMinute = currentMinute;
 
-    let config: CronConfig;
-    try {
-      const raw = readFileSync(this.#schedulePath, "utf-8");
-      const parsed = cronConfigSchema.safeParse(JSON.parse(raw));
-      if (!parsed.success) {
-        log.warn("schedule.json: 'jobs' is not an array");
-        return;
-      }
-      config = parsed.data;
-    } catch (err) {
-      if (err instanceof Error && "code" in err && err.code === "ENOENT") return;
-      log.warn({ err: err instanceof Error ? err.message : err }, "Failed to read schedule.json");
-      return;
-    }
+		let config: ScheduleConfig;
+		try {
+			const raw = readFileSync(this.#schedulePath, "utf-8");
+			const parsed = scheduleConfigSchema.safeParse(JSON.parse(raw));
+			if (!parsed.success) {
+				log.warn("schedule.json validation failed");
+				return;
+			}
+			config = parsed.data;
+		} catch (err) {
+			if (err instanceof Error && "code" in err && err.code === "ENOENT") return;
+			log.warn({ err: err instanceof Error ? err.message : err }, "Failed to read schedule.json");
+			return;
+		}
 
-    const firedNonRecurring: number[] = [];
+		const removedIndices: number[] = [];
 
-    for (let i = 0; i < config.jobs.length; i++) {
-      const job = config.jobs[i];
-      try {
-        const interval = CronExpressionParser.parse(job.cron);
-        const prev = interval.prev();
-        const diff = Math.abs(now.getTime() - prev.getTime());
-        // Match if the previous occurrence is within the current minute
-        if (diff < 60_000) {
-          log.debug({ name: job.name, cron: job.cron }, "Cron job triggered");
-          this.#config.onJob(job.name, job.prompt, job.model);
-          if (job.recurring === false) {
-            firedNonRecurring.push(i);
-          }
-        } else if (job.recurring === false && diff >= 60_000 && diff <= MAX_MISSED_MS) {
-          // Non-recurring job in the past — fire if missed within the last week
-          const missedMinutes = Math.round(diff / 60_000);
-          const firedAt = prev.toISOString();
-          const missedPrompt = `[missed event, should have fired ${missedMinutes} min ago at ${firedAt}] ${job.prompt}`;
-          log.info({ name: job.name, missedMinutes, firedAt }, "Firing missed non-recurring job");
-          this.#config.onJob(job.name, missedPrompt, job.model);
-          firedNonRecurring.push(i);
-        } else if (job.recurring === false && diff > MAX_MISSED_MS) {
-          // Non-recurring job missed by more than a week — discard without firing
-          log.warn({ name: job.name, missedMinutes: Math.round(diff / 60_000) }, "Discarding stale non-recurring job");
-          firedNonRecurring.push(i);
-        }
-      } catch (err) {
-        log.warn({ cron: job.cron, err: err instanceof Error ? err.message : err }, "Invalid cron expression");
-      }
-    }
+		for (let i = 0; i < config.jobs.length; i++) {
+			const job = config.jobs[i];
+			if (job.cron && job.fireAt) {
+				log.warn({ name: job.name }, "Job has both cron and fireAt, skipping");
+				continue;
+			}
+			if (job.cron) {
+				this.#evaluateCronJob(job as Job & { cron: string }, now);
+			} else if (job.fireAt) {
+				const result = this.#evaluateFireAtJob(job as Job & { fireAt: string }, now);
+				if (result === "remove") removedIndices.push(i);
+			} else {
+				log.warn({ name: job.name }, "Job has neither cron nor fireAt, skipping");
+			}
+		}
 
-    // Remove fired non-recurring jobs (iterate in reverse to preserve indices)
-    if (firedNonRecurring.length > 0) {
-      for (let i = firedNonRecurring.length - 1; i >= 0; i--) {
-        config.jobs.splice(firedNonRecurring[i], 1);
-      }
-      try {
-        writeFileSync(this.#schedulePath, `${JSON.stringify(config, null, 2)}\n`);
-      } catch (err) {
-        log.warn({ err: err instanceof Error ? err.message : err }, "Failed to write schedule.json");
-      }
-    }
-  }
+		if (removedIndices.length > 0) {
+			for (let i = removedIndices.length - 1; i >= 0; i--) {
+				config.jobs.splice(removedIndices[i], 1);
+			}
+			try {
+				writeFileSync(this.#schedulePath, `${JSON.stringify(config, null, 2)}\n`);
+			} catch (err) {
+				log.warn({ err: err instanceof Error ? err.message : err }, "Failed to write schedule.json");
+			}
+		}
+	}
+
+	#evaluateCronJob(job: { name: string; cron: string; prompt: string; model?: string }, now: Date): void {
+		try {
+			const interval = CronExpressionParser.parse(job.cron);
+			const prev = interval.prev();
+			const diff = Math.abs(now.getTime() - prev.getTime());
+			if (diff < 60_000) {
+				log.debug({ name: job.name, cron: job.cron }, "Cron job triggered");
+				this.#config.onJob(job.name, job.prompt, job.model);
+			}
+		} catch (err) {
+			log.warn({ cron: job.cron, err: err instanceof Error ? err.message : err }, "Invalid cron expression");
+		}
+	}
+
+	#evaluateFireAtJob(
+		job: { name: string; fireAt: string; prompt: string; model?: string },
+		now: Date,
+	): "remove" | "keep" {
+		if (!ISO_WITH_OFFSET.test(job.fireAt)) {
+			log.warn({ name: job.name, fireAt: job.fireAt }, "Invalid fireAt format, expected ISO 8601 with timezone offset");
+			return "keep";
+		}
+
+		const fireAt = new Date(job.fireAt);
+		if (Number.isNaN(fireAt.getTime())) {
+			log.warn({ name: job.name, fireAt: job.fireAt }, "Invalid fireAt date");
+			return "keep";
+		}
+
+		const diff = now.getTime() - fireAt.getTime();
+
+		if (diff < 0) {
+			// Upcoming — not yet due
+			return "keep";
+		}
+
+		if (diff < 60_000) {
+			log.debug({ name: job.name, fireAt: job.fireAt }, "One-shot job triggered");
+			this.#config.onJob(job.name, job.prompt, job.model);
+			return "remove";
+		}
+
+		if (diff <= MAX_MISSED_MS) {
+			const missedMinutes = Math.round(diff / 60_000);
+			const missedPrompt = `[missed event, should have fired ${missedMinutes} min ago at ${job.fireAt}] ${job.prompt}`;
+			log.info({ name: job.name, missedMinutes, fireAt: job.fireAt }, "Firing missed one-shot job");
+			this.#config.onJob(job.name, missedPrompt, job.model);
+			return "remove";
+		}
+
+		log.warn({ name: job.name, missedMinutes: Math.round(diff / 60_000) }, "Discarding stale one-shot job");
+		return "remove";
+	}
 }
