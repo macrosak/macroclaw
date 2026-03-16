@@ -20,7 +20,7 @@ interface CallInfo {
   prompt: string;
   sessionId?: string;
   model?: string;
-  systemPrompt?: string;
+  replaceSystemPrompt?: string;
 }
 
 type MockHandler = (info: CallInfo) => RunningQuery<unknown>;
@@ -45,18 +45,18 @@ function mockClaude(handler: MockHandler | unknown) {
     : () => resolvedQuery(handler);
 
   const claude = {
-    newSession: mock((prompt: string, _resultType: unknown, options?: { model?: string; systemPrompt?: string }) => {
-      const info: CallInfo = { method: "newSession", prompt, model: options?.model, systemPrompt: options?.systemPrompt };
+    newSession: mock((prompt: string, _resultType: unknown, options?: { model?: string; replaceSystemPrompt?: string }) => {
+      const info: CallInfo = { method: "newSession", prompt, model: options?.model, replaceSystemPrompt: options?.replaceSystemPrompt };
       calls.push(info);
       return handlerFn(info);
     }),
-    resumeSession: mock((sessionId: string, prompt: string, _resultType: unknown, options?: { model?: string; systemPrompt?: string }) => {
-      const info: CallInfo = { method: "resumeSession", sessionId, prompt, model: options?.model, systemPrompt: options?.systemPrompt };
+    resumeSession: mock((sessionId: string, prompt: string, _resultType: unknown, options?: { model?: string; replaceSystemPrompt?: string }) => {
+      const info: CallInfo = { method: "resumeSession", sessionId, prompt, model: options?.model, replaceSystemPrompt: options?.replaceSystemPrompt };
       calls.push(info);
       return handlerFn(info);
     }),
-    forkSession: mock((sessionId: string, prompt: string, _resultType: unknown, options?: { model?: string; systemPrompt?: string }) => {
-      const info: CallInfo = { method: "forkSession", sessionId, prompt, model: options?.model, systemPrompt: options?.systemPrompt };
+    forkSession: mock((sessionId: string, prompt: string, _resultType: unknown, options?: { model?: string; replaceSystemPrompt?: string }) => {
+      const info: CallInfo = { method: "forkSession", sessionId, prompt, model: options?.model, replaceSystemPrompt: options?.replaceSystemPrompt };
       calls.push(info);
       return handlerFn(info);
     }),
@@ -1059,7 +1059,7 @@ describe("Orchestrator", () => {
         if (callCount === 1) {
           return { sessionId: "bg-sid", startedAt: new Date(), result: new Promise(() => {}), kill: mock(async () => {}) };
         }
-        if (info.systemPrompt?.includes("naming assistant")) {
+        if (info.replaceSystemPrompt?.includes("task title")) {
           return resolvedQuery("Research pricing");
         }
         return resolvedQuery({ action: "send", message: "ok", actionReason: "ok" });

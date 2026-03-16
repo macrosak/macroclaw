@@ -47,7 +47,7 @@ function mockHangingSpawn(stdout: string) {
 
 const TEST_WORKSPACE = "/tmp/claude2-test";
 
-function makeClaude(config?: { model?: string; systemPrompt?: string }) {
+function makeClaude(config?: { model?: string; appendSystemPrompt?: string }) {
   return new Claude({ workspace: TEST_WORKSPACE, ...config });
 }
 
@@ -147,22 +147,32 @@ describe("Claude", () => {
       expect(args).not.toContain("sonnet");
     });
 
-    it("uses constructor systemPrompt as default", async () => {
+    it("uses constructor appendSystemPrompt as default", async () => {
       mockSpawn({ stdout: envelope({ result: "ok" }), exitCode: 0 });
-      const claude = makeClaude({ systemPrompt: "Be helpful." });
+      const claude = makeClaude({ appendSystemPrompt: "Be helpful." });
       await claude.newSession("hi", textResult).result;
       const args = spawnArgs();
       expect(args).toContain("--append-system-prompt");
       expect(args).toContain("Be helpful.");
     });
 
-    it("per-call systemPrompt overrides constructor systemPrompt", async () => {
+    it("per-call appendSystemPrompt overrides constructor", async () => {
       mockSpawn({ stdout: envelope({ result: "ok" }), exitCode: 0 });
-      const claude = makeClaude({ systemPrompt: "Be helpful." });
-      await claude.newSession("hi", textResult, { systemPrompt: "Be brief." }).result;
+      const claude = makeClaude({ appendSystemPrompt: "Be helpful." });
+      await claude.newSession("hi", textResult, { appendSystemPrompt: "Be brief." }).result;
       const args = spawnArgs();
       expect(args).toContain("Be brief.");
       expect(args).not.toContain("Be helpful.");
+    });
+
+    it("replaceSystemPrompt uses --system-prompt flag", async () => {
+      mockSpawn({ stdout: envelope({ result: "ok" }), exitCode: 0 });
+      const claude = makeClaude({ appendSystemPrompt: "Be helpful." });
+      await claude.newSession("hi", textResult, { replaceSystemPrompt: "Name this task." }).result;
+      const args = spawnArgs();
+      expect(args).toContain("--system-prompt");
+      expect(args).toContain("Name this task.");
+      expect(args).not.toContain("--append-system-prompt");
     });
 
     it("omits --model when none specified", async () => {

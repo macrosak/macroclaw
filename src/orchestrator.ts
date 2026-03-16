@@ -108,7 +108,7 @@ export class Orchestrator {
 
   constructor(config: OrchestratorConfig) {
     this.#config = config;
-    this.#claude = config.claude ?? new Claude({ workspace: config.workspace, systemPrompt: SYSTEM_PROMPT });
+    this.#claude = config.claude ?? new Claude({ workspace: config.workspace, appendSystemPrompt: SYSTEM_PROMPT });
     this.#queue = new Queue<OrchestratorRequest>();
     this.#queue.setHandler((request) => this.#handleRequest(request));
 
@@ -455,11 +455,10 @@ export class Orchestrator {
 
   #generateDisplayName(prompt: string, sessionId: string): void {
     try {
-      const namingPrompt = `${NAMING_SYSTEM_PROMPT}\n\nTask prompt:\n${prompt.slice(0, 200)}`;
       const query = this.#claude.newSession(
-        namingPrompt,
+        prompt,
         textResultType,
-        { model: "haiku", systemPrompt: "You are a naming assistant. Return only the short title. No explanation, quotes, or formatting." },
+        { model: "haiku", replaceSystemPrompt: NAMING_SYSTEM_PROMPT },
       );
 
       query.result.then(

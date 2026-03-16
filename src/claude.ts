@@ -17,13 +17,14 @@ export type InferResult<R extends ResultType> = R extends { type: "text" }
 export interface ClaudeConfig {
   workspace: string;
   model?: string;
-  systemPrompt?: string;
+  appendSystemPrompt?: string;
 }
 
 /** Per-call overrides */
 export interface QueryOptions {
   model?: string;
-  systemPrompt?: string;
+  appendSystemPrompt?: string;
+  replaceSystemPrompt?: string;
 }
 
 /** Resolved query result — wraps the typed output with metadata */
@@ -77,12 +78,12 @@ type SessionMode =
 export class Claude {
   #workspace: string;
   #model?: string;
-  #systemPrompt?: string;
+  #appendSystemPrompt?: string;
 
   constructor(config: ClaudeConfig) {
     this.#workspace = config.workspace;
     this.#model = config.model;
-    this.#systemPrompt = config.systemPrompt;
+    this.#appendSystemPrompt = config.appendSystemPrompt;
   }
 
   newSession<R extends ResultType>(prompt: string, resultType: R, options?: QueryOptions): RunningQuery<InferResult<R>> {
@@ -102,7 +103,6 @@ export class Claude {
     delete env.CLAUDECODE;
 
     const model = options?.model ?? this.#model;
-    const systemPrompt = options?.systemPrompt ?? this.#systemPrompt;
     const sessionId = mode.kind === "resume" ? mode.sessionId : crypto.randomUUID();
 
     const args = ["claude", "-p", "--output-format", "json", "--disallowedTools", "CronList,CronDelete,CronCreate,AskUserQuestion"];
@@ -120,10 +120,15 @@ export class Claude {
     }
 
     if (model) args.push("--model", model);
-    if (systemPrompt) args.push("--append-system-prompt", systemPrompt);
+    if (options?.replaceSystemPrompt) {
+      args.push("--system-prompt", options.replaceSystemPrompt);
+    } else {
+      const appendPrompt = options?.appendSystemPrompt ?? this.#appendSystemPrompt;
+      if (appendPrompt) args.push("--append-system-prompt", appendPrompt);
+    }
     args.push(prompt);
 
-    log.debug({ model, sessionId, promptLen: prompt.length, mode: mode.kind, hasSystemPrompt: !!systemPrompt }, "Sending to Claude");
+    log.debug({ model, sessionId, promptLen: prompt.length, mode: mode.kind }, "Sending to Claude");
 
     const proc = Bun.spawn(args, { cwd: this.#workspace, env, stdout: "pipe", stderr: "pipe" });
     const startedAt = new Date();

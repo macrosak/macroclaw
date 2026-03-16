@@ -42,7 +42,7 @@ describe("claude CLI structured output", () => {
     const { value } = await claude.newSession(
       "Say hello",
       objectResultType(simpleSchema),
-      { model: "haiku", systemPrompt: "You are a helpful assistant. This is a direct message from the user." },
+      { model: "haiku", appendSystemPrompt: "You are a helpful assistant. This is a direct message from the user." },
     ).result;
 
     console.log("Simple (with sysprompt):", JSON.stringify(value, null, 2));
@@ -54,7 +54,7 @@ describe("claude CLI structured output", () => {
     const { value } = await claude.newSession(
       "Say hello",
       objectResultType(fullSchema),
-      { model: "haiku", systemPrompt: "You are a helpful assistant. This is a direct message from the user." },
+      { model: "haiku", appendSystemPrompt: "You are a helpful assistant. This is a direct message from the user." },
     ).result;
 
     console.log("Full (with sysprompt):", JSON.stringify(value, null, 2));
@@ -67,7 +67,7 @@ describe("claude CLI structured output", () => {
     const { value } = await claude.newSession(
       "Say hello",
       objectResultType(fullSchema),
-      { model: "sonnet", systemPrompt: "You are an AI assistant running inside macroclaw. This is a direct message from the user." },
+      { model: "sonnet", appendSystemPrompt: "You are an AI assistant running inside macroclaw. This is a direct message from the user." },
     ).result;
 
     console.log("Full (real workspace):", JSON.stringify(value, null, 2));
