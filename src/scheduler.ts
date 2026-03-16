@@ -86,8 +86,12 @@ export class Scheduler {
 			if (job.cron) {
 				this.#evaluateCronJob(job as Job & { cron: string }, now);
 			} else if (job.fireAt) {
-				const result = this.#evaluateFireAtJob(job as Job & { fireAt: string }, now);
-				if (result === "remove") removedIndices.push(i);
+				try {
+					const result = this.#evaluateFireAtJob(job as Job & { fireAt: string }, now);
+					if (result === "remove") removedIndices.push(i);
+				} catch (err) {
+					log.warn({ name: job.name, fireAt: job.fireAt, err: err instanceof Error ? err.message : err }, "Failed to evaluate fireAt job");
+				}
 			} else {
 				log.warn({ name: job.name }, "Job has neither cron nor fireAt, skipping");
 			}
