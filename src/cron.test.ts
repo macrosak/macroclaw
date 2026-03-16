@@ -39,6 +39,12 @@ function minutesAgoCron(minutesAgo: number): string {
   return `${past.getMinutes()} ${past.getHours()} ${past.getDate()} ${past.getMonth() + 1} *`;
 }
 
+// Build a cron expression that matched N days ago
+function daysAgoCron(daysAgo: number): string {
+  const past = new Date(Date.now() - daysAgo * 24 * 60 * 60_000);
+  return `${past.getMinutes()} ${past.getHours()} ${past.getDate()} ${past.getMonth() + 1} *`;
+}
+
 beforeEach(() => {
   mkdirSync(SCHEDULE_DIR, { recursive: true });
 });
@@ -336,5 +342,42 @@ describe("missed non-recurring events", () => {
 
     const updated = readScheduleConfig();
     expect(updated.jobs).toHaveLength(0);
+  });
+
+  it("discards non-recurring job missed by more than a week without firing", () => {
+    writeScheduleConfig({
+      jobs: [
+        { name: "stale", cron: daysAgoCron(10), prompt: "too old", recurring: false },
+        { name: "keeper", cron: nonMatchingCron(), prompt: "stay" },
+      ],
+    });
+
+    const onJob = makeOnJob();
+    const cron = new CronScheduler(TEST_DIR, { onJob });
+    cron.start();
+    cron.stop();
+
+    expect(onJob).not.toHaveBeenCalled();
+
+    const updated = readScheduleConfig();
+    expect(updated.jobs).toHaveLength(1);
+    expect(updated.jobs[0].name).toBe("keeper");
+  });
+
+  it("fires non-recurring job missed by 6 days (within week window)", () => {
+    writeScheduleConfig({
+      jobs: [{ name: "recent", cron: daysAgoCron(6), prompt: "still valid", recurring: false }],
+    });
+
+    const onJob = makeOnJob();
+    const cron = new CronScheduler(TEST_DIR, { onJob });
+    cron.start();
+    cron.stop();
+
+    expect(onJob).toHaveBeenCalledTimes(1);
+    const call = onJob.mock.calls[0];
+    expect(call[0]).toBe("recent");
+    expect(call[1]).toContain("[missed event, should have fired");
+    expect(call[1]).toContain("still valid");
   });
 });
