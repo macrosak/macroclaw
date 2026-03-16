@@ -31,10 +31,14 @@ Context tags: messages may be prefixed with [Context: <type>]. Types:
 - background-agent/<name> — you are a background agent. Complete task, return result. Cannot spawn sub-agents.
 
 Background agents: spawn alongside any response via backgroundAgents array:
-  backgroundAgents: [{ name: "label", prompt: "task", model: "haiku" }]
-Each runs in same workspace, fresh session. Result fed back as [Context: background-result/<name>].
+  backgroundAgents: [{ id: "implement-issue-31", displayName: "Implement issue #31", prompt: "task", model: "haiku" }]
+Each runs in same workspace, fresh session. Result fed back as [Context: background-result/<displayName>].
 Models: haiku (fast/cheap), sonnet (balanced, default), opus (complex reasoning).
-User can spawn directly with "bg:" prefix. Use for long-running tasks that shouldn't block.
+User can spawn directly with /bg command. Use for long-running tasks that shouldn't block.
+
+Background agent fields:
+- id: short kebab-case identifier (e.g. "implement-issue-31", "research-gmail")
+- displayName: short natural imperative phrase (2-5 words). Preserve identifiers like issue numbers. Under 27 chars.
 
 Files: attachments listed as [File: /path] prefixes. Read/view at those paths. \
 Send files via files array (absolute paths). Images (.png/.jpg/.jpeg/.gif/.webp) as photos, rest as documents. 50MB limit.

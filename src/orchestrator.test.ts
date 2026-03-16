@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { existsSync, rmSync } from "node:fs";
 import { type Claude, QueryParseError, QueryProcessError, type QueryResult, type RunningQuery } from "./claude";
-import { Orchestrator, type OrchestratorConfig, type OrchestratorResponse } from "./orchestrator";
+import { generateAgentId, Orchestrator, type OrchestratorConfig, type OrchestratorResponse } from "./orchestrator";
 import { saveSessions } from "./sessions";
 
 const tmpSettingsDir = "/tmp/macroclaw-test-orchestrator-settings";
@@ -422,7 +422,7 @@ describe("Orchestrator", () => {
             action: "send",
             message: "Starting research",
             actionReason: "needs research",
-            backgroundAgents: [{ name: "research", prompt: "research this" }],
+            backgroundAgents: [{ id: "research", displayName: "Research this", prompt: "research this" }],
           });
         }
         return resolvedQuery({ action: "send", message: "research result", actionReason: "done" });
@@ -434,7 +434,7 @@ describe("Orchestrator", () => {
 
       const messages = responses.map((r) => r.message);
       expect(messages).toContain("Starting research");
-      expect(messages).toContain('Background agent "research" started.');
+      expect(messages).toContain('Background agent <b>Research this</b> started.');
 
       // Background agent result should be fed back
       await waitForProcessing(100);
@@ -870,8 +870,9 @@ describe("Orchestrator", () => {
       orch.handleBackgroundCommand("research pricing");
       await waitForProcessing();
 
-      expect(responses[0].message).toBe('Background agent "research-pricing" started.');
-      expect(claude.calls).toHaveLength(1);
+      expect(responses[0].message).toBe('Background agent <b>research-pricing</b> started.');
+      // 1 bg agent + 1 naming query
+      expect(claude.calls).toHaveLength(2);
     });
   });
 
@@ -904,8 +905,8 @@ describe("Orchestrator", () => {
       resolvePromise!(queryResult({ action: "send", message: "done!", actionReason: "completed" }));
       await waitForProcessing(100);
 
-      // The bg result gets fed back to the queue and processed
-      expect(callCount).toBe(2); // 1 bg agent + 1 bg result fed back
+      // 1 bg agent + 1 naming query + 1 bg result fed back
+      expect(callCount).toBe(3);
     });
 
     it("feeds error back to queue on spawn failure", async () => {
@@ -934,8 +935,8 @@ describe("Orchestrator", () => {
       rejectPromise!(new Error("spawn failed"));
       await waitForProcessing(100);
 
-      // Error should be fed back and processed
-      expect(callCount).toBe(2);
+      // 1 bg agent + 1 naming query + 1 error result fed back
+      expect(callCount).toBe(3);
       expect(responses[responses.length - 1].message).toBe("error processed");
     });
 
@@ -1017,6 +1018,85 @@ describe("Orchestrator", () => {
       await waitForProcessing();
 
       expect(failingOnResponse).toHaveBeenCalled();
+    });
+  });
+
+  describe("generateAgentId", () => {
+    it("converts simple prompt to kebab-case", () => {
+      expect(generateAgentId("research pricing")).toBe("research-pricing");
+    });
+
+    it("strips URLs", () => {
+      expect(generateAgentId("implement https://github.com/foo/bar/issues/31")).toBe("implement");
+    });
+
+    it("preserves issue numbers", () => {
+      expect(generateAgentId("implement issue #31 in macroclaw")).toBe("implement-issue-#31-in-ma");
+    });
+
+    it("truncates to 25 chars", () => {
+      expect(generateAgentId("a very long prompt that exceeds the limit")).toBe("a-very-long-prompt-that-e");
+    });
+
+    it("strips special characters", () => {
+      expect(generateAgentId("hello, world! @test")).toBe("hello-world-test");
+    });
+
+    it("falls back to bg-timestamp for empty result", () => {
+      expect(generateAgentId("!!!")).toMatch(/^bg-\d+$/);
+    });
+
+    it("handles URL-only prompt", () => {
+      expect(generateAgentId("https://github.com/foo/bar")).toMatch(/^bg-\d+$/);
+    });
+  });
+
+  describe("background agent displayName", () => {
+    it("user-initiated bg agents get displayName from naming query", async () => {
+      let callCount = 0;
+      const claude = mockClaude((info: CallInfo): RunningQuery<unknown> => {
+        callCount++;
+        if (callCount === 1) {
+          return { sessionId: "bg-sid", startedAt: new Date(), result: new Promise(() => {}), kill: mock(async () => {}) };
+        }
+        if (info.systemPrompt?.includes("task title")) {
+          return resolvedQuery("Research pricing");
+        }
+        return resolvedQuery({ action: "send", message: "ok", actionReason: "ok" });
+      });
+      const { orch, responses } = makeOrchestrator(claude);
+
+      orch.handleBackgroundCommand("research pricing models for our product");
+      await waitForProcessing();
+
+      orch.handleBackgroundList();
+      await waitForProcessing();
+
+      const listMsg = responses.find((r) => r.message?.includes("Research pricing"));
+      expect(listMsg).toBeTruthy();
+    });
+
+    it("Claude-spawned agents use schema name as displayName in started message", async () => {
+      let callCount = 0;
+      const claude = mockClaude((): RunningQuery<unknown> => {
+        callCount++;
+        if (callCount === 1) {
+          return resolvedQuery({
+            action: "send",
+            message: "Starting",
+            actionReason: "ok",
+            backgroundAgents: [{ id: "implement-issue-31", displayName: "Implement issue #31", prompt: "implement issue #31 in macroclaw" }],
+          });
+        }
+        return resolvedQuery({ action: "send", message: "done", actionReason: "ok" });
+      });
+      const { orch, responses } = makeOrchestrator(claude);
+
+      orch.handleMessage("hello");
+      await waitForProcessing();
+
+      const messages = responses.map((r) => r.message);
+      expect(messages).toContain('Background agent <b>Implement issue #31</b> started.');
     });
   });
 });
