@@ -4,7 +4,7 @@ import { CronExpressionParser } from "cron-parser";
 import { z } from "zod/v4";
 import { createLogger } from "./logger";
 
-const log = createLogger("cron");
+const log = createLogger("scheduler");
 
 const cronJobSchema = z.object({
   name: z.string(),
@@ -20,20 +20,20 @@ const cronConfigSchema = z.object({
 
 type CronConfig = z.infer<typeof cronConfigSchema>;
 
-export interface CronSchedulerConfig {
+export interface SchedulerConfig {
   onJob: (name: string, prompt: string, model?: string) => void;
 }
 
 const TICK_INTERVAL = 10_000; // 10 seconds
 const MAX_MISSED_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
 
-export class CronScheduler {
+export class Scheduler {
   #lastMinute = -1;
   #schedulePath: string;
-  #config: CronSchedulerConfig;
+  #config: SchedulerConfig;
   #timer: Timer | null = null;
 
-  constructor(workspace: string, config: CronSchedulerConfig) {
+  constructor(workspace: string, config: SchedulerConfig) {
     this.#schedulePath = join(workspace, "data", "schedule.json");
     this.#config = config;
   }

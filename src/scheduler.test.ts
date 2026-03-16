@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { CronScheduler } from "./cron";
+import { Scheduler } from "./scheduler";
 
-const TEST_DIR = join(import.meta.dir, "..", ".test-workspace-cron");
+const TEST_DIR = join(import.meta.dir, "..", ".test-workspace-scheduler");
 const SCHEDULE_DIR = join(TEST_DIR, "data");
 const SCHEDULE_FILE = join(SCHEDULE_DIR, "schedule.json");
 
@@ -53,14 +53,14 @@ afterEach(() => {
   rmSync(TEST_DIR, { recursive: true, force: true });
 });
 
-describe("CronScheduler", () => {
+describe("Scheduler", () => {
   it("calls onJob for matching cron job", () => {
     writeScheduleConfig({
       jobs: [{ name: "test-job", cron: currentMinuteCron(), prompt: "do something" }],
     });
 
     const onJob = makeOnJob();
-    const cron = new CronScheduler(TEST_DIR, { onJob });
+    const cron = new Scheduler(TEST_DIR, { onJob });
     cron.start();
     cron.stop();
 
@@ -73,7 +73,7 @@ describe("CronScheduler", () => {
     });
 
     const onJob = makeOnJob();
-    const cron = new CronScheduler(TEST_DIR, { onJob });
+    const cron = new Scheduler(TEST_DIR, { onJob });
     cron.start();
     cron.stop();
 
@@ -84,7 +84,7 @@ describe("CronScheduler", () => {
     rmSync(SCHEDULE_FILE, { force: true });
 
     const onJob = makeOnJob();
-    const cron = new CronScheduler(TEST_DIR, { onJob });
+    const cron = new Scheduler(TEST_DIR, { onJob });
     cron.start();
     cron.stop();
 
@@ -95,7 +95,7 @@ describe("CronScheduler", () => {
     writeFileSync(SCHEDULE_FILE, "not json{{{");
 
     const onJob = makeOnJob();
-    const cron = new CronScheduler(TEST_DIR, { onJob });
+    const cron = new Scheduler(TEST_DIR, { onJob });
     cron.start();
     cron.stop();
 
@@ -106,7 +106,7 @@ describe("CronScheduler", () => {
     writeScheduleConfig({ jobs: "not-array" });
 
     const onJob = makeOnJob();
-    const cron = new CronScheduler(TEST_DIR, { onJob });
+    const cron = new Scheduler(TEST_DIR, { onJob });
     cron.start();
     cron.stop();
 
@@ -122,7 +122,7 @@ describe("CronScheduler", () => {
     });
 
     const onJob = makeOnJob();
-    const cron = new CronScheduler(TEST_DIR, { onJob });
+    const cron = new Scheduler(TEST_DIR, { onJob });
     cron.start();
     cron.stop();
 
@@ -134,7 +134,7 @@ describe("CronScheduler", () => {
     writeScheduleConfig({ jobs: [] });
 
     const onJob = makeOnJob();
-    const cron = new CronScheduler(TEST_DIR, { onJob });
+    const cron = new Scheduler(TEST_DIR, { onJob });
     cron.start();
     cron.stop(); // should not throw
   });
@@ -145,7 +145,7 @@ describe("CronScheduler", () => {
     });
 
     const onJob = makeOnJob();
-    const cron = new CronScheduler(TEST_DIR, { onJob });
+    const cron = new Scheduler(TEST_DIR, { onJob });
     cron.start();
     cron.stop();
 
@@ -153,7 +153,7 @@ describe("CronScheduler", () => {
 
     // Start again with a new instance — the lastMinute tracker is per-instance
     const onJob2 = makeOnJob();
-    const cron2 = new CronScheduler(TEST_DIR, { onJob: onJob2 });
+    const cron2 = new Scheduler(TEST_DIR, { onJob: onJob2 });
     cron2.start();
     cron2.stop();
 
@@ -169,7 +169,7 @@ describe("CronScheduler", () => {
     });
 
     const onJob = makeOnJob();
-    const cron = new CronScheduler(TEST_DIR, { onJob });
+    const cron = new Scheduler(TEST_DIR, { onJob });
     cron.start();
     cron.stop();
 
@@ -184,7 +184,7 @@ describe("CronScheduler", () => {
     });
 
     const onJob = makeOnJob();
-    const cron = new CronScheduler(TEST_DIR, { onJob });
+    const cron = new Scheduler(TEST_DIR, { onJob });
     cron.start();
     cron.stop();
 
@@ -200,7 +200,7 @@ describe("CronScheduler", () => {
     });
 
     const onJob = makeOnJob();
-    const cron = new CronScheduler(TEST_DIR, { onJob });
+    const cron = new Scheduler(TEST_DIR, { onJob });
     cron.start();
     cron.stop();
 
@@ -217,7 +217,7 @@ describe("CronScheduler", () => {
     });
 
     const onJob = makeOnJob();
-    const cron = new CronScheduler(TEST_DIR, { onJob });
+    const cron = new Scheduler(TEST_DIR, { onJob });
     cron.start();
     cron.stop();
 
@@ -232,7 +232,7 @@ describe("CronScheduler", () => {
     });
 
     const onJob = makeOnJob();
-    const cron = new CronScheduler(TEST_DIR, { onJob });
+    const cron = new Scheduler(TEST_DIR, { onJob });
     cron.start();
     cron.stop();
 
@@ -249,7 +249,7 @@ describe("CronScheduler", () => {
     chmodSync(SCHEDULE_FILE, 0o444);
 
     const onJob = makeOnJob();
-    const cron = new CronScheduler(TEST_DIR, { onJob });
+    const cron = new Scheduler(TEST_DIR, { onJob });
     cron.start();
     cron.stop();
 
@@ -264,7 +264,7 @@ describe("CronScheduler", () => {
     });
 
     const onJob = makeOnJob();
-    const cron = new CronScheduler(TEST_DIR, { onJob });
+    const cron = new Scheduler(TEST_DIR, { onJob });
     cron.start();
     cron.stop();
 
@@ -280,7 +280,7 @@ describe("missed non-recurring events", () => {
     });
 
     const onJob = makeOnJob();
-    const cron = new CronScheduler(TEST_DIR, { onJob });
+    const cron = new Scheduler(TEST_DIR, { onJob });
     cron.start();
     cron.stop();
 
@@ -301,7 +301,7 @@ describe("missed non-recurring events", () => {
     });
 
     const onJob = makeOnJob();
-    const cron = new CronScheduler(TEST_DIR, { onJob });
+    const cron = new Scheduler(TEST_DIR, { onJob });
     cron.start();
     cron.stop();
 
@@ -317,7 +317,7 @@ describe("missed non-recurring events", () => {
     });
 
     const onJob = makeOnJob();
-    const cron = new CronScheduler(TEST_DIR, { onJob });
+    const cron = new Scheduler(TEST_DIR, { onJob });
     cron.start();
     cron.stop();
 
@@ -330,7 +330,7 @@ describe("missed non-recurring events", () => {
     });
 
     const onJob = makeOnJob();
-    const cron = new CronScheduler(TEST_DIR, { onJob });
+    const cron = new Scheduler(TEST_DIR, { onJob });
     cron.start();
     cron.stop();
 
@@ -353,7 +353,7 @@ describe("missed non-recurring events", () => {
     });
 
     const onJob = makeOnJob();
-    const cron = new CronScheduler(TEST_DIR, { onJob });
+    const cron = new Scheduler(TEST_DIR, { onJob });
     cron.start();
     cron.stop();
 
@@ -370,7 +370,7 @@ describe("missed non-recurring events", () => {
     });
 
     const onJob = makeOnJob();
-    const cron = new CronScheduler(TEST_DIR, { onJob });
+    const cron = new Scheduler(TEST_DIR, { onJob });
     cron.start();
     cron.stop();
 
