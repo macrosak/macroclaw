@@ -73,7 +73,7 @@ Two job types, discriminated by field:
 |-------|----------|-------------|
 | `name` | yes | Short kebab-case identifier (e.g. `dentist-reminder`). Appears in the `[Context: cron/<name>]` prefix when fired. |
 | `cron` | for recurring | Standard cron expression (UTC). See reference below. |
-| `fireAt` | for one-time | ISO 8601 timestamp with timezone offset (e.g. `2026-03-15T08:00:00+01:00`). Must include offset — no bare dates, no Z suffix. |
+| `fireAt` | for one-time | ISO 8601 timestamp, preferably with timezone offset (e.g. `2026-03-15T08:00:00+01:00`). Any format parseable by JavaScript `Date` works. |
 | `prompt` | yes | The message sent to the agent when the event fires. Write it as a natural instruction. |
 | `model` | no | Override the model. Use `haiku` for cheap checks, `opus` for complex reasoning. Omit for default. |
 

@@ -360,9 +360,9 @@ describe("Scheduler — validation and edge cases", () => {
 		expect(onJob).not.toHaveBeenCalled();
 	});
 
-	it("skips fireAt without timezone offset", () => {
+	it("skips fireAt with unparseable date", () => {
 		writeScheduleConfig({
-			jobs: [{ name: "bad", fireAt: "2026-03-16T08:00:00", prompt: "no offset" }],
+			jobs: [{ name: "bad", fireAt: "not-a-date", prompt: "invalid" }],
 		});
 
 		const onJob = makeOnJob();
@@ -375,19 +375,6 @@ describe("Scheduler — validation and edge cases", () => {
 		// Job should remain (not removed, just skipped)
 		const updated = readScheduleConfig();
 		expect(updated.jobs).toHaveLength(1);
-	});
-
-	it("skips fireAt with Z suffix (no explicit offset)", () => {
-		writeScheduleConfig({
-			jobs: [{ name: "bad", fireAt: "2026-03-16T08:00:00Z", prompt: "z suffix" }],
-		});
-
-		const onJob = makeOnJob();
-		const s = new Scheduler(TEST_DIR, { onJob });
-		s.start();
-		s.stop();
-
-		expect(onJob).not.toHaveBeenCalled();
 	});
 
 	it("stop clears the interval", () => {
