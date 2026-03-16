@@ -6,8 +6,6 @@ import { createLogger } from "./logger";
 
 const log = createLogger("scheduler");
 
-const ISO_WITH_OFFSET = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?[+-]\d{2}:\d{2}$/;
-
 const jobSchema = z.object({
 	name: z.string(),
 	prompt: z.string(),
@@ -125,11 +123,6 @@ export class Scheduler {
 		job: { name: string; fireAt: string; prompt: string; model?: string },
 		now: Date,
 	): "remove" | "keep" {
-		if (!ISO_WITH_OFFSET.test(job.fireAt)) {
-			log.warn({ name: job.name, fireAt: job.fireAt }, "Invalid fireAt format, expected ISO 8601 with timezone offset");
-			return "keep";
-		}
-
 		const fireAt = new Date(job.fireAt);
 		if (Number.isNaN(fireAt.getTime())) {
 			log.warn({ name: job.name, fireAt: job.fireAt }, "Invalid fireAt date");
