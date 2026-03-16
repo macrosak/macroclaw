@@ -25,6 +25,7 @@ export interface CronSchedulerConfig {
 }
 
 const TICK_INTERVAL = 10_000; // 10 seconds
+const MAX_MISSED_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
 
 export class CronScheduler {
   #lastMinute = -1;
@@ -87,13 +88,17 @@ export class CronScheduler {
           if (job.recurring === false) {
             firedNonRecurring.push(i);
           }
-        } else if (job.recurring === false && diff >= 60_000) {
-          // Non-recurring job in the past — fire regardless of how late
+        } else if (job.recurring === false && diff >= 60_000 && diff <= MAX_MISSED_MS) {
+          // Non-recurring job in the past — fire if missed within the last week
           const missedMinutes = Math.round(diff / 60_000);
           const firedAt = prev.toISOString();
           const missedPrompt = `[missed event, should have fired ${missedMinutes} min ago at ${firedAt}] ${job.prompt}`;
           log.info({ name: job.name, missedMinutes, firedAt }, "Firing missed non-recurring job");
           this.#config.onJob(job.name, missedPrompt, job.model);
+          firedNonRecurring.push(i);
+        } else if (job.recurring === false && diff > MAX_MISSED_MS) {
+          // Non-recurring job missed by more than a week — discard without firing
+          log.warn({ name: job.name, missedMinutes: Math.round(diff / 60_000) }, "Discarding stale non-recurring job");
           firedNonRecurring.push(i);
         }
       } catch (err) {
