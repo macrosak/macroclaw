@@ -128,7 +128,7 @@ export class Claude {
     }
     args.push(prompt);
 
-    log.debug({ model, sessionId, promptLen: prompt.length, mode: mode.kind }, "Sending to Claude");
+    log.debug({ cmd: args.join(" "), sessionId, mode: mode.kind }, "Sending to Claude");
 
     const proc = Bun.spawn(args, { cwd: this.#workspace, env, stdout: "pipe", stderr: "pipe" });
     const startedAt = new Date();
