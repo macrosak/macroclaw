@@ -1,7 +1,7 @@
 import type { Bot } from "grammy";
-import { CronScheduler } from "./cron";
 import { createLogger } from "./logger";
 import { type Claude, Orchestrator, type OrchestratorResponse } from "./orchestrator";
+import { Scheduler } from "./scheduler";
 import type { SpeechToText } from "./speech-to-text";
 import { createBot, downloadFile, sendFile, sendResponse } from "./telegram";
 
@@ -42,10 +42,10 @@ export class App {
 
   start() {
     log.info("Starting macroclaw...");
-    const cron = new CronScheduler(this.#config.workspace, {
+    const scheduler = new Scheduler(this.#config.workspace, {
       onJob: (name, prompt, model) => this.#orchestrator.handleCron(name, prompt, model),
     });
-    cron.start();
+    scheduler.start();
     this.#bot.api.setMyCommands([
       { command: "chatid", description: "Show current chat ID" },
       { command: "session", description: "Show current session ID" },
