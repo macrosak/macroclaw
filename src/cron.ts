@@ -97,9 +97,19 @@ export class CronScheduler {
           this.#config.onJob(job.name, missedPrompt, job.model);
           firedNonRecurring.push(i);
         } else if (job.recurring === false && diff > MAX_MISSED_MS) {
-          // Non-recurring job missed by more than a week — discard without firing
-          log.warn({ name: job.name, missedMinutes: Math.round(diff / 60_000) }, "Discarding stale non-recurring job");
-          firedNonRecurring.push(i);
+          // prev() returned a far-past date — check if it's actually upcoming
+          // (timezone can cause prev() to skip to last year if today's occurrence hasn't passed in local time)
+          const nextInterval = CronExpressionParser.parse(job.cron);
+          const nextOccurrence = nextInterval.next();
+          const nextDiff = Math.abs(now.getTime() - nextOccurrence.getTime());
+          if (nextDiff <= MAX_MISSED_MS) {
+            // Next occurrence is soon — job is upcoming, keep it
+            log.debug({ name: job.name }, "Non-recurring job upcoming, skipping");
+          } else {
+            // Truly stale — discard without firing
+            log.warn({ name: job.name, missedMinutes: Math.round(diff / 60_000) }, "Discarding stale non-recurring job");
+            firedNonRecurring.push(i);
+          }
         }
       } catch (err) {
         log.warn({ cron: job.cron, err: err instanceof Error ? err.message : err }, "Invalid cron expression");

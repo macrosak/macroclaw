@@ -364,6 +364,29 @@ describe("missed non-recurring events", () => {
     expect(updated.jobs[0].name).toBe("keeper");
   });
 
+  it("keeps non-recurring job whose next occurrence is within a week", () => {
+    // Simulates timezone mismatch: prev() returns last year but next() is today/soon
+    const future = new Date(Date.now() + 3 * 60 * 60_000); // 3 hours from now
+    const futureCron = `${future.getMinutes()} ${future.getHours()} ${future.getDate()} ${future.getMonth() + 1} *`;
+
+    writeScheduleConfig({
+      jobs: [{ name: "upcoming", cron: futureCron, prompt: "soon", recurring: false }],
+    });
+
+    const onJob = makeOnJob();
+    const cron = new CronScheduler(TEST_DIR, { onJob });
+    cron.start();
+    cron.stop();
+
+    // Should not fire — it's upcoming, not missed
+    expect(onJob).not.toHaveBeenCalled();
+
+    // Should still be in schedule.json
+    const updated = readScheduleConfig();
+    expect(updated.jobs).toHaveLength(1);
+    expect(updated.jobs[0].name).toBe("upcoming");
+  });
+
   it("fires non-recurring job missed by 6 days (within week window)", () => {
     writeScheduleConfig({
       jobs: [{ name: "recent", cron: daysAgoCron(6), prompt: "still valid", recurring: false }],
