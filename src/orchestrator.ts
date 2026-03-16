@@ -455,10 +455,11 @@ export class Orchestrator {
 
   #generateDisplayName(prompt: string, sessionId: string): void {
     try {
+      const namingPrompt = `${NAMING_SYSTEM_PROMPT}\n\nTask prompt:\n${prompt.slice(0, 200)}`;
       const query = this.#claude.newSession(
-        prompt.slice(0, 200),
+        namingPrompt,
         textResultType,
-        { model: "haiku", systemPrompt: NAMING_SYSTEM_PROMPT },
+        { model: "haiku", systemPrompt: "You are a naming assistant. Return only the short title. No explanation, quotes, or formatting." },
       );
 
       query.result.then(

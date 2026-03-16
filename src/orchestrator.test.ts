@@ -1059,7 +1059,7 @@ describe("Orchestrator", () => {
         if (callCount === 1) {
           return { sessionId: "bg-sid", startedAt: new Date(), result: new Promise(() => {}), kill: mock(async () => {}) };
         }
-        if (info.systemPrompt?.includes("task title")) {
+        if (info.systemPrompt?.includes("naming assistant")) {
           return resolvedQuery("Research pricing");
         }
         return resolvedQuery({ action: "send", message: "ok", actionReason: "ok" });
