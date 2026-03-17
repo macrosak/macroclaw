@@ -20,7 +20,6 @@ interface CallInfo {
   prompt: string;
   sessionId?: string;
   model?: string;
-  replaceSystemPrompt?: string;
 }
 
 type MockHandler = (info: CallInfo) => RunningQuery<unknown>;
@@ -45,18 +44,18 @@ function mockClaude(handler: MockHandler | unknown) {
     : () => resolvedQuery(handler);
 
   const claude = {
-    newSession: mock((prompt: string, _resultType: unknown, options?: { model?: string; replaceSystemPrompt?: string }) => {
-      const info: CallInfo = { method: "newSession", prompt, model: options?.model, replaceSystemPrompt: options?.replaceSystemPrompt };
+    newSession: mock((prompt: string, _resultType: unknown, options?: { model?: string }) => {
+      const info: CallInfo = { method: "newSession", prompt, model: options?.model };
       calls.push(info);
       return handlerFn(info);
     }),
-    resumeSession: mock((sessionId: string, prompt: string, _resultType: unknown, options?: { model?: string; replaceSystemPrompt?: string }) => {
-      const info: CallInfo = { method: "resumeSession", sessionId, prompt, model: options?.model, replaceSystemPrompt: options?.replaceSystemPrompt };
+    resumeSession: mock((sessionId: string, prompt: string, _resultType: unknown, options?: { model?: string }) => {
+      const info: CallInfo = { method: "resumeSession", sessionId, prompt, model: options?.model };
       calls.push(info);
       return handlerFn(info);
     }),
-    forkSession: mock((sessionId: string, prompt: string, _resultType: unknown, options?: { model?: string; replaceSystemPrompt?: string }) => {
-      const info: CallInfo = { method: "forkSession", sessionId, prompt, model: options?.model, replaceSystemPrompt: options?.replaceSystemPrompt };
+    forkSession: mock((sessionId: string, prompt: string, _resultType: unknown, options?: { model?: string }) => {
+      const info: CallInfo = { method: "forkSession", sessionId, prompt, model: options?.model };
       calls.push(info);
       return handlerFn(info);
     }),
@@ -871,8 +870,7 @@ describe("Orchestrator", () => {
       await waitForProcessing();
 
       expect(responses[0].message).toBe('Background agent <b>research-pricing</b> started.');
-      // 1 bg agent + 1 naming query
-      expect(claude.calls).toHaveLength(2);
+      expect(claude.calls).toHaveLength(1);
     });
   });
 
@@ -905,8 +903,8 @@ describe("Orchestrator", () => {
       resolvePromise!(queryResult({ action: "send", message: "done!", actionReason: "completed" }));
       await waitForProcessing(100);
 
-      // 1 bg agent + 1 naming query + 1 bg result fed back
-      expect(callCount).toBe(3);
+      // 1 bg agent + 1 bg result fed back
+      expect(callCount).toBe(2);
     });
 
     it("feeds error back to queue on spawn failure", async () => {
@@ -935,8 +933,8 @@ describe("Orchestrator", () => {
       rejectPromise!(new Error("spawn failed"));
       await waitForProcessing(100);
 
-      // 1 bg agent + 1 naming query + 1 error result fed back
-      expect(callCount).toBe(3);
+      // 1 bg agent + 1 error result fed back
+      expect(callCount).toBe(2);
       expect(responses[responses.length - 1].message).toBe("error processed");
     });
 
@@ -1053,18 +1051,11 @@ describe("Orchestrator", () => {
 
   describe("background agent displayName", () => {
     it("user-initiated bg agents get displayName from naming query", async () => {
-      let callCount = 0;
-      const claude = mockClaude((info: CallInfo): RunningQuery<unknown> => {
-        callCount++;
-        if (callCount === 1) {
-          return { sessionId: "bg-sid", startedAt: new Date(), result: new Promise(() => {}), kill: mock(async () => {}) };
-        }
-        if (info.replaceSystemPrompt?.includes("task title")) {
-          return resolvedQuery("Research pricing");
-        }
-        return resolvedQuery({ action: "send", message: "ok", actionReason: "ok" });
+      const claude = mockClaude((): RunningQuery<unknown> => {
+        return { sessionId: "bg-sid", startedAt: new Date(), result: new Promise(() => {}), kill: mock(async () => {}) };
       });
-      const { orch, responses } = makeOrchestrator(claude);
+      const namingClaude = mockClaude(() => resolvedQuery("Research pricing"));
+      const { orch, responses } = makeOrchestrator(claude, { namingClaude });
 
       orch.handleBackgroundCommand("research pricing models for our product");
       await waitForProcessing();
@@ -1074,6 +1065,41 @@ describe("Orchestrator", () => {
 
       const listMsg = responses.find((r) => r.message?.includes("Research pricing"));
       expect(listMsg).toBeTruthy();
+    });
+
+    it("naming failure does not affect background agent", async () => {
+      const claude = mockClaude((): RunningQuery<unknown> => {
+        return { sessionId: "bg-sid", startedAt: new Date(), result: new Promise(() => {}), kill: mock(async () => {}) };
+      });
+      const namingClaude = {
+        newSession: mock(() => { throw new Error("spawn failed"); }),
+        resumeSession: mock(),
+        forkSession: mock(),
+      } as unknown as Claude;
+      const { orch, responses } = makeOrchestrator(claude, { namingClaude });
+
+      orch.handleBackgroundCommand("research pricing");
+      await waitForProcessing();
+
+      expect(responses[0].message).toContain("started.");
+    });
+
+    it("naming rejection is handled gracefully", async () => {
+      const claude = mockClaude((): RunningQuery<unknown> => {
+        return { sessionId: "bg-sid", startedAt: new Date(), result: new Promise(() => {}), kill: mock(async () => {}) };
+      });
+      const namingClaude = mockClaude((): RunningQuery<unknown> => ({
+        sessionId: "naming-sid",
+        startedAt: new Date(),
+        result: Promise.reject(new Error("naming failed")),
+        kill: mock(async () => {}),
+      }));
+      const { orch, responses } = makeOrchestrator(claude, { namingClaude });
+
+      orch.handleBackgroundCommand("research pricing");
+      await waitForProcessing();
+
+      expect(responses[0].message).toContain("started.");
     });
 
     it("Claude-spawned agents use schema name as displayName in started message", async () => {

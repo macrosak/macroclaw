@@ -38,24 +38,16 @@ describe("claude CLI structured output", () => {
   }, 60_000);
 
   it("simple schema with system prompt", async () => {
-    const claude = new Claude({ workspace: WORKSPACE });
-    const { value } = await claude.newSession(
-      "Say hello",
-      objectResultType(simpleSchema),
-      { model: "haiku", appendSystemPrompt: "You are a helpful assistant. This is a direct message from the user." },
-    ).result;
+    const claude = new Claude({ workspace: WORKSPACE, model: "haiku", appendSystemPrompt: "You are a helpful assistant. This is a direct message from the user." });
+    const { value } = await claude.newSession("Say hello", objectResultType(simpleSchema)).result;
 
     console.log("Simple (with sysprompt):", JSON.stringify(value, null, 2));
     expect(value).not.toBeNull();
   }, 60_000);
 
   it("full schema with system prompt", async () => {
-    const claude = new Claude({ workspace: WORKSPACE });
-    const { value } = await claude.newSession(
-      "Say hello",
-      objectResultType(fullSchema),
-      { model: "haiku", appendSystemPrompt: "You are a helpful assistant. This is a direct message from the user." },
-    ).result;
+    const claude = new Claude({ workspace: WORKSPACE, model: "haiku", appendSystemPrompt: "You are a helpful assistant. This is a direct message from the user." });
+    const { value } = await claude.newSession("Say hello", objectResultType(fullSchema)).result;
 
     console.log("Full (with sysprompt):", JSON.stringify(value, null, 2));
     expect(value).not.toBeNull();
@@ -63,12 +55,8 @@ describe("claude CLI structured output", () => {
 
   it("full schema with real system prompt and workspace", async () => {
     const workspace = process.env.MACROCLAW_WORKSPACE ?? WORKSPACE;
-    const claude = new Claude({ workspace });
-    const { value } = await claude.newSession(
-      "Say hello",
-      objectResultType(fullSchema),
-      { model: "sonnet", appendSystemPrompt: "You are an AI assistant running inside macroclaw. This is a direct message from the user." },
-    ).result;
+    const claude = new Claude({ workspace, model: "sonnet", appendSystemPrompt: "You are an AI assistant running inside macroclaw. This is a direct message from the user." });
+    const { value } = await claude.newSession("Say hello", objectResultType(fullSchema)).result;
 
     console.log("Full (real workspace):", JSON.stringify(value, null, 2));
     expect(value).not.toBeNull();

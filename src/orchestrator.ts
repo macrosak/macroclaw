@@ -1,3 +1,4 @@
+import { mkdirSync } from "node:fs";
 import { z } from "zod/v4";
 import {
   Claude,
@@ -96,11 +97,15 @@ export interface OrchestratorConfig {
   settingsDir?: string;
   onResponse: (response: OrchestratorResponse) => Promise<void>;
   claude?: Claude;
+  namingClaude?: Claude;
 }
+
+const NAMING_WORKSPACE = "/tmp/macroclaw-naming";
 
 export class Orchestrator {
   #config: Omit<OrchestratorConfig , 'claude'>;
   #claude: Claude;
+  #namingClaude: Claude;
 
   #mainSessionId: string | undefined;
   #backgroundAgents = new Map<string, BackgroundInfo>();
@@ -109,6 +114,8 @@ export class Orchestrator {
   constructor(config: OrchestratorConfig) {
     this.#config = config;
     this.#claude = config.claude ?? new Claude({ workspace: config.workspace, appendSystemPrompt: SYSTEM_PROMPT });
+    mkdirSync(NAMING_WORKSPACE, { recursive: true });
+    this.#namingClaude = config.namingClaude ?? new Claude({ workspace: NAMING_WORKSPACE, model: "haiku", replaceSystemPrompt: NAMING_SYSTEM_PROMPT });
     this.#queue = new Queue<OrchestratorRequest>();
     this.#queue.setHandler((request) => this.#handleRequest(request));
 
@@ -455,11 +462,7 @@ export class Orchestrator {
 
   #generateDisplayName(prompt: string, sessionId: string): void {
     try {
-      const query = this.#claude.newSession(
-        prompt,
-        textResultType,
-        { model: "haiku", replaceSystemPrompt: NAMING_SYSTEM_PROMPT },
-      );
+      const query = this.#namingClaude.newSession(prompt, textResultType);
 
       query.result.then(
         ({ value }) => {

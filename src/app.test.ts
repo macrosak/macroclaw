@@ -736,8 +736,7 @@ describe("App", () => {
       const calls = (bot.api.sendMessage as any).mock.calls;
       const text = calls[calls.length - 1][1];
       expect(text).toBe('Background agent <b>research-pricing</b> started.');
-      // 1 bg agent + 1 naming query
-      expect(claude.calls).toHaveLength(2);
+      expect(claude.calls).toHaveLength(1);
     });
 
     it("/bg lists active background agents via sendMessage", async () => {

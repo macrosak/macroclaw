@@ -47,7 +47,7 @@ function mockHangingSpawn(stdout: string) {
 
 const TEST_WORKSPACE = "/tmp/claude2-test";
 
-function makeClaude(config?: { model?: string; appendSystemPrompt?: string }) {
+function makeClaude(config?: { model?: string; appendSystemPrompt?: string; replaceSystemPrompt?: string }) {
   return new Claude({ workspace: TEST_WORKSPACE, ...config });
 }
 
@@ -156,19 +156,10 @@ describe("Claude", () => {
       expect(args).toContain("Be helpful.");
     });
 
-    it("per-call appendSystemPrompt overrides constructor", async () => {
-      mockSpawn({ stdout: envelope({ result: "ok" }), exitCode: 0 });
-      const claude = makeClaude({ appendSystemPrompt: "Be helpful." });
-      await claude.newSession("hi", textResult, { appendSystemPrompt: "Be brief." }).result;
-      const args = spawnArgs();
-      expect(args).toContain("Be brief.");
-      expect(args).not.toContain("Be helpful.");
-    });
-
     it("replaceSystemPrompt uses --system-prompt flag", async () => {
       mockSpawn({ stdout: envelope({ result: "ok" }), exitCode: 0 });
-      const claude = makeClaude({ appendSystemPrompt: "Be helpful." });
-      await claude.newSession("hi", textResult, { replaceSystemPrompt: "Name this task." }).result;
+      const claude = makeClaude({ replaceSystemPrompt: "Name this task." });
+      await claude.newSession("hi", textResult).result;
       const args = spawnArgs();
       expect(args).toContain("--system-prompt");
       expect(args).toContain("Name this task.");

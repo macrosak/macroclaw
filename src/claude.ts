@@ -18,13 +18,12 @@ export interface ClaudeConfig {
   workspace: string;
   model?: string;
   appendSystemPrompt?: string;
+  replaceSystemPrompt?: string;
 }
 
 /** Per-call overrides */
 export interface QueryOptions {
   model?: string;
-  appendSystemPrompt?: string;
-  replaceSystemPrompt?: string;
 }
 
 /** Resolved query result — wraps the typed output with metadata */
@@ -79,11 +78,13 @@ export class Claude {
   #workspace: string;
   #model?: string;
   #appendSystemPrompt?: string;
+  #replaceSystemPrompt?: string;
 
   constructor(config: ClaudeConfig) {
     this.#workspace = config.workspace;
     this.#model = config.model;
     this.#appendSystemPrompt = config.appendSystemPrompt;
+    this.#replaceSystemPrompt = config.replaceSystemPrompt;
   }
 
   newSession<R extends ResultType>(prompt: string, resultType: R, options?: QueryOptions): RunningQuery<InferResult<R>> {
@@ -120,11 +121,10 @@ export class Claude {
     }
 
     if (model) args.push("--model", model);
-    if (options?.replaceSystemPrompt) {
-      args.push("--system-prompt", options.replaceSystemPrompt);
-    } else {
-      const appendPrompt = options?.appendSystemPrompt ?? this.#appendSystemPrompt;
-      if (appendPrompt) args.push("--append-system-prompt", appendPrompt);
+    if (this.#replaceSystemPrompt) {
+      args.push("--system-prompt", this.#replaceSystemPrompt);
+    } else if (this.#appendSystemPrompt) {
+      args.push("--append-system-prompt", this.#appendSystemPrompt);
     }
     args.push(prompt);
 
