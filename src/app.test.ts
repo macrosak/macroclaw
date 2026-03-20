@@ -141,12 +141,12 @@ describe("App", () => {
     expect(bot.filterHandlers.has("callback_query:data")).toBe(true);
   });
 
-  it("registers chatid, session, and bg commands", () => {
+  it("registers chatid, bg, and sessions commands", () => {
     const app = new App(makeConfig());
     const bot = app.bot as any;
     expect(bot.commandHandlers.has("chatid")).toBe(true);
-    expect(bot.commandHandlers.has("session")).toBe(true);
     expect(bot.commandHandlers.has("bg")).toBe(true);
+    expect(bot.commandHandlers.has("sessions")).toBe(true);
   });
 
   it("registers error handler", () => {
@@ -576,7 +576,7 @@ describe("App", () => {
       expect(ctx.editMessageReplyMarkup).toHaveBeenCalledWith({ reply_markup: { inline_keyboard: [[{ text: "✓ Opened", callback_data: "_noop" }]] } });
       const calls = (bot.api.sendMessage as any).mock.calls;
       const text = calls[calls.length - 1][1];
-      expect(text).toBe("Agent not found or already finished.");
+      expect(text).toBe("Session not found or already finished.");
     });
 
     it("handles peek: callback by routing to orchestrator.handlePeek", async () => {
@@ -599,7 +599,7 @@ describe("App", () => {
       expect(ctx.editMessageReplyMarkup).toHaveBeenCalledWith({ reply_markup: { inline_keyboard: [[{ text: "✓ Peeked", callback_data: "_noop" }]] } });
       const calls = (bot.api.sendMessage as any).mock.calls;
       const text = calls[calls.length - 1][1];
-      expect(text).toBe("Agent not found or already finished.");
+      expect(text).toBe("Session not found or already finished.");
     });
 
     it("handles kill: callback by routing to orchestrator.handleKill", async () => {
@@ -622,7 +622,7 @@ describe("App", () => {
       expect(ctx.editMessageReplyMarkup).toHaveBeenCalledWith({ reply_markup: { inline_keyboard: [[{ text: "✓ Killed", callback_data: "_noop" }]] } });
       const calls = (bot.api.sendMessage as any).mock.calls;
       const text = calls[calls.length - 1][1];
-      expect(text).toBe("Agent not found or already finished.");
+      expect(text).toBe("Session not found or already finished.");
     });
 
     it("ignores callback_query from unauthorized chats", async () => {
@@ -676,35 +676,9 @@ describe("App", () => {
       expect(ctx.reply).toHaveBeenCalledWith("Chat ID: `12345`", { parse_mode: "Markdown" });
     });
 
-    it("/session sends session ID via sendMessage", async () => {
-      const app = new App(makeConfig());
-      const bot = app.bot as any;
-      const handler = bot.commandHandlers.get("session")!;
-      const ctx = { chat: { id: 12345 } };
-
-      handler(ctx);
-      await new Promise((r) => setTimeout(r, 50));
-
-      const calls = (bot.api.sendMessage as any).mock.calls;
-      expect(calls.length).toBeGreaterThan(0);
-      const text = calls[calls.length - 1][1];
-      expect(text).toBe("Session: <code>test-session</code>");
-    });
-
-    it("/session is ignored for unauthorized chats", async () => {
-      const app = new App(makeConfig());
-      const bot = app.bot as any;
-      const handler = bot.commandHandlers.get("session")!;
-      const ctx = { chat: { id: 99999 } };
-
-      handler(ctx);
-      await new Promise((r) => setTimeout(r, 50));
-
-      expect((bot.api.sendMessage as any).mock.calls.length).toBe(0);
-    });
-
-    it("/bg shows no agents via sendMessage when none are running", async () => {
-      const app = new App(makeConfig());
+    it("/bg without prompt sends usage hint", async () => {
+      const config = makeConfig();
+      const app = new App(config);
       const bot = app.bot as any;
       const handler = bot.commandHandlers.get("bg")!;
       const ctx = { chat: { id: 12345 }, match: "" };
@@ -712,9 +686,9 @@ describe("App", () => {
       handler(ctx);
       await new Promise((r) => setTimeout(r, 50));
 
+      expect((config.claude as Claude & { calls: CallInfo[] }).calls).toHaveLength(0);
       const calls = (bot.api.sendMessage as any).mock.calls;
-      const text = calls[calls.length - 1][1];
-      expect(text).toBe("No background agents running.");
+      expect(calls[calls.length - 1][1]).toBe("Usage: /bg <prompt>");
     });
 
     it("/bg with prompt spawns a background agent via sendMessage", async () => {
@@ -739,37 +713,10 @@ describe("App", () => {
       expect(claude.calls).toHaveLength(1);
     });
 
-    it("/bg lists active background agents via sendMessage", async () => {
-      const claude = mockClaude((): RunningQuery<unknown> => ({
-        sessionId: `bg-${Date.now()}`,
-        startedAt: new Date(),
-        result: new Promise(() => {}),
-        kill: mock(async () => {}),
-      }));
-      const config = makeConfig({ claude });
-      const app = new App(config);
-      const bot = app.bot as any;
-      const bgHandler = bot.commandHandlers.get("bg")!;
-
-      const spawnCtx = { chat: { id: 12345 }, match: "long task" };
-      bgHandler(spawnCtx);
-      await new Promise((r) => setTimeout(r, 10));
-
-      const listCtx = { chat: { id: 12345 }, match: "" };
-      bgHandler(listCtx);
-      await new Promise((r) => setTimeout(r, 10));
-
-      const calls = (bot.api.sendMessage as any).mock.calls;
-      const lastText = calls[calls.length - 1][1];
-      expect(lastText).toContain("long-task");
-      expect(lastText).toMatch(/\d+s/);
-    });
-
-    it("shows 'none' when no session exists yet", async () => {
-      if (existsSync(tmpSettingsDir)) rmSync(tmpSettingsDir, { recursive: true });
+    it("/sessions lists running sessions via sendMessage", async () => {
       const app = new App(makeConfig());
       const bot = app.bot as any;
-      const handler = bot.commandHandlers.get("session")!;
+      const handler = bot.commandHandlers.get("sessions")!;
       const ctx = { chat: { id: 12345 } };
 
       handler(ctx);
@@ -777,8 +724,23 @@ describe("App", () => {
 
       const calls = (bot.api.sendMessage as any).mock.calls;
       const text = calls[calls.length - 1][1];
-      expect(text).toBe("Session: <code>none</code>");
+      expect(text).toBe("No running sessions.");
     });
+
+    it("/sessions is ignored for unauthorized chats", async () => {
+      const app = new App(makeConfig());
+      const bot = app.bot as any;
+      const handler = bot.commandHandlers.get("sessions")!;
+      const ctx = { chat: { id: 99999 } };
+
+      handler(ctx);
+      await new Promise((r) => setTimeout(r, 50));
+
+      // No sendMessage calls for unauthorized
+      expect((bot.api.sendMessage as any).mock.calls.length).toBe(0);
+    });
+
+
   });
 
   describe("error handler", () => {
@@ -803,8 +765,8 @@ describe("App", () => {
       app.start();
       expect(bot.api.setMyCommands).toHaveBeenCalledWith([
         { command: "chatid", description: "Show current chat ID" },
-        { command: "session", description: "Show current session ID" },
-        { command: "bg", description: "List or spawn background agents" },
+        { command: "bg", description: "Spawn a background agent" },
+        { command: "sessions", description: "List running sessions" },
       ]);
     });
   });

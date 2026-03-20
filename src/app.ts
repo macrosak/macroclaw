@@ -48,8 +48,8 @@ export class App {
     scheduler.start();
     this.#bot.api.setMyCommands([
       { command: "chatid", description: "Show current chat ID" },
-      { command: "session", description: "Show current session ID" },
-      { command: "bg", description: "List or spawn background agents" },
+      { command: "bg", description: "Spawn a background agent" },
+      { command: "sessions", description: "List running sessions" },
     ]).catch((err) => log.error({ err }, "Failed to set commands"));
     this.#bot.start({
       onStart: (botInfo) => {
@@ -73,22 +73,22 @@ export class App {
       ctx.reply(`Chat ID: \`${ctx.chat.id}\``, { parse_mode: "Markdown" });
     });
 
-    this.#bot.command("session", (ctx) => {
-      if (ctx.chat.id.toString() !== this.#config.authorizedChatId) return;
-      log.debug("Command /session");
-      this.#orchestrator.handleSessionCommand();
-    });
-
     this.#bot.command("bg", (ctx) => {
       if (ctx.chat.id.toString() !== this.#config.authorizedChatId) return;
       const prompt = ctx.match?.trim();
-      if (prompt) {
-        log.debug({ prompt }, "Command /bg spawn");
-        this.#orchestrator.handleBackgroundCommand(prompt);
+      if (!prompt) {
+        log.debug("Command /bg without prompt");
+        sendResponse(this.#bot, this.#config.authorizedChatId, "Usage: /bg <prompt>");
         return;
       }
-      log.debug("Command /bg list");
-      this.#orchestrator.handleBackgroundList();
+      log.debug({ prompt }, "Command /bg spawn");
+      this.#orchestrator.handleBackgroundCommand(prompt);
+    });
+
+    this.#bot.command("sessions", (ctx) => {
+      if (ctx.chat.id.toString() !== this.#config.authorizedChatId) return;
+      log.debug("Command /sessions");
+      this.#orchestrator.handleSessions();
     });
 
     this.#bot.on("message:photo", async (ctx) => {
