@@ -679,6 +679,9 @@ describe("status", () => {
 		});
 		mockExistsSync.mockReturnValue(false);
 		const mgr = createManager({ home: "/nonexistent" });
+		// Override isInstalled getter — on hosts where macroclaw is installed as a systemd
+		// service, existsSync("/etc/systemd/system/macroclaw.service") returns true
+		Object.defineProperty(mgr, "isInstalled", { get: () => false });
 		const s = mgr.status();
 		expect(s.installed).toBe(false);
 		expect(s.running).toBe(false);
