@@ -8,7 +8,7 @@ import {
 } from "./claude";
 import { writeHistoryPrompt, writeHistoryResult } from "./history";
 import { createLogger } from "./logger";
-import { SYSTEM_PROMPT } from "./prompts";
+import { buildContextPrefix, type ContextInput, SYSTEM_PROMPT } from "./prompts";
 import { Queue } from "./queue";
 import { loadSessions, saveSessions } from "./sessions";
 
@@ -58,7 +58,6 @@ export interface OrchestratorResponse {
 
 type OrchestratorRequest =
   | { type: "user"; message: string; files?: string[] }
-  | { type: "cron"; name: string; prompt: string; model?: string }
   | { type: "background-agent-result"; name: string; response: AgentOutput }
   | { type: "button"; label: string };
 
@@ -115,10 +114,14 @@ export class Orchestrator {
     this.#queue.push({ type: "button", label });
   }
 
-  handleCron(name: string, prompt: string, model?: string): void {
+  handleCron(name: string, prompt: string, model?: string, missed?: { missedBy: string; scheduledAt: string }): void {
     const cronName = `cron-${name}`;
-    const cronPrompt = `[Context: cron/${name}] ${prompt}`;
-    this.#spawnBackground(cronName, cronPrompt, model ?? this.#config.model);
+    const cronContext = buildContextPrefix({
+      session: "background",
+      source: { type: "cron", name, missedBy: missed?.missedBy, scheduledAt: missed?.scheduledAt },
+      content: { tag: "task", text: prompt },
+    });
+    this.#spawnBackgroundRaw(cronName, prompt, cronContext, model ?? this.#config.model);
   }
 
   handleBackgroundCommand(prompt: string): void {
@@ -252,7 +255,11 @@ export class Orchestrator {
     let prompt = this.#formatPrompt(request);
     if (movedToBackground) {
       const truncated = movedToBackground.length > 100 ? `${movedToBackground.slice(0, 100)}...` : movedToBackground;
-      prompt = `[Context: previous task "${truncated}" moved to background]\n${prompt}`;
+      const demotedContext = buildContextPrefix({
+        session: "main",
+        source: { type: "demoted-task", prompt: truncated },
+      });
+      prompt = `${demotedContext}\n${prompt}`;
     }
 
     this.#startMainQuery(prompt, this.#config.model);
@@ -343,19 +350,33 @@ export class Orchestrator {
   }
 
   #formatPrompt(request: OrchestratorRequest): string {
+    let input: ContextInput;
+
     switch (request.type) {
-      case "user": {
-        if (!request.files?.length) return request.message;
-        const prefix = request.files.map((f) => `[File: ${f}]`).join("\n");
-        return request.message ? `${prefix}\n${request.message}` : prefix;
-      }
-      case "cron":
-        return `[Context: cron/${request.name}] ${request.prompt}`;
+      case "user":
+        input = {
+          session: "main",
+          source: { type: "user" },
+          content: request.message ? { tag: "prompt", text: request.message } : undefined,
+          files: request.files,
+        };
+        break;
       case "background-agent-result":
-        return `[Context: background-result/${request.name}] ${request.response.message || "[No output]"}`;
+        input = {
+          session: "main",
+          source: { type: "background-result", name: request.name },
+          content: { tag: "result", text: request.response.message || "[No output]" },
+        };
+        break;
       case "button":
-        return `[Context: button-click] User tapped "${request.label}"`;
+        input = {
+          session: "main",
+          source: { type: "button", label: request.label },
+        };
+        break;
     }
+
+    return buildContextPrefix(input);
   }
 
   #errorResponse(err: unknown): AgentOutput {
@@ -376,10 +397,18 @@ export class Orchestrator {
   // --- Background management ---
 
   #spawnBackground(name: string, prompt: string, model: string | undefined) {
-    const bgPrompt = `[Context: background-agent/${name}] ${prompt}`;
+    const formatted = buildContextPrefix({
+      session: "background",
+      source: { type: "background-agent", name },
+      content: { tag: "task", text: prompt },
+    });
+    this.#spawnBackgroundRaw(name, prompt, formatted, model);
+  }
+
+  #spawnBackgroundRaw(name: string, prompt: string, formatted: string, model: string | undefined) {
     const query = this.#mainSessionId
-      ? this.#claude.forkSession(this.#mainSessionId, bgPrompt, responseResultType, { model })
-      : this.#claude.newSession(bgPrompt, responseResultType, { model });
+      ? this.#claude.forkSession(this.#mainSessionId, formatted, responseResultType, { model })
+      : this.#claude.newSession(formatted, responseResultType, { model });
     this.#registerBackground(name, prompt, model, query);
   }
 
