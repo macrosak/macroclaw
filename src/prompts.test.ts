@@ -10,7 +10,7 @@ describe("SYSTEM_PROMPT", () => {
     expect(SYSTEM_PROMPT).toContain("Cron");
     expect(SYSTEM_PROMPT).toContain("Buttons");
     expect(SYSTEM_PROMPT).toContain("Files");
-    expect(SYSTEM_PROMPT).toContain("Timeouts");
+    expect(SYSTEM_PROMPT).toContain("Session routing");
   });
 
   it("contains HTML formatting instructions", () => {

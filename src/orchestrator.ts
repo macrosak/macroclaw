@@ -3,19 +3,22 @@ import {
   Claude,
   QueryParseError,
   QueryProcessError,
-  type QueryResult,
   QueryValidationError,
   type RunningQuery
 } from "./claude";
 import { writeHistoryPrompt, writeHistoryResult } from "./history";
 import { createLogger } from "./logger";
-import { CRON_TIMEOUT, MAIN_TIMEOUT, SYSTEM_PROMPT } from "./prompts";
+import { SYSTEM_PROMPT } from "./prompts";
 import { Queue } from "./queue";
 import { loadSessions, saveSessions } from "./sessions";
 
 type ButtonSpec = string | { text: string; data: string };
 
 const log = createLogger("orchestrator");
+
+// --- Constants ---
+
+const WAIT_THRESHOLD = 60_000;
 
 // --- Response schema ---
 
@@ -56,20 +59,21 @@ export interface OrchestratorResponse {
 type OrchestratorRequest =
   | { type: "user"; message: string; files?: string[] }
   | { type: "cron"; name: string; prompt: string; model?: string }
-  | { type: "background-agent-result"; name: string; response: AgentOutput; sessionId?: string }
+  | { type: "background-agent-result"; name: string; response: AgentOutput }
   | { type: "button"; label: string };
 
 function escapeHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-// --- Background tracking ---
+// --- Session tracking ---
 
-interface BackgroundInfo {
+interface SessionInfo {
   name: string;
   prompt: string;
   model?: string;
   query: RunningQuery<AgentOutput>;
+  lastMessageAt: Date;
 }
 
 export interface OrchestratorConfig {
@@ -78,19 +82,23 @@ export interface OrchestratorConfig {
   settingsDir?: string;
   onResponse: (response: OrchestratorResponse) => Promise<void>;
   claude?: Claude;
+  /** How long to wait for a running main session before demoting it (ms). Default: 60000 */
+  waitThreshold?: number;
 }
 
 export class Orchestrator {
   #config: Omit<OrchestratorConfig , 'claude'>;
   #claude: Claude;
+  #waitThreshold: number;
 
   #mainSessionId: string | undefined;
-  #backgroundAgents = new Map<string, BackgroundInfo>();
+  #runningSessions = new Map<string, SessionInfo>();
   #queue: Queue<OrchestratorRequest>;
 
   constructor(config: OrchestratorConfig) {
     this.#config = config;
     this.#claude = config.claude ?? new Claude({ workspace: config.workspace, systemPrompt: SYSTEM_PROMPT });
+    this.#waitThreshold = config.waitThreshold ?? WAIT_THRESHOLD;
     this.#queue = new Queue<OrchestratorRequest>();
     this.#queue.setHandler((request) => this.#handleRequest(request));
 
@@ -108,7 +116,9 @@ export class Orchestrator {
   }
 
   handleCron(name: string, prompt: string, model?: string): void {
-    this.#queue.push({ type: "cron", name, prompt, model });
+    const cronName = `cron-${name}`;
+    const cronPrompt = `[Context: cron/${name}] ${prompt}`;
+    this.#spawnBackground(cronName, cronPrompt, model ?? this.#config.model);
   }
 
   handleBackgroundCommand(prompt: string): void {
@@ -117,38 +127,42 @@ export class Orchestrator {
     this.#callOnResponse({ message: `Background agent "${escapeHtml(name)}" started.` });
   }
 
-  handleBackgroundList(): void {
-    const agents = [...this.#backgroundAgents.values()];
-    if (agents.length === 0) {
-      this.#callOnResponse({ message: "No background agents running." });
+  handleSessions(): void {
+    const sessions = [...this.#runningSessions.entries()];
+    if (sessions.length === 0) {
+      this.#callOnResponse({ message: "No running sessions." });
       return;
     }
-    const lines = agents.map((a) => {
-      const elapsed = Math.round((Date.now() - a.query.startedAt.getTime()) / 1000);
-      return `- ${escapeHtml(a.name)} (${elapsed}s)`;
+    const lines = sessions.map(([sid, s]) => {
+      const elapsed = Math.round((Date.now() - s.query.startedAt.getTime()) / 1000);
+      const isMain = sid === this.#mainSessionId;
+      return isMain
+        ? `▶ ${escapeHtml(s.name)} (${elapsed}s) [main]`
+        : `- ${escapeHtml(s.name)} (${elapsed}s)`;
     });
-    const buttons: ButtonSpec[] = agents.map((a) => {
-      const elapsed = Math.round((Date.now() - a.query.startedAt.getTime()) / 1000);
-      const text = `${a.name} (${elapsed}s)`.slice(0, 27);
-      return { text, data: `detail:${a.query.sessionId}` };
+    const buttons: ButtonSpec[] = sessions.map(([sid, s]) => {
+      const elapsed = Math.round((Date.now() - s.query.startedAt.getTime()) / 1000);
+      const text = `${s.name} (${elapsed}s)`.slice(0, 27);
+      return { text, data: `detail:${sid}` };
     });
-    buttons.push({text: "Dismiss", data: "_dismiss"});
+    buttons.push({ text: "Dismiss", data: "_dismiss" });
     this.#callOnResponse({ message: lines.join("\n"), buttons });
   }
 
   handleDetail(sessionId: string): void {
-    const agent = this.#backgroundAgents.get(sessionId);
-    if (!agent) {
-      this.#callOnResponse({ message: "Agent not found or already finished." });
+    const session = this.#runningSessions.get(sessionId);
+    if (!session) {
+      this.#callOnResponse({ message: "Session not found or already finished." });
       return;
     }
 
-    const elapsed = Math.round((Date.now() - agent.query.startedAt.getTime()) / 1000);
-    const truncatedPrompt = agent.prompt.length > 300 ? `${agent.prompt.slice(0, 300)}…` : agent.prompt;
+    const elapsed = Math.round((Date.now() - session.query.startedAt.getTime()) / 1000);
+    const truncatedPrompt = session.prompt.length > 300 ? `${session.prompt.slice(0, 300)}…` : session.prompt;
+    const isMain = sessionId === this.#mainSessionId;
     const lines = [
-      `<b>${escapeHtml(agent.name)}</b>`,
+      `<b>${escapeHtml(session.name)}</b>${isMain ? " [main]" : ""}`,
       `Prompt: ${escapeHtml(truncatedPrompt)}`,
-      `Model: ${agent.model ?? "default"}`,
+      `Model: ${session.model ?? "default"}`,
       `Elapsed: ${elapsed}s`,
       "Status: running",
     ];
@@ -161,16 +175,16 @@ export class Orchestrator {
   }
 
   async handlePeek(sessionId: string): Promise<void> {
-    const agent = this.#backgroundAgents.get(sessionId);
-    if (!agent) {
-      this.#callOnResponse({ message: "Agent not found or already finished." });
+    const session = this.#runningSessions.get(sessionId);
+    if (!session) {
+      this.#callOnResponse({ message: "Session not found or already finished." });
       return;
     }
 
-    this.#callOnResponse({ message: `Peeking at <b>${escapeHtml(agent.name)}</b>...` });
+    this.#callOnResponse({ message: `Peeking at <b>${escapeHtml(session.name)}</b>...` });
 
     try {
-      const startedAt = agent.query.startedAt.toISOString();
+      const startedAt = session.query.startedAt.toISOString();
       const query = this.#claude.forkSession(
         sessionId,
         `This session started at ${startedAt}. Only consider events after that time. Give a brief status update: what has been done so far, what's currently happening, and what's remaining. 2-3 sentences max.`,
@@ -178,65 +192,76 @@ export class Orchestrator {
         { model: "haiku" },
       );
       const { value } = await query.result;
-      this.#callOnResponse({ message: `<b>[${escapeHtml(agent.name)}]</b> ${value || "[No output]"}` });
+      this.#callOnResponse({ message: `<b>[${escapeHtml(session.name)}]</b> ${value || "[No output]"}` });
     } catch (err) {
-      this.#callOnResponse({ message: `Couldn't peek at ${escapeHtml(agent.name)}: ${err}` });
+      this.#callOnResponse({ message: `Couldn't peek at ${escapeHtml(session.name)}: ${err}` });
     }
   }
 
   async handleKill(sessionId: string): Promise<void> {
-    const agent = this.#backgroundAgents.get(sessionId);
-    if (!agent) {
-      this.#callOnResponse({ message: "Agent not found or already finished." });
+    const session = this.#runningSessions.get(sessionId);
+    if (!session) {
+      this.#callOnResponse({ message: "Session not found or already finished." });
       return;
     }
 
-    this.#backgroundAgents.delete(sessionId);
+    this.#runningSessions.delete(sessionId);
 
     try {
-      await agent.query.kill();
+      await session.query.kill();
     } catch (err) {
-      log.error({ err, name: agent.name }, "Kill failed");
+      log.error({ err, name: session.name }, "Kill failed");
     }
 
-    this.#callOnResponse({ message: `Killed <b>${escapeHtml(agent.name)}</b>.` });
+    this.#callOnResponse({ message: `Killed <b>${escapeHtml(session.name)}</b>.` });
   }
 
-  handleSessionCommand(): void {
-    this.#callOnResponse({ message: `Session: <code>${this.#mainSessionId ?? "none"}</code>` });
-  }
 
   // --- Internal queue handler ---
 
   async #handleRequest(request: OrchestratorRequest): Promise<void> {
     log.debug({ type: request.type }, "Incoming request");
 
-    // Background result with matching session ID: deliver directly
-    if (request.type === "background-agent-result" && request.sessionId === this.#mainSessionId) {
-      log.debug({ name: request.name }, "Background result on current session, applying directly");
-      await this.#deliverResponse(request.response);
-      return;
+    const mainInfo = this.#mainSessionId ? this.#runningSessions.get(this.#mainSessionId) : undefined;
+    let movedToBackground: string | undefined;
+
+    if (mainInfo) {
+      const elapsed = Date.now() - mainInfo.lastMessageAt.getTime();
+      if (elapsed >= this.#waitThreshold) {
+        // Main has been running too long — move to background immediately
+        log.info({ name: mainInfo.name, sessionId: mainInfo.query.sessionId }, "Moving main session to background (exceeded threshold)");
+        movedToBackground = mainInfo.prompt;
+      } else {
+        // Main started recently — wait for it to finish or threshold
+        const remaining = this.#waitThreshold - elapsed;
+        const finished = await Promise.race([
+          mainInfo.query.result.then(() => true as const, () => true as const),
+          new Promise<false>((r) => setTimeout(() => r(false), remaining)),
+        ]);
+
+        if (!finished) {
+          log.info({ name: mainInfo.name, sessionId: mainInfo.query.sessionId }, "Moving main session to background (wait timed out)");
+          movedToBackground = mainInfo.prompt;
+        }
+        // If finished: completion handler already delivered the result and removed from map.
+      }
     }
 
     await writeHistoryPrompt(request);
 
-    const result = await this.#queryWithRetry(request);
-    if (!result) return;
-
-    // Update session ID (important after fork or new session)
-    if (result.sessionId !== this.#mainSessionId) {
-      log.info({ oldSessionId: this.#mainSessionId, newSessionId: result.sessionId }, "Session updated");
-      this.#mainSessionId = result.sessionId;
-      saveSessions({ mainSessionId: this.#mainSessionId }, this.#config.settingsDir);
+    let prompt = this.#formatPrompt(request);
+    if (movedToBackground) {
+      const truncated = movedToBackground.length > 100 ? `${movedToBackground.slice(0, 100)}...` : movedToBackground;
+      prompt = `[Context: previous task "${truncated}" moved to background]\n${prompt}`;
     }
 
-    await writeHistoryResult(result.value);
-    await this.#deliverResponse(result.value);
+    this.#startMainQuery(prompt, this.#config.model);
   }
 
   // --- Response delivery ---
 
   async #deliverResponse(response: AgentOutput): Promise<void> {
+    await writeHistoryResult(response);
     if (response.action === "send") {
       this.#callOnResponse({
         message: response.message || "[No output]",
@@ -262,53 +287,59 @@ export class Orchestrator {
     });
   }
 
-  // --- Claude calls ---
+  // --- Main session query ---
 
-  async #queryWithRetry(request: OrchestratorRequest): Promise<QueryResult<AgentOutput> | null> {
-    const timeout = request.type === "cron" ? CRON_TIMEOUT : MAIN_TIMEOUT;
-    const query = this.#query(request);
-
-    try {
-      const result = await this.#awaitOrBackground(query, request, timeout);
-      if (!result) return null;
-      return result;
-    } catch (err) {
-      // Resume failed — retry with a fresh session
-      if (err instanceof QueryProcessError && this.#mainSessionId) {
-        log.info("Resume failed, retrying with new session");
-        this.#mainSessionId = undefined;
-        const retryQuery = this.#query(request);
-
-        try {
-          const retryResult = await this.#awaitOrBackground(retryQuery, request, timeout);
-          if (!retryResult) return null;
-          return retryResult;
-        } catch (retryErr) {
-          return { value: this.#errorResponse(retryErr), sessionId: retryQuery.sessionId };
-        }
-      }
-
-      return { value: this.#errorResponse(err), sessionId: this.#mainSessionId ?? "" };
-    }
-  }
-
-  #query(request: OrchestratorRequest) {
-    const prompt = this.#formatPrompt(request);
-    const model = request.type === "cron" ? (request.model ?? this.#config.model) : this.#config.model;
+  #startMainQuery(prompt: string, model: string | undefined): void {
     const opts = { model };
+    let query: RunningQuery<AgentOutput>;
 
-    // Fork if a background agent is running on the main session
-    if (this.#mainSessionId && this.#backgroundAgents.has(this.#mainSessionId)) {
-      return this.#claude.forkSession(this.#mainSessionId, prompt, responseResultType, opts);
+    if (this.#mainSessionId && this.#runningSessions.has(this.#mainSessionId)) {
+      query = this.#claude.forkSession(this.#mainSessionId, prompt, responseResultType, opts);
+    } else if (this.#mainSessionId) {
+      query = this.#claude.resumeSession(this.#mainSessionId, prompt, responseResultType, opts);
+    } else {
+      query = this.#claude.newSession(prompt, responseResultType, opts);
     }
 
-    // Resume existing session
-    if (this.#mainSessionId) {
-      return this.#claude.resumeSession(this.#mainSessionId, prompt, responseResultType, opts);
+    const sid = query.sessionId;
+    const name = prompt.slice(0, 30).replace(/\s+/g, "-");
+    this.#runningSessions.set(sid, { name, prompt, model, query, lastMessageAt: new Date() });
+
+    if (sid !== this.#mainSessionId) {
+      log.info({ oldSessionId: this.#mainSessionId, newSessionId: sid }, "Session updated");
+      this.#mainSessionId = sid;
+      saveSessions({ mainSessionId: sid }, this.#config.settingsDir);
     }
 
-    // Start fresh
-    return this.#claude.newSession(prompt, responseResultType, opts);
+    log.debug({ name, sessionId: sid }, "Main query started");
+
+    query.result.then(
+      async ({ value: response }) => {
+        if (!this.#runningSessions.has(sid)) {
+          log.error({ name, sessionId: sid }, "Completed session not in runningSessions — delivering anyway");
+          await this.#deliverResponse(response);
+          return;
+        }
+        this.#runningSessions.delete(sid);
+
+        if (sid === this.#mainSessionId) {
+          log.debug({ name, sessionId: sid }, "Main query finished, delivering directly");
+          await this.#deliverResponse(response);
+        } else {
+          log.debug({ name, sessionId: sid }, "Non-main query finished, feeding to main session");
+          this.#queue.push({ type: "background-agent-result", name, response });
+        }
+      },
+      async (err) => {
+        if (!this.#runningSessions.has(sid)) {
+          log.error({ name, sessionId: sid, err }, "Failed session not in runningSessions — delivering error");
+        } else {
+          this.#runningSessions.delete(sid);
+          log.error({ name, sessionId: sid, err }, "Main query failed");
+        }
+        await this.#deliverResponse(this.#errorResponse(err));
+      },
+    );
   }
 
   #formatPrompt(request: OrchestratorRequest): string {
@@ -325,29 +356,6 @@ export class Orchestrator {
       case "button":
         return `[Context: button-click] User tapped "${request.label}"`;
     }
-  }
-
-  async #awaitOrBackground(
-    query: RunningQuery<AgentOutput>,
-    request: OrchestratorRequest,
-    timeoutMs: number,
-  ): Promise<QueryResult<AgentOutput> | null> {
-    const result = await Promise.race([
-      query.result,
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
-    ]);
-
-    if (result !== null) return result;
-
-    const name = request.type === "user" ? request.message.slice(0, 30).replace(/\s+/g, "-")
-      : request.type === "cron" ? `cron-${request.name}`
-      : "task";
-    const prompt = this.#formatPrompt(request);
-    const model = request.type === "cron" ? (request.model ?? this.#config.model) : this.#config.model;
-    log.info({ name, sessionId: query.sessionId }, "Request backgrounded due to timeout");
-    this.#callOnResponse({ message: "This is taking longer, continuing in the background." });
-    this.#adoptBackground(name, prompt, model, query);
-    return null;
   }
 
   #errorResponse(err: unknown): AgentOutput {
@@ -372,47 +380,27 @@ export class Orchestrator {
     const query = this.#mainSessionId
       ? this.#claude.forkSession(this.#mainSessionId, bgPrompt, responseResultType, { model })
       : this.#claude.newSession(bgPrompt, responseResultType, { model });
-    const sessionId = query.sessionId;
-    const info: BackgroundInfo = { name, prompt, model, query };
-    this.#backgroundAgents.set(sessionId, info);
-
-    log.debug({ name, sessionId }, "Starting background agent");
-
-    query.result.then(
-      async ({ value: response }) => {
-        if (!this.#backgroundAgents.has(sessionId)) return;
-        this.#backgroundAgents.delete(sessionId);
-        log.debug({ name, message: response.message }, "Background agent finished");
-        this.#queue.push({ type: "background-agent-result", name, response });
-      },
-      (err) => {
-        if (!this.#backgroundAgents.has(sessionId)) return;
-        this.#backgroundAgents.delete(sessionId);
-        log.error({ name, err }, "Background agent failed");
-        this.#queue.push({ type: "background-agent-result", name, response: { action: "send", message: `[Error] ${err}`, actionReason: "bg-agent-failed" } });
-      },
-    );
+    this.#registerBackground(name, prompt, model, query);
   }
 
-  #adoptBackground(name: string, prompt: string, model: string | undefined, query: RunningQuery<AgentOutput>) {
-    const sessionId = query.sessionId;
-    const info: BackgroundInfo = { name, prompt, model, query };
-    this.#backgroundAgents.set(sessionId, info);
+  #registerBackground(name: string, prompt: string, model: string | undefined, query: RunningQuery<AgentOutput>) {
+    const sid = query.sessionId;
+    this.#runningSessions.set(sid, { name, prompt, model, query, lastMessageAt: new Date() });
 
-    log.debug({ name, sessionId }, "Adopting backgrounded task");
+    log.debug({ name, sessionId: sid }, "Background session registered");
 
     query.result.then(
       ({ value: response }) => {
-        if (!this.#backgroundAgents.has(sessionId)) return;
-        this.#backgroundAgents.delete(sessionId);
-        log.debug({ name }, "Adopted task finished");
-        this.#queue.push({ type: "background-agent-result", name, response, sessionId });
+        if (!this.#runningSessions.has(sid)) return;
+        this.#runningSessions.delete(sid);
+        log.debug({ name, message: response.message }, "Background session finished");
+        this.#queue.push({ type: "background-agent-result", name, response });
       },
       (err) => {
-        if (!this.#backgroundAgents.has(sessionId)) return;
-        this.#backgroundAgents.delete(sessionId);
-        log.error({ name, err }, "Adopted task failed");
-        this.#queue.push({ type: "background-agent-result", name, response: { action: "send", message: `[Error] ${err}`, actionReason: "deferred-failed" }, sessionId });
+        if (!this.#runningSessions.has(sid)) return;
+        this.#runningSessions.delete(sid);
+        log.error({ name, err }, "Background session failed");
+        this.#queue.push({ type: "background-agent-result", name, response: { action: "send", message: `[Error] ${err}`, actionReason: "bg-failed" } });
       },
     );
   }
