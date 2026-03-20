@@ -1,13 +1,16 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadSessions, newSessionId, saveSessions } from "./sessions";
 
 const tmpDir = "/tmp/macroclaw-sessions-test";
 
-afterEach(() => {
+function cleanup() {
   if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true });
-});
+}
+
+beforeEach(cleanup);
+afterEach(cleanup);
 
 describe("loadSessions", () => {
   it("returns empty object when dir does not exist", () => {
