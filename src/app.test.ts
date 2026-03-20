@@ -166,7 +166,7 @@ describe("App", () => {
       await new Promise((r) => setTimeout(r, 50));
 
       const claude = config.claude as Claude & { calls: CallInfo[] };
-      expect(claude.calls[0].prompt).toBe("hello");
+      expect(claude.calls[0].prompt).toContain("<prompt>hello</prompt>");
     });
 
     it("ignores messages from unauthorized chats", async () => {
@@ -219,7 +219,7 @@ describe("App", () => {
       await new Promise((r) => setTimeout(r, 50));
 
       const claude = config.claude as Claude & { calls: CallInfo[] };
-      expect(claude.calls[0].prompt).toBe("bg: research pricing");
+      expect(claude.calls[0].prompt).toContain("<prompt>bg: research pricing</prompt>");
     });
 
     it("sends error wrapped in response", async () => {
@@ -269,7 +269,7 @@ describe("App", () => {
       expect(bot.api.getFile).toHaveBeenCalledWith("large");
       const claude = config.claude as Claude & { calls: CallInfo[] };
       expect(claude.calls).toHaveLength(1);
-      expect(claude.calls[0].prompt).toContain("[File:");
+      expect(claude.calls[0].prompt).toContain("<file path=");
 
       globalThis.fetch = origFetch;
     });
@@ -297,7 +297,7 @@ describe("App", () => {
       expect(bot.api.getFile).toHaveBeenCalledWith("doc-id");
       const claude = config.claude as Claude & { calls: CallInfo[] };
       expect(claude.calls).toHaveLength(1);
-      expect(claude.calls[0].prompt).toContain("[File:");
+      expect(claude.calls[0].prompt).toContain("<file path=");
 
       globalThis.fetch = origFetch;
     });
@@ -363,7 +363,7 @@ describe("App", () => {
 
       const claude = config.claude as Claude & { calls: CallInfo[] };
       expect(claude.calls).toHaveLength(1);
-      expect(claude.calls[0].prompt).toBe("hello from voice");
+      expect(claude.calls[0].prompt).toContain("<prompt>hello from voice</prompt>");
 
       globalThis.fetch = origFetch;
     });
@@ -532,7 +532,7 @@ describe("App", () => {
       expect(ctx.editMessageReplyMarkup).toHaveBeenCalledWith({ reply_markup: { inline_keyboard: [[{ text: "✓ Yes", callback_data: "_noop" }]] } });
       const claude = config.claude as Claude & { calls: CallInfo[] };
       expect(claude.calls).toHaveLength(1);
-      expect(claude.calls[0].prompt).toBe('[Context: button-click] User tapped "Yes"');
+      expect(claude.calls[0].prompt).toContain('<source type="button" label="Yes" />');
     });
 
     it("handles _dismiss callback by removing reply markup", async () => {

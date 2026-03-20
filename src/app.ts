@@ -43,7 +43,7 @@ export class App {
   start() {
     log.info("Starting macroclaw...");
     const scheduler = new Scheduler(this.#config.workspace, {
-      onJob: (name, prompt, model) => this.#orchestrator.handleCron(name, prompt, model),
+      onJob: (name, prompt, model, missed) => this.#orchestrator.handleCron(name, prompt, model, missed),
     });
     scheduler.start();
     this.#bot.api.setMyCommands([

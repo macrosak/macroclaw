@@ -17,7 +17,7 @@ function readScheduleConfig() {
 }
 
 function makeOnJob() {
-	return mock((_name: string, _prompt: string, _model?: string) => {});
+	return mock((_name: string, _prompt: string, _model?: string, _missed?: { missedBy: string; scheduledAt: string }) => {});
 }
 
 // Build a cron expression that matches the current minute
@@ -169,6 +169,7 @@ describe("Scheduler — fireAt jobs", () => {
 		s.stop();
 
 		expect(onJob).toHaveBeenCalledWith("now", "do it", undefined);
+		expect(onJob.mock.calls[0][3]).toBeUndefined();
 	});
 
 	it("removes one-shot job after firing", () => {
@@ -220,9 +221,10 @@ describe("Scheduler — fireAt jobs", () => {
 		expect(onJob).toHaveBeenCalledTimes(1);
 		const call = onJob.mock.calls[0];
 		expect(call[0]).toBe("reminder");
-		expect(call[1]).toContain("[missed event, should have fired");
-		expect(call[1]).toContain("min ago at");
-		expect(call[1]).toContain("buy milk");
+		expect(call[1]).toBe("buy milk");
+		expect(call[3]).toBeDefined();
+		expect(call[3]!.missedBy).toMatch(/^\d+m$/);
+		expect(call[3]!.scheduledAt).toBeDefined();
 	});
 
 	it("removes missed one-shot job after firing", () => {
@@ -257,8 +259,9 @@ describe("Scheduler — fireAt jobs", () => {
 		expect(onJob).toHaveBeenCalledTimes(1);
 		const call = onJob.mock.calls[0];
 		expect(call[0]).toBe("recent");
-		expect(call[1]).toContain("[missed event, should have fired");
-		expect(call[1]).toContain("still valid");
+		expect(call[1]).toBe("still valid");
+		expect(call[3]).toBeDefined();
+		expect(call[3]!.missedBy).toMatch(/^\d+m$/);
 	});
 
 	it("discards stale one-shot job (older than a week) without firing", () => {
