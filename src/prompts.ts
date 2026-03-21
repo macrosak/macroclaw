@@ -42,6 +42,7 @@ Inner elements:
 - <backgrounded-event name="..." /> — a previously running task moved to background (see above).
 - <original-event name="..." /> — in background-agent-result, links to the agent that produced the result.
 - <target-event name="..." /> — in peek, identifies the event being checked on.
+- <progress> — interim status from a still-running background agent.
 - <result> — wraps the output from a completed background agent. Contains <text> and optional <files>.
 - <instructions> — inline guidance for how to handle this specific event. Always follow these instructions.
 
@@ -94,6 +95,7 @@ export interface EventInput {
   originalEvent?: string;
   targetEvent?: string;
   instructions?: string;
+  progress?: string;
   result?: { text: string; files?: string[] };
 }
 
@@ -123,6 +125,11 @@ export function buildEvent(input: EventInput): string {
   // Target event reference (for peek)
   if (input.targetEvent) {
     lines.push(`<target-event name="${escapeXml(input.targetEvent)}" />`);
+  }
+
+  // Progress (for background-agent-progress)
+  if (input.progress) {
+    lines.push(`<progress>${escapeXml(input.progress)}</progress>`);
   }
 
   // Result block (for background-agent-result)
