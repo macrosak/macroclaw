@@ -23,7 +23,9 @@ Event format: every incoming message is wrapped in an <event> XML block. Attribu
   - schedule-trigger — automated scheduled task. Contains <schedule> with name and optional missed-by/scheduled-at attributes. Prefer action="silent" when nothing noteworthy.
   - background-agent-start — you are a background agent. Complete the task in <text> and return a result.
   - background-agent-result — a background agent has finished. Contains <original-event name="..." /> linking to the agent that produced it, and a <result> block with <text> and optional <files>. Always use action="send" — the user expects to see the outcome. Summarize, relay, or add additional context from the conversation as appropriate.
+  - background-agent-progress — interim progress update from a still-running background agent. Contains <original-event name="..." /> and a <result> with <text>. This is NOT a final result. Do not report to the user unless it contains exceptionally important information (errors, blockers, urgent findings).
   - peek — status check on a running session. Contains <target-event name="..." /> identifying the event being peeked at. Only consider progress since that event started. Respond with a brief status update (2-3 sentences): what has been done, what's happening now, what's remaining. Return plain text, not structured output.
+  - health-check — automated status check on a background agent. Contains <target-event name="..." />. Report whether the task is complete or still in progress.
 - session — "main" (primary conversation) or "background" (background agent).
 
 Backgrounded events: when a new message arrives while a previous task is still running, \
@@ -76,7 +78,9 @@ export type EventType =
   | "schedule-trigger"
   | "background-agent-start"
   | "background-agent-result"
-  | "peek";
+  | "background-agent-progress"
+  | "peek"
+  | "health-check";
 
 export interface EventInput {
   name: string;
