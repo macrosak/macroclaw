@@ -123,7 +123,7 @@ export class Claude {
     if (systemPrompt) args.push("--append-system-prompt", systemPrompt);
     args.push(prompt);
 
-    log.debug({ model, sessionId, promptLen: prompt.length, mode: mode.kind, hasSystemPrompt: !!systemPrompt }, "Sending to Claude");
+    log.debug({ model, sessionId, promptLen: prompt.length, mode: mode.kind, hasSystemPrompt: !!systemPrompt, prompt }, "Sending to Claude");
 
     const proc = Bun.spawn(args, { cwd: this.#workspace, env, stdout: "pipe", stderr: "pipe" });
     const startedAt = new Date();

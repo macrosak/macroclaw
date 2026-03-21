@@ -21,8 +21,13 @@ const scheduleConfigSchema = z.object({
 type ScheduleConfig = z.infer<typeof scheduleConfigSchema>;
 type Job = z.infer<typeof jobSchema>;
 
+export interface MissedInfo {
+	missedBy: string;
+	scheduledAt: string;
+}
+
 export interface SchedulerConfig {
-	onJob: (name: string, prompt: string, model?: string) => void;
+	onJob: (name: string, prompt: string, model?: string, missed?: MissedInfo) => void;
 }
 
 const TICK_INTERVAL = 10_000; // 10 seconds
@@ -148,9 +153,11 @@ export class Scheduler {
 
 		if (diff <= MAX_MISSED_MS) {
 			const missedMinutes = Math.round(diff / 60_000);
-			const missedPrompt = `[missed event, should have fired ${missedMinutes} min ago at ${job.fireAt}] ${job.prompt}`;
 			log.info({ name: job.name, missedMinutes, fireAt: job.fireAt }, "Firing missed one-shot job");
-			this.#config.onJob(job.name, missedPrompt, job.model);
+			this.#config.onJob(job.name, job.prompt, job.model, {
+				missedBy: `${missedMinutes}m`,
+				scheduledAt: job.fireAt,
+			});
 			return "remove";
 		}
 

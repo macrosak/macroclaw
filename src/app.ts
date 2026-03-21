@@ -43,7 +43,7 @@ export class App {
   start() {
     log.info("Starting macroclaw...");
     const scheduler = new Scheduler(this.#config.workspace, {
-      onJob: (name, prompt, model) => this.#orchestrator.handleCron(name, prompt, model),
+      onJob: (name, prompt, model, missed) => this.#orchestrator.handleCron(name, prompt, model, missed),
     });
     scheduler.start();
     this.#bot.api.setMyCommands([
@@ -78,7 +78,7 @@ export class App {
       const prompt = ctx.match?.trim();
       if (!prompt) {
         log.debug("Command /bg without prompt");
-        sendResponse(this.#bot, this.#config.authorizedChatId, "Usage: /bg <prompt>");
+        sendResponse(this.#bot, this.#config.authorizedChatId, "Usage: /bg &lt;prompt&gt;");
         return;
       }
       log.debug({ prompt }, "Command /bg spawn");

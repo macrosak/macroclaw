@@ -8,6 +8,10 @@ import { SpeechToText } from "./speech-to-text";
 export async function start(): Promise<void> {
   const log = createLogger("index");
 
+  process.on("unhandledRejection", (err) => {
+    log.error({ err }, "Unhandled rejection");
+  });
+
   const mgr = new SettingsManager();
   const settings = mgr.load();
   const { settings: resolved, overrides } = mgr.applyEnvOverrides(settings);
