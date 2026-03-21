@@ -103,7 +103,8 @@ describe("Orchestrator", () => {
       orch.handleMessage("hello");
       await waitForProcessing();
 
-      expect(claude.calls[0].prompt).toBe("hello");
+      expect(claude.calls[0].prompt).toContain('type="user-message"');
+      expect(claude.calls[0].prompt).toContain("<text>hello</text>");
     });
 
     it("prepends file references for user requests", async () => {
@@ -113,7 +114,9 @@ describe("Orchestrator", () => {
       orch.handleMessage("check this", ["/tmp/photo.jpg", "/tmp/doc.pdf"]);
       await waitForProcessing();
 
-      expect(claude.calls[0].prompt).toBe("[File: /tmp/photo.jpg]\n[File: /tmp/doc.pdf]\ncheck this");
+      expect(claude.calls[0].prompt).toContain('<file path="/tmp/photo.jpg" />');
+      expect(claude.calls[0].prompt).toContain('<file path="/tmp/doc.pdf" />');
+      expect(claude.calls[0].prompt).toContain("<text>check this</text>");
     });
 
     it("sends only file references when message is empty", async () => {
@@ -123,7 +126,8 @@ describe("Orchestrator", () => {
       orch.handleMessage("", ["/tmp/photo.jpg"]);
       await waitForProcessing();
 
-      expect(claude.calls[0].prompt).toBe("[File: /tmp/photo.jpg]");
+      expect(claude.calls[0].prompt).toContain('<file path="/tmp/photo.jpg" />');
+      expect(claude.calls[0].prompt).not.toContain("<text>");
     });
 
     it("builds button click prompt", async () => {
@@ -133,7 +137,7 @@ describe("Orchestrator", () => {
       orch.handleButton("Yes");
       await waitForProcessing();
 
-      expect(claude.calls[0].prompt).toBe('[Context: button-click] User tapped "Yes"');
+      expect(claude.calls[0].prompt).toContain('<button>Yes</button>');
     });
   });
 
@@ -338,9 +342,8 @@ describe("Orchestrator", () => {
       expect(callCount).toBe(2);
       const secondCall = claude.calls[1];
       expect(secondCall.method).toBe("forkSession");
-      expect(secondCall.prompt).toContain("[Context: previous task");
-      expect(secondCall.prompt).toContain("moved to background]");
-      expect(secondCall.prompt).toContain("second");
+      expect(secondCall.prompt).toContain("<backgrounded-event");
+      expect(secondCall.prompt).toContain("<text>second</text>");
 
       // Resolve both
       resolve2(queryResult({ action: "send", message: "second done", actionReason: "ok" }, "q2-sid"));
@@ -405,7 +408,7 @@ describe("Orchestrator", () => {
 
       expect(callCount).toBe(2);
       const userCall = claude.calls[1];
-      expect(userCall.prompt).toContain("[Context: previous task");
+      expect(userCall.prompt).toContain("<backgrounded-event");
       expect(userCall.prompt).toContain("follow up");
       expect(responses.map((r) => r.message)).toContain("forked result");
     });
@@ -451,7 +454,7 @@ describe("Orchestrator", () => {
       orch.handleButton("Yes");
       await waitForProcessing();
 
-      expect(claude.calls[0].prompt).toBe('[Context: button-click] User tapped "Yes"');
+      expect(claude.calls[0].prompt).toContain('<button>Yes</button>');
       expect(responses[0].message).toBe("button response");
     });
 
@@ -503,8 +506,8 @@ describe("Orchestrator", () => {
       await waitForProcessing();
 
       expect(claude.calls[0].method).toBe("forkSession");
-      expect(claude.calls[0].prompt).toContain("[Context: background-agent/cron-daily-check]");
-      expect(claude.calls[0].prompt).toContain("[Context: cron/daily-check] Check for updates");
+      expect(claude.calls[0].prompt).toContain('<schedule name="daily-check" />');
+      expect(claude.calls[0].prompt).toContain("<text>Check for updates</text>");
       expect(claude.calls[0].model).toBe("haiku");
     });
 

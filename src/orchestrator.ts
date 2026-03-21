@@ -8,7 +8,8 @@ import {
 } from "./claude";
 import { writeHistoryPrompt, writeHistoryResult } from "./history";
 import { createLogger } from "./logger";
-import { SYSTEM_PROMPT } from "./prompts";
+import { generateName } from "./naming";
+import { buildEvent, type EventInput, SYSTEM_PROMPT } from "./prompts";
 import { Queue } from "./queue";
 import { loadSessions, saveSessions } from "./sessions";
 
@@ -58,7 +59,6 @@ export interface OrchestratorResponse {
 
 type OrchestratorRequest =
   | { type: "user"; message: string; files?: string[] }
-  | { type: "cron"; name: string; prompt: string; model?: string }
   | { type: "background-agent-result"; name: string; response: AgentOutput }
   | { type: "button"; label: string };
 
@@ -115,14 +115,20 @@ export class Orchestrator {
     this.#queue.push({ type: "button", label });
   }
 
-  handleCron(name: string, prompt: string, model?: string): void {
+  handleCron(name: string, prompt: string, model?: string, missed?: { missedBy: string; scheduledAt: string }): void {
     const cronName = `cron-${name}`;
-    const cronPrompt = `[Context: cron/${name}] ${prompt}`;
-    this.#spawnBackground(cronName, cronPrompt, model ?? this.#config.model);
+    const formatted = buildEvent({
+      name: cronName,
+      type: "schedule-trigger",
+      session: "background",
+      schedule: { name, missedBy: missed?.missedBy, scheduledAt: missed?.scheduledAt },
+      text: prompt,
+    });
+    this.#spawnBackgroundRaw(cronName, prompt, formatted, model ?? this.#config.model);
   }
 
   handleBackgroundCommand(prompt: string): void {
-    const name = prompt.slice(0, 30).replace(/\s+/g, "-");
+    const name = generateName(prompt);
     this.#spawnBackground(name, prompt, this.#config.model);
     this.#callOnResponse({ message: `Background agent "${escapeHtml(name)}" started.` });
   }
@@ -184,10 +190,16 @@ export class Orchestrator {
     this.#callOnResponse({ message: `Peeking at <b>${escapeHtml(session.name)}</b>...` });
 
     try {
-      const startedAt = session.query.startedAt.toISOString();
+      const prompt = buildEvent({
+        name: `peek-${session.name}`,
+        type: "peek",
+        session: "background",
+        targetEvent: session.name,
+        instructions: `Only consider progress since the "${session.name}" event. Brief status update: done, in progress, remaining. 2-3 sentences max, plain text.`,
+      });
       const query = this.#claude.forkSession(
         sessionId,
-        `This session started at ${startedAt}. Only consider events after that time. Give a brief status update: what has been done so far, what's currently happening, and what's remaining. 2-3 sentences max.`,
+        prompt,
         textResultType,
         { model: "haiku" },
       );
@@ -249,13 +261,12 @@ export class Orchestrator {
 
     await writeHistoryPrompt(request);
 
-    let prompt = this.#formatPrompt(request);
-    if (movedToBackground) {
-      const truncated = movedToBackground.length > 100 ? `${movedToBackground.slice(0, 100)}...` : movedToBackground;
-      prompt = `[Context: previous task "${truncated}" moved to background]\n${prompt}`;
-    }
+    const label = Orchestrator.#requestLabel(request);
+    const name = generateName(label);
+    const backgroundedName = movedToBackground ? mainInfo?.name : undefined;
+    const prompt = this.#formatPrompt(request, name, backgroundedName);
 
-    this.#startMainQuery(prompt, this.#config.model);
+    this.#startMainQuery(name, prompt, this.#config.model);
   }
 
   // --- Response delivery ---
@@ -289,7 +300,7 @@ export class Orchestrator {
 
   // --- Main session query ---
 
-  #startMainQuery(prompt: string, model: string | undefined): void {
+  #startMainQuery(name: string, prompt: string, model: string | undefined): void {
     const opts = { model };
     let query: RunningQuery<AgentOutput>;
 
@@ -302,7 +313,6 @@ export class Orchestrator {
     }
 
     const sid = query.sessionId;
-    const name = prompt.slice(0, 30).replace(/\s+/g, "-");
     this.#runningSessions.set(sid, { name, prompt, model, query, lastMessageAt: new Date() });
 
     if (sid !== this.#mainSessionId) {
@@ -342,19 +352,56 @@ export class Orchestrator {
     );
   }
 
-  #formatPrompt(request: OrchestratorRequest): string {
+  #formatPrompt(request: OrchestratorRequest, name: string, backgroundedEvent?: string): string {
+    let input: EventInput;
+
     switch (request.type) {
-      case "user": {
-        if (!request.files?.length) return request.message;
-        const prefix = request.files.map((f) => `[File: ${f}]`).join("\n");
-        return request.message ? `${prefix}\n${request.message}` : prefix;
-      }
-      case "cron":
-        return `[Context: cron/${request.name}] ${request.prompt}`;
+      case "user":
+        input = {
+          name,
+          type: "user-message",
+          session: "main",
+          text: request.message || undefined,
+          files: request.files,
+          backgroundedEvent,
+        };
+        break;
       case "background-agent-result":
-        return `[Context: background-result/${request.name}] ${request.response.message || "[No output]"}`;
+        input = {
+          name,
+          type: "background-agent-result",
+          session: "main",
+          originalEvent: request.name,
+          result: {
+            text: request.response.message || "[No output]",
+            files: request.response.files,
+          },
+          backgroundedEvent,
+          instructions: "Forward this result to the user (action=\"send\"). Summarize or add context from the conversation as appropriate.",
+        };
+        break;
       case "button":
-        return `[Context: button-click] User tapped "${request.label}"`;
+        input = {
+          name,
+          type: "button-click",
+          session: "main",
+          button: request.label,
+          backgroundedEvent,
+        };
+        break;
+    }
+
+    return buildEvent(input);
+  }
+
+  static #requestLabel(request: OrchestratorRequest): string {
+    switch (request.type) {
+      case "user":
+        return request.message;
+      case "background-agent-result":
+        return `bg:${request.name}`;
+      case "button":
+        return `btn:${request.label}`;
     }
   }
 
@@ -376,10 +423,19 @@ export class Orchestrator {
   // --- Background management ---
 
   #spawnBackground(name: string, prompt: string, model: string | undefined) {
-    const bgPrompt = `[Context: background-agent/${name}] ${prompt}`;
+    const formatted = buildEvent({
+      name,
+      type: "background-agent-start",
+      session: "background",
+      text: prompt,
+    });
+    this.#spawnBackgroundRaw(name, prompt, formatted, model);
+  }
+
+  #spawnBackgroundRaw(name: string, prompt: string, formatted: string, model: string | undefined) {
     const query = this.#mainSessionId
-      ? this.#claude.forkSession(this.#mainSessionId, bgPrompt, responseResultType, { model })
-      : this.#claude.newSession(bgPrompt, responseResultType, { model });
+      ? this.#claude.forkSession(this.#mainSessionId, formatted, responseResultType, { model })
+      : this.#claude.newSession(formatted, responseResultType, { model });
     this.#registerBackground(name, prompt, model, query);
   }
 
