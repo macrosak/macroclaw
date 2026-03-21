@@ -231,6 +231,20 @@ describe("buildEvent", () => {
     expect(result).not.toContain("<text>");
   });
 
+  it("builds progress event with progress tag", () => {
+    const result = buildEvent({
+      name: "progress-research",
+      type: "background-agent-progress",
+      session: "main",
+      originalEvent: "research",
+      progress: "indexing 500 documents",
+    });
+    expect(result).toContain('type="background-agent-progress"');
+    expect(result).toContain('<original-event name="research" />');
+    expect(result).toContain("<progress>indexing 500 documents</progress>");
+    expect(result).not.toContain("<result>");
+  });
+
   it("includes instructions in event", () => {
     const result = buildEvent({
       name: "bg-research",

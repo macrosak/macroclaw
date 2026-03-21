@@ -405,7 +405,7 @@ export class Orchestrator {
           type: "background-agent-progress",
           session: "main",
           originalEvent: request.name,
-          result: { text: request.progress },
+          progress: request.progress,
           instructions: "This is an interim progress update, not a final result. Do not report to the user unless it contains exceptionally important information.",
           backgroundedEvent,
         };
