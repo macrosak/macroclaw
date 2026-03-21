@@ -920,6 +920,154 @@ describe("Orchestrator", () => {
     });
   });
 
+  describe("health checks", () => {
+    it("runs health check after interval and reports finished agent", async () => {
+      saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
+      const { query: bgQuery } = pendingQuery("bg-sid");
+
+      let callCount = 0;
+      const claude = mockClaude((info: CallInfo): RunningQuery<unknown> => {
+        callCount++;
+        if (callCount === 1) return bgQuery; // background agent spawn
+        if (info.prompt.includes("health-check")) {
+          return resolvedQuery({
+            finished: true,
+            output: { action: "send", message: "task complete", actionReason: "done" },
+          }, "hc-sid");
+        }
+        // Main session processes the background-agent-result
+        return resolvedQuery({ action: "send", message: "relayed", actionReason: "ok" });
+      });
+
+      const { orch } = makeOrchestrator(claude, {
+        healthCheckInterval: 50,
+        healthCheckTimeout: 5000,
+      });
+
+      orch.handleBackgroundCommand("long task");
+      await waitForProcessing(200);
+
+      // Health check should have fired, detected finished, killed original, and pushed result
+      expect(callCount).toBeGreaterThanOrEqual(2);
+      const hcCall = claude.calls.find((c: CallInfo) => c.prompt.includes("health-check"));
+      expect(hcCall).toBeDefined();
+      expect(hcCall!.model).toBe("haiku");
+    });
+
+    it("reports progress and schedules next check when not finished", async () => {
+      saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
+      const { query: bgQuery } = pendingQuery("bg-sid");
+
+      let hcCount = 0;
+      const claude = mockClaude((info: CallInfo): RunningQuery<unknown> => {
+        if (info.prompt.includes("health-check")) {
+          hcCount++;
+          return resolvedQuery({ finished: false, progress: "still working" }, "hc-sid");
+        }
+        if (info.prompt.includes("background-agent-result")) {
+          return resolvedQuery({ action: "silent", message: "ok", actionReason: "progress" });
+        }
+        return bgQuery; // background agent spawn
+      });
+
+      const { orch } = makeOrchestrator(claude, {
+        healthCheckInterval: 50,
+        healthCheckTimeout: 5000,
+      });
+
+      orch.handleBackgroundCommand("long task");
+      // Wait for two health check cycles
+      await waitForProcessing(250);
+
+      expect(hcCount).toBeGreaterThanOrEqual(2);
+    });
+
+    it("kills unresponsive agent on health check timeout", async () => {
+      saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
+      const { query: bgQuery } = pendingQuery("bg-sid");
+
+      const claude = mockClaude((info: CallInfo): RunningQuery<unknown> => {
+        if (info.prompt.includes("health-check")) {
+          // Never resolves — simulates unresponsive agent
+          return { sessionId: "hc-sid", startedAt: new Date(), result: new Promise(() => {}), kill: mock(async () => {}) };
+        }
+        return bgQuery;
+      });
+
+      const { orch, responses } = makeOrchestrator(claude, {
+        healthCheckInterval: 30,
+        healthCheckTimeout: 60,
+      });
+
+      orch.handleBackgroundCommand("stuck task");
+      await waitForProcessing(200);
+
+      const killMsg = responses.find((r) => r.message.includes("unresponsive"));
+      expect(killMsg).toBeDefined();
+    });
+
+    it("does not run health checks when interval is 0", async () => {
+      saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
+      const { query: bgQuery } = pendingQuery("bg-sid");
+
+      const claude = mockClaude((): RunningQuery<unknown> => bgQuery);
+      const { orch } = makeOrchestrator(claude, { healthCheckInterval: 0 });
+
+      orch.handleBackgroundCommand("some task");
+      await waitForProcessing(100);
+
+      // Only the spawn call, no health check fork
+      expect(claude.calls).toHaveLength(1);
+    });
+
+    it("clears health check timer when session is killed", async () => {
+      saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
+      const { query: bgQuery } = pendingQuery("bg-sid");
+
+      let hcCount = 0;
+      const claude = mockClaude((info: CallInfo): RunningQuery<unknown> => {
+        if (info.prompt.includes("health-check")) hcCount++;
+        return bgQuery;
+      });
+
+      const { orch } = makeOrchestrator(claude, { healthCheckInterval: 100 });
+
+      orch.handleBackgroundCommand("killable task");
+      await waitForProcessing();
+
+      // Get the session ID and kill it before health check fires
+      orch.handleKill("bg-sid");
+      await waitForProcessing(200);
+
+      expect(hcCount).toBe(0);
+    });
+
+    it("stops health check if session completes organically before timer", async () => {
+      saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
+      const { query: bgQuery, resolve: resolveBg } = pendingQuery("bg-sid");
+
+      let hcCount = 0;
+      let callCount = 0;
+      const claude = mockClaude((info: CallInfo): RunningQuery<unknown> => {
+        callCount++;
+        if (info.prompt.includes("health-check")) { hcCount++; return pendingQuery().query; }
+        if (callCount === 1) return bgQuery;
+        return resolvedQuery({ action: "send", message: "processed", actionReason: "ok" });
+      });
+
+      const { orch } = makeOrchestrator(claude, { healthCheckInterval: 200 });
+
+      orch.handleBackgroundCommand("fast task");
+      await waitForProcessing();
+
+      // Complete before health check fires
+      resolveBg(queryResult({ action: "send", message: "done", actionReason: "done" }));
+      await waitForProcessing(350);
+
+      expect(hcCount).toBe(0);
+    });
+  });
+
   describe("onResponse error handling", () => {
     it("logs error and does not throw when onResponse callback fails", async () => {
       const claude = mockClaude({ action: "send", message: "hello", actionReason: "ok" });

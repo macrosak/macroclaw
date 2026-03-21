@@ -20,6 +20,8 @@ const log = createLogger("orchestrator");
 // --- Constants ---
 
 const WAIT_THRESHOLD = 60_000;
+const HEALTH_CHECK_INTERVAL_MS = 5 * 60 * 1000;
+const HEALTH_CHECK_TIMEOUT_MS = 120 * 1000;
 
 // --- Response schema ---
 
@@ -40,7 +42,14 @@ const agentOutputSchema = z.object({
 
 type AgentOutput = z.infer<typeof agentOutputSchema>;
 
+const healthCheckSchema = z.object({
+  finished: z.boolean().describe("True if the task is complete, false if still working"),
+  output: agentOutputSchema.optional().describe("Full output when finished=true"),
+  progress: z.string().optional().describe("One-sentence status when finished=false"),
+});
+
 const responseResultType = { type: "object" as const, schema: agentOutputSchema };
+const healthCheckResultType = { type: "object" as const, schema: healthCheckSchema };
 
 const textResultType = { type: "text" } as const;
 
@@ -60,6 +69,7 @@ export interface OrchestratorResponse {
 type OrchestratorRequest =
   | { type: "user"; message: string; files?: string[] }
   | { type: "background-agent-result"; name: string; response: AgentOutput }
+  | { type: "background-agent-progress"; name: string; progress: string }
   | { type: "button"; label: string };
 
 function escapeHtml(text: string): string {
@@ -74,6 +84,7 @@ interface SessionInfo {
   model?: string;
   query: RunningQuery<AgentOutput>;
   lastMessageAt: Date;
+  healthCheckTimer?: Timer;
 }
 
 export interface OrchestratorConfig {
@@ -84,12 +95,18 @@ export interface OrchestratorConfig {
   claude?: Claude;
   /** How long to wait for a running main session before demoting it (ms). Default: 60000 */
   waitThreshold?: number;
+  /** Interval between background agent health checks (ms). Default: 300000. Set to 0 to disable. */
+  healthCheckInterval?: number;
+  /** Timeout for health check fork responses (ms). Default: 120000 */
+  healthCheckTimeout?: number;
 }
 
 export class Orchestrator {
   #config: Omit<OrchestratorConfig , 'claude'>;
   #claude: Claude;
   #waitThreshold: number;
+  #healthCheckInterval: number;
+  #healthCheckTimeout: number;
 
   #mainSessionId: string | undefined;
   #runningSessions = new Map<string, SessionInfo>();
@@ -99,6 +116,8 @@ export class Orchestrator {
     this.#config = config;
     this.#claude = config.claude ?? new Claude({ workspace: config.workspace, systemPrompt: SYSTEM_PROMPT });
     this.#waitThreshold = config.waitThreshold ?? WAIT_THRESHOLD;
+    this.#healthCheckInterval = config.healthCheckInterval ?? HEALTH_CHECK_INTERVAL_MS;
+    this.#healthCheckTimeout = config.healthCheckTimeout ?? HEALTH_CHECK_TIMEOUT_MS;
     this.#queue = new Queue<OrchestratorRequest>();
     this.#queue.setHandler((request) => this.#handleRequest(request));
 
@@ -217,7 +236,7 @@ export class Orchestrator {
       return;
     }
 
-    this.#runningSessions.delete(sessionId);
+    this.#clearSession(sessionId);
 
     try {
       await session.query.kill();
@@ -330,7 +349,7 @@ export class Orchestrator {
           await this.#deliverResponse(response);
           return;
         }
-        this.#runningSessions.delete(sid);
+        this.#clearSession(sid);
 
         if (sid === this.#mainSessionId) {
           log.debug({ name, sessionId: sid }, "Main query finished, delivering directly");
@@ -344,7 +363,7 @@ export class Orchestrator {
         if (!this.#runningSessions.has(sid)) {
           log.error({ name, sessionId: sid, err }, "Failed session not in runningSessions — delivering error");
         } else {
-          this.#runningSessions.delete(sid);
+          this.#clearSession(sid);
           log.error({ name, sessionId: sid, err }, "Main query failed");
         }
         await this.#deliverResponse(this.#errorResponse(err));
@@ -380,6 +399,17 @@ export class Orchestrator {
           instructions: "Forward this result to the user (action=\"send\"). Summarize or add context from the conversation as appropriate.",
         };
         break;
+      case "background-agent-progress":
+        input = {
+          name,
+          type: "background-agent-progress",
+          session: "main",
+          originalEvent: request.name,
+          result: { text: request.progress },
+          instructions: "This is an interim progress update, not a final result. Do not report to the user unless it contains exceptionally important information.",
+          backgroundedEvent,
+        };
+        break;
       case "button":
         input = {
           name,
@@ -400,6 +430,8 @@ export class Orchestrator {
         return request.message;
       case "background-agent-result":
         return `bg:${request.name}`;
+      case "background-agent-progress":
+        return `progress:${request.name}`;
       case "button":
         return `btn:${request.label}`;
     }
@@ -441,23 +473,108 @@ export class Orchestrator {
 
   #registerBackground(name: string, prompt: string, model: string | undefined, query: RunningQuery<AgentOutput>) {
     const sid = query.sessionId;
-    this.#runningSessions.set(sid, { name, prompt, model, query, lastMessageAt: new Date() });
+    const info: SessionInfo = { name, prompt, model, query, lastMessageAt: new Date() };
+    this.#runningSessions.set(sid, info);
 
     log.debug({ name, sessionId: sid }, "Background session registered");
+
+    this.#scheduleHealthCheck(sid);
 
     query.result.then(
       ({ value: response }) => {
         if (!this.#runningSessions.has(sid)) return;
-        this.#runningSessions.delete(sid);
+        this.#clearSession(sid);
         log.debug({ name, message: response.message }, "Background session finished");
         this.#queue.push({ type: "background-agent-result", name, response });
       },
       (err) => {
         if (!this.#runningSessions.has(sid)) return;
-        this.#runningSessions.delete(sid);
+        this.#clearSession(sid);
         log.error({ name, err }, "Background session failed");
         this.#queue.push({ type: "background-agent-result", name, response: { action: "send", message: `[Error] ${err}`, actionReason: "bg-failed" } });
       },
     );
+  }
+
+  // --- Session cleanup ---
+
+  #clearSession(sessionId: string) {
+    const info = this.#runningSessions.get(sessionId);
+    if (info?.healthCheckTimer) clearTimeout(info.healthCheckTimer);
+    this.#runningSessions.delete(sessionId);
+  }
+
+  // --- Health checks ---
+
+  #scheduleHealthCheck(sessionId: string) {
+    if (this.#healthCheckInterval <= 0) return;
+
+    const info = this.#runningSessions.get(sessionId);
+    if (!info) return;
+
+    info.healthCheckTimer = setTimeout(() => {
+      this.#runHealthCheck(sessionId);
+    }, this.#healthCheckInterval);
+  }
+
+  async #runHealthCheck(sessionId: string): Promise<void> {
+    const info = this.#runningSessions.get(sessionId);
+    if (!info) return;
+
+    log.debug({ name: info.name, sessionId }, "Running health check");
+
+    const prompt = buildEvent({
+      name: `health-check-${info.name}`,
+      type: "health-check",
+      session: "background",
+      targetEvent: info.name,
+      instructions: "Report your current status. If your task is complete, set finished=true and provide the full output. If still working, set finished=false and describe current progress in one sentence.",
+    });
+
+    let query: RunningQuery<z.infer<typeof healthCheckSchema>>;
+    try {
+      query = this.#claude.forkSession(sessionId, prompt, healthCheckResultType, { model: "haiku" });
+    } catch (err) {
+      log.error({ name: info.name, sessionId, err }, "Health check fork failed");
+      this.#scheduleHealthCheck(sessionId);
+      return;
+    }
+
+    const result = await Promise.race([
+      query.result.then((r) => r.value),
+      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), this.#healthCheckTimeout)),
+    ]);
+
+    // Session may have completed/been killed while health check was running
+    if (!this.#runningSessions.has(sessionId)) return;
+
+    if (result === "timeout") {
+      log.warn({ name: info.name, sessionId }, "Health check timed out, killing session");
+      try { await query.kill(); } catch { /* ignore */ }
+      this.#clearSession(sessionId);
+      try { await info.query.kill(); } catch { /* ignore */ }
+      this.#callOnResponse({ message: `Agent <b>${escapeHtml(info.name)}</b> appears unresponsive, killed it.` });
+      return;
+    }
+
+    if (result.finished) {
+      log.info({ name: info.name, sessionId }, "Health check: agent reports finished");
+      this.#clearSession(sessionId);
+      try { await info.query.kill(); } catch { /* ignore */ }
+      const response = result.output ?? { action: "send" as const, message: "[Agent finished but returned no output]", actionReason: "health-check-finished" };
+      this.#queue.push({ type: "background-agent-result", name: info.name, response });
+      return;
+    }
+
+    log.debug({ name: info.name, progress: result.progress }, "Health check: still running");
+    if (result.progress) {
+      this.#queue.push({
+        type: "background-agent-progress",
+        name: info.name,
+        progress: result.progress,
+      });
+    }
+
+    this.#scheduleHealthCheck(sessionId);
   }
 }
