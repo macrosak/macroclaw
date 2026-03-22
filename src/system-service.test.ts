@@ -72,9 +72,9 @@ describe("serviceFilePath", () => {
 		expect(mgr.serviceFilePath).toContain("Library/LaunchAgents/com.macroclaw.plist");
 	});
 
-	it("returns systemd path for systemd", () => {
-		const mgr = createManager({ platform: "linux" });
-		expect(mgr.serviceFilePath).toBe("/etc/systemd/system/macroclaw.service");
+	it("returns user systemd path for systemd", () => {
+		const mgr = createManager({ platform: "linux", home: "/home/testuser" });
+		expect(mgr.serviceFilePath).toBe("/home/testuser/.config/systemd/user/macroclaw.service");
 	});
 });
 
@@ -128,7 +128,7 @@ describe("isRunning", () => {
 
 	it("returns true when systemd service is active", () => {
 		mockExecSync.mockImplementation((cmd: string) => {
-			if (cmd === "systemctl is-active macroclaw") return SYSTEMD_ACTIVE;
+			if (cmd === "systemctl --user is-active macroclaw") return SYSTEMD_ACTIVE;
 			return "";
 		});
 		const mgr = createManager();
@@ -137,7 +137,7 @@ describe("isRunning", () => {
 
 	it("returns false when systemd service is inactive", () => {
 		mockExecSync.mockImplementation((cmd: string) => {
-			if (cmd === "systemctl is-active macroclaw") return SYSTEMD_INACTIVE;
+			if (cmd === "systemctl --user is-active macroclaw") return SYSTEMD_INACTIVE;
 			return "";
 		});
 		const mgr = createManager();
@@ -146,7 +146,7 @@ describe("isRunning", () => {
 
 	it("returns false when systemctl throws", () => {
 		mockExecSync.mockImplementation((cmd: string) => {
-			if (cmd === "systemctl is-active macroclaw") throw new Error("not found");
+			if (cmd === "systemctl --user is-active macroclaw") throw new Error("not found");
 			return "";
 		});
 		const mgr = createManager();
@@ -163,12 +163,7 @@ describe("install", () => {
 	});
 
 	it("throws when settings.json is missing on Linux", () => {
-		mockExecSync.mockImplementation((cmd: string) => {
-			if (cmd.startsWith("id -gn")) return "testuser\n";
-			return "";
-		});
-		mockUserInfo.mockImplementation(() => ({ username: "testuser", homedir: "/nonexistent", uid: 1000, gid: 1000, shell: "/bin/bash" }));
-		const mgr = createManager();
+		const mgr = createManager({ home: "/nonexistent" });
 		expect(() => mgr.install()).toThrow("Settings not found. Run `macroclaw setup` first.");
 	});
 
@@ -183,10 +178,14 @@ describe("install", () => {
 			if (cmd === "which bun") return `${tmpHome}/.bun/bin/bun\n`;
 			if (cmd === "which claude") return `${tmpHome}/.local/bin/claude\n`;
 			if (cmd === "bun pm bin -g") return `${tmpHome}/.bun/bin\n`;
-			if (cmd.startsWith("id -gn")) return "testuser\n";
 			return "";
 		});
 		mockUserInfo.mockImplementation(() => ({ username: "testuser", homedir: tmpHome, uid: 1000, gid: 1000, shell: "/bin/bash" }));
+		// Mock existsSync to handle linger check
+		mockExistsSync.mockImplementation((path: string) => {
+			if (path === "/var/lib/systemd/linger/testuser") return true; // already lingering
+			return realExistsSync(path);
+		});
 		const mgr = createManager({ home: tmpHome });
 		mgr.install();
 		rmSync(tmpHome, { recursive: true });
@@ -298,7 +297,7 @@ describe("install", () => {
 		rmSync(tmpHome, { recursive: true });
 	});
 
-	it("installs systemd service with PATH via temp file and sudo cp", () => {
+	it("installs systemd user service and writes unit file directly", () => {
 		const tmpHome = `/tmp/macroclaw-test-systemd-${Date.now()}`;
 		mkdirSync(join(tmpHome, ".macroclaw"), { recursive: true });
 		writeFileSync(join(tmpHome, ".macroclaw/settings.json"), "{}");
@@ -309,71 +308,63 @@ describe("install", () => {
 			if (cmd === "which bun") return `${tmpHome}/.bun/bin/bun\n`;
 			if (cmd === "which claude") return `${tmpHome}/.local/bin/claude\n`;
 			if (cmd === "bun pm bin -g") return `${tmpHome}/.bun/bin\n`;
-			if (cmd.startsWith("id -gn")) return "testuser\n";
 			return "";
 		});
 		mockUserInfo.mockImplementation(() => ({ username: "testuser", homedir: tmpHome, uid: 1000, gid: 1000, shell: "/bin/bash" }));
+		// Mock existsSync: linger file does not exist (triggers sudo loginctl)
+		mockExistsSync.mockImplementation((path: string) => {
+			if (path === "/var/lib/systemd/linger/testuser") return false;
+			return realExistsSync(path);
+		});
 		const mgr = createManager({ home: tmpHome });
 		mgr.install();
 
-		// Elevated operations use sudo
-		expect(mockExecSync).toHaveBeenCalledWith(expect.stringMatching(/^sudo cp \/tmp\/macroclaw-.+\.service \/etc\/systemd\/system\/macroclaw\.service$/), expect.anything());
-		expect(mockExecSync).toHaveBeenCalledWith("sudo systemctl daemon-reload", expect.anything());
-		expect(mockExecSync).toHaveBeenCalledWith("sudo systemctl enable macroclaw", expect.anything());
-		expect(mockExecSync).toHaveBeenCalledWith("sudo systemctl start macroclaw", expect.anything());
+		// Unit file written directly (no sudo cp)
+		const unitPath = join(tmpHome, ".config/systemd/user/macroclaw.service");
+		expect(existsSync(unitPath)).toBe(true);
+		const unitContent = readFileSync(unitPath, "utf-8");
+		expect(unitContent).toContain("WantedBy=default.target");
+		expect(unitContent).not.toContain("User=");
+		expect(unitContent).not.toContain("Group=");
+		expect(unitContent).toContain(`Environment=HOME=${tmpHome}`);
+		expect(unitContent).toContain(`ExecStart=${tmpHome}/.bun/bin/bun ${tmpHome}/.bun/bin/macroclaw start`);
+
+		// Lingering enabled via sudo
+		expect(mockExecSync).toHaveBeenCalledWith("sudo loginctl enable-linger testuser", expect.anything());
+		// User systemctl commands (no sudo)
+		expect(mockExecSync).toHaveBeenCalledWith("systemctl --user daemon-reload", expect.anything());
+		expect(mockExecSync).toHaveBeenCalledWith("systemctl --user enable macroclaw", expect.anything());
+		expect(mockExecSync).toHaveBeenCalledWith("systemctl --user start macroclaw", expect.anything());
+		// No sudo systemctl calls
+		for (const call of mockExecSync.mock.calls) {
+			expect(call[0]).not.toMatch(/^sudo systemctl/);
+		}
 		rmSync(tmpHome, { recursive: true });
 	});
 
-	it("cleans up temp file even when sudo cp fails", () => {
-		const tmpHome = `/tmp/macroclaw-test-cleanup-${Date.now()}`;
+	it("skips lingering when already enabled", () => {
+		const tmpHome = `/tmp/macroclaw-test-linger-${Date.now()}`;
 		mkdirSync(join(tmpHome, ".macroclaw"), { recursive: true });
 		writeFileSync(join(tmpHome, ".macroclaw/settings.json"), "{}");
 		mkdirSync(join(tmpHome, ".bun/bin"), { recursive: true });
 		writeFileSync(join(tmpHome, ".bun/bin/macroclaw"), "");
 
-		let tmpServicePath = "";
 		mockExecSync.mockImplementation((cmd: string) => {
-			if (cmd.startsWith("id -gn")) return "testuser\n";
 			if (cmd === "which bun") return `${tmpHome}/.bun/bin/bun\n`;
 			if (cmd === "which claude") return `${tmpHome}/.local/bin/claude\n`;
 			if (cmd === "bun pm bin -g") return `${tmpHome}/.bun/bin\n`;
-			if (cmd.startsWith("sudo cp")) {
-				tmpServicePath = cmd.split(" ")[2];
-				throw new Error("Permission denied");
-			}
 			return "";
 		});
 		mockUserInfo.mockImplementation(() => ({ username: "testuser", homedir: tmpHome, uid: 1000, gid: 1000, shell: "/bin/bash" }));
-		const mgr = createManager({ home: tmpHome });
-		expect(() => mgr.install()).toThrow("Permission denied");
-		// Temp file should be cleaned up
-		expect(tmpServicePath).toBeTruthy();
-		expect(existsSync(tmpServicePath)).toBe(false);
-		rmSync(tmpHome, { recursive: true });
-	});
-
-	it("uses os userInfo identity, not environment variables", () => {
-		const tmpHome = `/tmp/macroclaw-test-userinfo-${Date.now()}`;
-		mkdirSync(join(tmpHome, ".macroclaw"), { recursive: true });
-		writeFileSync(join(tmpHome, ".macroclaw/settings.json"), "{}");
-		mkdirSync(join(tmpHome, "bin"), { recursive: true });
-		writeFileSync(join(tmpHome, "bin/macroclaw"), "");
-
-		mockExecSync.mockImplementation((cmd: string) => {
-			if (cmd === "which bun") return "/usr/local/bin/bun\n";
-			if (cmd === "which claude") return "/usr/local/bin/claude\n";
-			if (cmd === "bun pm bin -g") return `${tmpHome}/bin\n`;
-			if (cmd === "id -gn deploy") return "deploy\n";
-			return "";
+		// Linger already enabled
+		mockExistsSync.mockImplementation((path: string) => {
+			if (path === "/var/lib/systemd/linger/testuser") return true;
+			return realExistsSync(path);
 		});
-		mockUserInfo.mockImplementation(() => ({ username: "deploy", homedir: tmpHome, uid: 1000, gid: 1000, shell: "/bin/bash" }));
 		const mgr = createManager({ home: tmpHome });
 		mgr.install();
 
-		// Verify the unit content was passed to sudo cp
-		const cpCall = mockExecSync.mock.calls.find(c => (c[0] as string).startsWith("sudo cp"));
-		expect(cpCall).toBeTruthy();
-
+		expect(mockExecSync).not.toHaveBeenCalledWith("sudo loginctl enable-linger testuser", expect.anything());
 		rmSync(tmpHome, { recursive: true });
 	});
 
@@ -388,10 +379,13 @@ describe("install", () => {
 			if (cmd === "which bun") return `${tmpHome}/.bun/bin/bun\n`;
 			if (cmd === "which claude") return `${tmpHome}/.local/bin/claude\n`;
 			if (cmd === "bun pm bin -g") return `${tmpHome}/.bun/bin\n`;
-			if (cmd.startsWith("id -gn")) return "testuser\n";
 			return "";
 		});
 		mockUserInfo.mockImplementation(() => ({ username: "testuser", homedir: tmpHome, uid: 1000, gid: 1000, shell: "/bin/bash" }));
+		mockExistsSync.mockImplementation((path: string) => {
+			if (path === "/var/lib/systemd/linger/testuser") return true;
+			return realExistsSync(path);
+		});
 		const mgr = createManager({ home: tmpHome });
 		mgr.install();
 		expect(mockExecSync).toHaveBeenCalledWith("bun install -g macroclaw", expect.anything());
@@ -405,11 +399,9 @@ describe("install", () => {
 		writeFileSync(join(tmpHome, ".macroclaw/settings.json"), "{}");
 
 		mockExecSync.mockImplementation((cmd: string) => {
-			if (cmd.startsWith("id -gn")) return "testuser\n";
 			if (cmd === "which bun") throw new Error("not found");
 			return "";
 		});
-		mockUserInfo.mockImplementation(() => ({ username: "testuser", homedir: tmpHome, uid: 1000, gid: 1000, shell: "/bin/bash" }));
 		const mgr = createManager({ home: tmpHome });
 		expect(() => mgr.install()).toThrow("Could not resolve bun path. Is it installed?");
 		rmSync(tmpHome, { recursive: true });
@@ -423,13 +415,11 @@ describe("install", () => {
 		// Note: NOT creating macroclaw binary
 
 		mockExecSync.mockImplementation((cmd: string) => {
-			if (cmd.startsWith("id -gn")) return "testuser\n";
 			if (cmd === "which bun") return `${tmpHome}/.bun/bin/bun\n`;
 			if (cmd === "which claude") return `${tmpHome}/.local/bin/claude\n`;
 			if (cmd === "bun pm bin -g") return `${tmpHome}/.bun/bin\n`;
 			return "";
 		});
-		mockUserInfo.mockImplementation(() => ({ username: "testuser", homedir: tmpHome, uid: 1000, gid: 1000, shell: "/bin/bash" }));
 		const mgr = createManager({ home: tmpHome });
 		expect(() => mgr.install()).toThrow(`Could not find macroclaw in ${tmpHome}/.bun/bin`);
 		rmSync(tmpHome, { recursive: true });
@@ -500,33 +490,45 @@ describe("uninstall", () => {
 		rmSync(tmpHome, { recursive: true, force: true });
 	});
 
-	it("uninstalls running systemd service via sudo", () => {
-		// systemd serviceFilePath is /etc/systemd/... which exists on Linux
-		// We mock isInstalled by ensuring the file "exists" via execSync behavior
-		// Actually isInstalled uses real existsSync — need a real file at the systemd path
-		// Since we can't write to /etc, we test the commands that would be called
-		// by using a launchd path with a real file but checking systemd commands aren't needed here
-		// Actually, let's just verify the throws case works — the systemd uninstall path
-		// requires /etc/systemd/system/macroclaw.service to exist, which we can't create in tests
-		// Skip this — already covered by the launchd tests above and the sudo assertions below
-	});
-
-	it("calls correct sudo commands for systemd uninstall", () => {
-		// Create a tmpHome-based manager and manually test the calls
-		// We need isInstalled to return true — for systemd that's /etc/systemd/system/macroclaw.service
-		// Since we can't create that, we verify via the launchd path
+	it("uninstalls running systemd user service", () => {
 		const tmpHome = `/tmp/macroclaw-test-unsys-${Date.now()}`;
-		const plistDir = join(tmpHome, "Library/LaunchAgents");
-		mkdirSync(plistDir, { recursive: true });
-		writeFileSync(join(plistDir, "com.macroclaw.plist"), "test");
+		const unitDir = join(tmpHome, ".config/systemd/user");
+		mkdirSync(unitDir, { recursive: true });
+		const unitPath = join(unitDir, "macroclaw.service");
+		writeFileSync(unitPath, "test");
 
 		mockExecSync.mockImplementation((cmd: string) => {
-			if (cmd.startsWith("launchctl list ")) return LAUNCHD_RUNNING;
+			if (cmd === "systemctl --user is-active macroclaw") return SYSTEMD_ACTIVE;
 			return "";
 		});
-		const mgr = createManager({ platform: "darwin", home: tmpHome });
+		const mgr = createManager({ platform: "linux", home: tmpHome });
 		mgr.uninstall();
-		expect(mockExecSync).toHaveBeenCalledWith(expect.stringContaining("launchctl unload"), expect.anything());
+		expect(mockExecSync).toHaveBeenCalledWith("systemctl --user stop macroclaw", expect.anything());
+		expect(mockExecSync).toHaveBeenCalledWith("systemctl --user disable macroclaw", expect.anything());
+		expect(mockExecSync).toHaveBeenCalledWith("systemctl --user daemon-reload", expect.anything());
+		expect(existsSync(unitPath)).toBe(false);
+		// No sudo for systemctl
+		for (const call of mockExecSync.mock.calls) {
+			expect(call[0]).not.toMatch(/^sudo /);
+		}
+		rmSync(tmpHome, { recursive: true, force: true });
+	});
+
+	it("uninstalls stopped systemd user service without stopping", () => {
+		const tmpHome = `/tmp/macroclaw-test-unsys2-${Date.now()}`;
+		const unitDir = join(tmpHome, ".config/systemd/user");
+		mkdirSync(unitDir, { recursive: true });
+		writeFileSync(join(unitDir, "macroclaw.service"), "test");
+
+		mockExecSync.mockImplementation((cmd: string) => {
+			if (cmd === "systemctl --user is-active macroclaw") throw new Error("inactive");
+			return "";
+		});
+		const mgr = createManager({ platform: "linux", home: tmpHome });
+		mgr.uninstall();
+		expect(mockExecSync).not.toHaveBeenCalledWith("systemctl --user stop macroclaw", expect.anything());
+		expect(mockExecSync).toHaveBeenCalledWith("systemctl --user disable macroclaw", expect.anything());
+		expect(mockExecSync).toHaveBeenCalledWith("systemctl --user daemon-reload", expect.anything());
 		rmSync(tmpHome, { recursive: true, force: true });
 	});
 });
@@ -567,6 +569,22 @@ describe("start", () => {
 		expect(mockExecSync).toHaveBeenCalledWith(expect.stringContaining("launchctl load"), expect.anything());
 		rmSync(tmpHome, { recursive: true });
 	});
+
+	it("starts systemd user service", () => {
+		const tmpHome = `/tmp/macroclaw-test-startsys-${Date.now()}`;
+		const unitDir = join(tmpHome, ".config/systemd/user");
+		mkdirSync(unitDir, { recursive: true });
+		writeFileSync(join(unitDir, "macroclaw.service"), "test");
+
+		mockExecSync.mockImplementation((cmd: string) => {
+			if (cmd === "systemctl --user is-active macroclaw") throw new Error("inactive");
+			return "";
+		});
+		const mgr = createManager({ platform: "linux", home: tmpHome });
+		mgr.start();
+		expect(mockExecSync).toHaveBeenCalledWith("systemctl --user start macroclaw", expect.anything());
+		rmSync(tmpHome, { recursive: true });
+	});
 });
 
 describe("stop", () => {
@@ -603,6 +621,22 @@ describe("stop", () => {
 		const mgr = createManager({ platform: "darwin", home: tmpHome });
 		mgr.stop();
 		expect(mockExecSync).toHaveBeenCalledWith(expect.stringContaining("launchctl unload"), expect.anything());
+		rmSync(tmpHome, { recursive: true });
+	});
+
+	it("stops systemd user service", () => {
+		const tmpHome = `/tmp/macroclaw-test-stopsys-${Date.now()}`;
+		const unitDir = join(tmpHome, ".config/systemd/user");
+		mkdirSync(unitDir, { recursive: true });
+		writeFileSync(join(unitDir, "macroclaw.service"), "test");
+
+		mockExecSync.mockImplementation((cmd: string) => {
+			if (cmd === "systemctl --user is-active macroclaw") return SYSTEMD_ACTIVE;
+			return "";
+		});
+		const mgr = createManager({ platform: "linux", home: tmpHome });
+		mgr.stop();
+		expect(mockExecSync).toHaveBeenCalledWith("systemctl --user stop macroclaw", expect.anything());
 		rmSync(tmpHome, { recursive: true });
 	});
 });
@@ -674,13 +708,13 @@ describe("update", () => {
 describe("status", () => {
 	it("returns not installed, not running when service file missing", () => {
 		mockExecSync.mockImplementation((cmd: string) => {
-			if (cmd === "systemctl is-active macroclaw") throw new Error("not found");
+			if (cmd === "systemctl --user is-active macroclaw") throw new Error("not found");
 			return "";
 		});
 		mockExistsSync.mockReturnValue(false);
 		const mgr = createManager({ home: "/nonexistent" });
 		// Override isInstalled getter — on hosts where macroclaw is installed as a systemd
-		// service, existsSync("/etc/systemd/system/macroclaw.service") returns true
+		// service, existsSync for the user path might still return true
 		Object.defineProperty(mgr, "isInstalled", { get: () => false });
 		const s = mgr.status();
 		expect(s.installed).toBe(false);
@@ -731,14 +765,14 @@ describe("status", () => {
 });
 
 describe("logs", () => {
-	it("returns journalctl command for systemd", () => {
+	it("returns journalctl --user command for systemd", () => {
 		const mgr = createManager();
-		expect(mgr.logs()).toBe("journalctl -u macroclaw -n 50 --no-pager");
+		expect(mgr.logs()).toBe("journalctl --user -u macroclaw -n 50 --no-pager");
 	});
 
-	it("returns journalctl follow command for systemd", () => {
+	it("returns journalctl --user follow command for systemd", () => {
 		const mgr = createManager();
-		expect(mgr.logs(true)).toBe("journalctl -u macroclaw -f");
+		expect(mgr.logs(true)).toBe("journalctl --user -u macroclaw -f");
 	});
 
 	it("returns tail command for launchd", () => {

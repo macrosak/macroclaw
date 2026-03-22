@@ -1,7 +1,6 @@
 import { execSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { userInfo as osUserInfo, tmpdir } from "node:os";
+import { userInfo as osUserInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createLogger } from "./logger";
 
@@ -9,12 +8,6 @@ const log = createLogger("service");
 const LAUNCHD_LABEL = "com.macroclaw";
 
 export type Platform = "launchd" | "systemd";
-
-interface LinuxUser {
-	user: string;
-	group: string;
-	home: string;
-}
 
 export interface ServiceStatus {
 	installed: boolean;
@@ -51,7 +44,7 @@ export class SystemServiceManager {
 	get serviceFilePath(): string {
 		return this.#platform === "launchd"
 			? resolve(this.#home, "Library/LaunchAgents/com.macroclaw.plist")
-			: "/etc/systemd/system/macroclaw.service";
+			: resolve(this.#home, ".config/systemd/user/macroclaw.service");
 	}
 
 	get isInstalled(): boolean {
@@ -68,7 +61,7 @@ export class SystemServiceManager {
 			}
 		}
 		try {
-			const out = this.#exec("systemctl is-active macroclaw");
+			const out = this.#exec("systemctl --user is-active macroclaw");
 			return out.trim() === "active";
 		} catch {
 			return false;
@@ -110,10 +103,13 @@ export class SystemServiceManager {
 	}
 
 	#installSystemd(): void {
-		const target = this.#resolveLinuxUser();
+		const settingsPath = resolve(this.#home, ".macroclaw/settings.json");
+		if (!existsSync(settingsPath)) {
+			throw new Error("Settings not found. Run `macroclaw setup` first.");
+		}
 
 		if (this.isRunning) {
-			this.#sudo("systemctl stop macroclaw");
+			this.#exec("systemctl --user stop macroclaw");
 		}
 
 		this.#exec("bun install -g macroclaw");
@@ -123,12 +119,19 @@ export class SystemServiceManager {
 
 		const pathDirs = [...new Set([dirname(bunPath), dirname(claudePath), dirname(macroclawPath)])];
 
-		const unitContent = this.#generateSystemdUnit(bunPath, macroclawPath, target, pathDirs);
-		this.#writeSystemdUnit(unitContent);
-		log.debug({ filePath: this.serviceFilePath, user: target.user }, "Wrote systemd unit");
-		this.#sudo("systemctl daemon-reload");
-		this.#sudo("systemctl enable macroclaw");
-		this.#sudo("systemctl start macroclaw");
+		// Enable lingering so user services run without an active login session
+		const username = osUserInfo().username;
+		if (!existsSync(`/var/lib/systemd/linger/${username}`)) {
+			this.#sudo(`loginctl enable-linger ${username}`);
+		}
+
+		const unitContent = this.#generateSystemdUnit(bunPath, macroclawPath, pathDirs);
+		mkdirSync(dirname(this.serviceFilePath), { recursive: true });
+		writeFileSync(this.serviceFilePath, unitContent);
+		log.debug({ filePath: this.serviceFilePath }, "Wrote systemd unit");
+		this.#exec("systemctl --user daemon-reload");
+		this.#exec("systemctl --user enable macroclaw");
+		this.#exec("systemctl --user start macroclaw");
 	}
 
 	uninstall(): void {
@@ -141,11 +144,11 @@ export class SystemServiceManager {
 			rmSync(this.serviceFilePath);
 		} else {
 			if (this.isRunning) {
-				this.#sudo("systemctl stop macroclaw");
+				this.#exec("systemctl --user stop macroclaw");
 			}
-			try { this.#sudo("systemctl disable macroclaw"); } catch { /* already disabled */ }
-			this.#sudo(`rm ${this.serviceFilePath}`);
-			this.#sudo("systemctl daemon-reload");
+			try { this.#exec("systemctl --user disable macroclaw"); } catch { /* already disabled */ }
+			rmSync(this.serviceFilePath);
+			this.#exec("systemctl --user daemon-reload");
 		}
 
 		log.debug("Service uninstalled");
@@ -161,7 +164,7 @@ export class SystemServiceManager {
 		if (this.#platform === "launchd") {
 			this.#exec(`launchctl load ${this.serviceFilePath}`);
 		} else {
-			this.#sudo("systemctl start macroclaw");
+			this.#exec("systemctl --user start macroclaw");
 		}
 
 		log.debug("Service started");
@@ -178,7 +181,7 @@ export class SystemServiceManager {
 		if (this.#platform === "launchd") {
 			this.#exec(`launchctl unload ${this.serviceFilePath}`);
 		} else {
-			this.#sudo("systemctl stop macroclaw");
+			this.#exec("systemctl --user stop macroclaw");
 		}
 
 		log.debug("Service stopped");
@@ -211,7 +214,7 @@ export class SystemServiceManager {
 				} catch { /* best effort */ }
 			} else {
 				try {
-					const out = this.#exec("systemctl show macroclaw --property=MainPID,ActiveEnterTimestamp --no-pager");
+					const out = this.#exec("systemctl --user show macroclaw --property=MainPID,ActiveEnterTimestamp --no-pager");
 					const pidMatch = /MainPID=(\d+)/.exec(out);
 					if (pidMatch && pidMatch[1] !== "0") result.pid = Number(pidMatch[1]);
 					const tsMatch = /ActiveEnterTimestamp=(.+)/.exec(out);
@@ -231,8 +234,8 @@ export class SystemServiceManager {
 				: `tail -n 50 ${logDir}/stdout.log`;
 		}
 		return follow
-			? "journalctl -u macroclaw -f"
-			: "journalctl -u macroclaw -n 50 --no-pager";
+			? "journalctl --user -u macroclaw -f"
+			: "journalctl --user -u macroclaw -n 50 --no-pager";
 	}
 
 	#exec(cmd: string): string {
@@ -278,36 +281,11 @@ export class SystemServiceManager {
 			const logDir = resolve(this.#home, ".macroclaw/logs");
 			return `tail -f ${logDir}/*.log`;
 		}
-		return "journalctl -u macroclaw -f";
+		return "journalctl --user -u macroclaw -f";
 	}
 
 	#sudo(cmd: string): void {
 		this.#exec(`sudo ${cmd}`);
-	}
-
-	/** Write unit content to a temp file, then sudo-copy it into /etc/systemd/system/. */
-	#writeSystemdUnit(content: string): void {
-		const tmpPath = join(tmpdir(), `macroclaw-${randomUUID()}.service`);
-		writeFileSync(tmpPath, content);
-		try {
-			this.#sudo(`cp ${tmpPath} ${this.serviceFilePath}`);
-		} finally {
-			try { rmSync(tmpPath); } catch { /* best-effort cleanup */ }
-		}
-	}
-
-	#resolveLinuxUser(): LinuxUser {
-		const info = osUserInfo();
-		const user = info.username;
-		const home = info.homedir;
-		const group = this.#exec(`id -gn ${user}`).trim();
-
-		const settingsPath = resolve(home, ".macroclaw/settings.json");
-		if (!existsSync(settingsPath)) {
-			throw new Error("Settings not found. Run `macroclaw setup` first.");
-		}
-
-		return { user, group, home };
 	}
 
 	#generateLaunchdPlist(bunPath: string, macroclawPath: string, pathDirs: string[], oauthToken?: string): string {
@@ -343,24 +321,22 @@ export class SystemServiceManager {
 `;
 	}
 
-	#generateSystemdUnit(bunPath: string, macroclawPath: string, target: LinuxUser, pathDirs: string[]): string {
+	#generateSystemdUnit(bunPath: string, macroclawPath: string, pathDirs: string[]): string {
 		return `[Unit]
 Description=Macroclaw - Telegram-to-Claude-Code bridge
 After=network.target
 
 [Service]
 Type=simple
-User=${target.user}
-Group=${target.group}
-Environment=HOME=${target.home}
+Environment=HOME=${this.#home}
 Environment=PATH=${pathDirs.join(":")}
-WorkingDirectory=${target.home}
+WorkingDirectory=${this.#home}
 ExecStart=${bunPath} ${macroclawPath} start
 Restart=on-failure
 RestartSec=5
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
 `;
 	}
 }
