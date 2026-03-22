@@ -113,7 +113,7 @@ export class SetupWizard {
   async installService(): Promise<void> {
     this.#io.open();
     try {
-      const installAnswer = await this.#io.ask("Install as a system service? [Y/n]: ");
+      const installAnswer = await this.#io.ask("Install as a service? [Y/n]:");
       if (installAnswer.toLowerCase() === "n" || installAnswer.toLowerCase() === "no") return;
 
       await this.#doInstallService();

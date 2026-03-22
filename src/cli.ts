@@ -130,7 +130,7 @@ const setupCommand = defineCommand({
 	meta: { name: "setup", description: "Run the interactive setup wizard" },
 	args: {
 		"skip-service": { type: "boolean", description: "Skip the service installation prompt" },
-		"install-service": { type: "boolean", description: "Install as a system service without prompting" },
+		"install-service": { type: "boolean", description: "Install as a service without prompting" },
 	},
 	run: ({ args }) => defaultCli.setup({ skipService: args["skip-service"], installService: args["install-service"] }).catch(handleError),
 });
@@ -141,7 +141,7 @@ const claudeCommand = defineCommand({
 });
 
 const serviceInstallCommand = defineCommand({
-	meta: { name: "install", description: "Install and start macroclaw as a system service" },
+	meta: { name: "install", description: "Install and start macroclaw as a service" },
 	args: {
 		token: { type: "string", description: "Claude OAuth token from `claude setup-token` (required on macOS)" },
 	},
@@ -149,17 +149,17 @@ const serviceInstallCommand = defineCommand({
 });
 
 const serviceUninstallCommand = defineCommand({
-	meta: { name: "uninstall", description: "Stop and remove the system service" },
+	meta: { name: "uninstall", description: "Stop and remove the service" },
 	run: () => { try { defaultCli.service("uninstall"); } catch (err) { handleError(err); } },
 });
 
 const serviceStartCommand = defineCommand({
-	meta: { name: "start", description: "Start the system service" },
+	meta: { name: "start", description: "Start the service" },
 	run: () => { try { defaultCli.service("start"); } catch (err) { handleError(err); } },
 });
 
 const serviceStopCommand = defineCommand({
-	meta: { name: "stop", description: "Stop the system service" },
+	meta: { name: "stop", description: "Stop the service" },
 	run: () => { try { defaultCli.service("stop"); } catch (err) { handleError(err); } },
 });
 
@@ -182,7 +182,7 @@ const serviceLogsCommand = defineCommand({
 });
 
 const serviceCommand = defineCommand({
-	meta: { name: "service", description: "Manage macroclaw system service" },
+	meta: { name: "service", description: "Manage macroclaw service" },
 	subCommands: {
 		install: serviceInstallCommand,
 		uninstall: serviceUninstallCommand,
