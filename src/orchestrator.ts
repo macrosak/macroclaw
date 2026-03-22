@@ -283,9 +283,9 @@ export class Orchestrator {
     const label = Orchestrator.#requestLabel(request);
     const name = generateName(label);
     const backgroundedName = movedToBackground ? mainInfo?.name : undefined;
-    const prompt = this.#formatPrompt(request, name, backgroundedName);
+    const formatted = this.#formatPrompt(request, name, backgroundedName);
 
-    this.#startMainQuery(name, prompt, this.#config.model);
+    this.#startMainQuery(name, label, formatted, this.#config.model);
   }
 
   // --- Response delivery ---
@@ -319,20 +319,20 @@ export class Orchestrator {
 
   // --- Main session query ---
 
-  #startMainQuery(name: string, prompt: string, model: string | undefined): void {
+  #startMainQuery(name: string, displayPrompt: string, formatted: string, model: string | undefined): void {
     const opts = { model };
     let query: RunningQuery<AgentOutput>;
 
     if (this.#mainSessionId && this.#runningSessions.has(this.#mainSessionId)) {
-      query = this.#claude.forkSession(this.#mainSessionId, prompt, responseResultType, opts);
+      query = this.#claude.forkSession(this.#mainSessionId, formatted, responseResultType, opts);
     } else if (this.#mainSessionId) {
-      query = this.#claude.resumeSession(this.#mainSessionId, prompt, responseResultType, opts);
+      query = this.#claude.resumeSession(this.#mainSessionId, formatted, responseResultType, opts);
     } else {
-      query = this.#claude.newSession(prompt, responseResultType, opts);
+      query = this.#claude.newSession(formatted, responseResultType, opts);
     }
 
     const sid = query.sessionId;
-    this.#runningSessions.set(sid, { name, prompt, model, query, lastMessageAt: new Date() });
+    this.#runningSessions.set(sid, { name, prompt: displayPrompt, model, query, lastMessageAt: new Date() });
 
     if (sid !== this.#mainSessionId) {
       log.info({ oldSessionId: this.#mainSessionId, newSessionId: sid }, "Session updated");

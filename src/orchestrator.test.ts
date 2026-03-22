@@ -775,6 +775,33 @@ describe("Orchestrator", () => {
       const detailResponse = responses[responses.length - 1];
       expect(detailResponse.message).toContain("Model: opus");
     });
+
+    it("shows clean prompt text for main sessions, not XML wrapper", async () => {
+      const claude = mockClaude((): RunningQuery<unknown> => ({
+        sessionId: "main-sid",
+        startedAt: new Date(),
+        result: new Promise(() => {}),
+        kill: mock(async () => {}),
+      }));
+      const { orch, responses } = makeOrchestrator(claude);
+
+      orch.handleMessage("I want to visit my parents at their house");
+      await waitForProcessing(); // Let the queue process and start the main query
+
+      orch.handleSessions();
+      await waitForProcessing();
+      const listResponse = responses[responses.length - 1];
+      const detailBtn = listResponse.buttons![0] as { text: string; data: string };
+      const sessionId = detailBtn.data.slice(7);
+
+      orch.handleDetail(sessionId);
+      await waitForProcessing();
+
+      const detailResponse = responses[responses.length - 1];
+      expect(detailResponse.message).toContain("I want to visit my parents");
+      expect(detailResponse.message).not.toContain("<event");
+      expect(detailResponse.message).not.toContain("<text>");
+    });
   });
 
   describe("handleKill", () => {
