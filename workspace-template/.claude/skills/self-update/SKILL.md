@@ -24,6 +24,6 @@ Update macroclaw to the latest version.
 
 ## Important
 
-- The `macroclaw service update` command stops the service, installs the latest version, and starts it again. Stopping the service kills all processes in the cgroup — including this Claude Code session.
+- The `macroclaw service update` command stops the user service, installs the latest version, and starts it again. Stopping the service kills all processes in the cgroup — including this Claude Code session.
 - Do NOT use a background agent — it gets killed along with the main process.
 - Always run step 4 LAST — everything after it may not execute.
