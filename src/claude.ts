@@ -142,7 +142,11 @@ export class ClaudeProcess<T = unknown> {
         continue;
       }
 
-      if (parsed.type !== "result") continue;
+      if (parsed.type !== "result") {
+        const thinking = ClaudeProcess.#extractThinking(parsed);
+        if (thinking) log.debug({ thinking }, "Thinking");
+        continue;
+      }
 
       this.#state = "idle";
       return this.#parseResult(parsed);
@@ -178,6 +182,15 @@ export class ClaudeProcess<T = unknown> {
 
     log.debug({ duration, cost, sessionId: sid }, "Claude response received");
     return { value, sessionId: sid, duration, cost };
+  }
+
+  static #extractThinking(event: Record<string, unknown>): string | undefined {
+    if (event.type !== "assistant") return undefined;
+    const msg = event.message as Record<string, unknown> | undefined;
+    const content = msg?.content as Array<Record<string, unknown>> | undefined;
+    if (!Array.isArray(content)) return undefined;
+    const block = content.find((c) => c.type === "thinking");
+    return typeof block?.thinking === "string" ? block.thinking : undefined;
   }
 
   static async *#readLines(reader: StreamReader): AsyncGenerator<string> {
