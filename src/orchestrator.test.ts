@@ -1002,6 +1002,9 @@ describe("Orchestrator", () => {
       await waitForProcessing(250);
 
       expect(hcCount).toBeGreaterThanOrEqual(2);
+
+      // Kill session to stop the health check loop
+      await orch.handleKill("bg-sid");
     });
 
     it("kills unresponsive agent on health check timeout", async () => {
