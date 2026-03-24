@@ -1,10 +1,11 @@
 import { z } from "zod/v4";
 import {
   Claude,
+  type ClaudeProcess,
   QueryParseError,
   QueryProcessError,
+  type QueryResult,
   QueryValidationError,
-  type RunningQuery
 } from "./claude";
 import { writeHistoryPrompt, writeHistoryResult } from "./history";
 import { createLogger } from "./logger";
@@ -92,7 +93,8 @@ interface SessionInfo {
   name: string;
   prompt: string;
   model?: string;
-  query: RunningQuery<AgentOutput>;
+  process: ClaudeProcess<AgentOutput>;
+  pendingResult: Promise<QueryResult<AgentOutput>>;
   lastMessageAt: Date;
   healthCheckTimer?: Timer;
 }
@@ -119,6 +121,7 @@ export class Orchestrator {
   #healthCheckTimeout: number;
 
   #mainSessionId: string | undefined;
+  #mainProcess: ClaudeProcess<AgentOutput> | null = null;
   #runningSessions = new Map<string, SessionInfo>();
   #queue: Queue<OrchestratorRequest>;
 
@@ -167,14 +170,14 @@ export class Orchestrator {
       return;
     }
     const lines = sessions.map(([sid, s]) => {
-      const elapsed = Math.round((Date.now() - s.query.startedAt.getTime()) / 1000);
+      const elapsed = Math.round((Date.now() - s.process.startedAt.getTime()) / 1000);
       const isMain = sid === this.#mainSessionId;
       return isMain
         ? `▶ ${escapeHtml(s.name)} (${elapsed}s) [main]`
         : `- ${escapeHtml(s.name)} (${elapsed}s)`;
     });
     const buttons: ButtonSpec[] = sessions.map(([sid, s]) => {
-      const elapsed = Math.round((Date.now() - s.query.startedAt.getTime()) / 1000);
+      const elapsed = Math.round((Date.now() - s.process.startedAt.getTime()) / 1000);
       const text = `${s.name} (${elapsed}s)`.slice(0, 27);
       return { text, data: `detail:${sid}` };
     });
@@ -189,7 +192,7 @@ export class Orchestrator {
       return;
     }
 
-    const elapsed = Math.round((Date.now() - session.query.startedAt.getTime()) / 1000);
+    const elapsed = Math.round((Date.now() - session.process.startedAt.getTime()) / 1000);
     const truncatedPrompt = session.prompt.length > 300 ? `${session.prompt.slice(0, 300)}…` : session.prompt;
     const isMain = sessionId === this.#mainSessionId;
     const lines = [
@@ -222,13 +225,13 @@ export class Orchestrator {
         session.name,
         `Only consider progress since the "${session.name}" event. Brief status update: done, in progress, remaining. 2-3 sentences max, plain text.`,
       );
-      const query = this.#claude.forkSession(
+      const peekProcess = this.#claude.forkSession(
         sessionId,
-        prompt,
         textResultType,
         { model: "haiku" },
       );
-      const { value } = await query.result;
+      const { value } = await peekProcess.send(prompt);
+      peekProcess.kill().catch(() => {});
       this.#callOnResponse({ message: `<b>[${escapeHtml(session.name)}]</b> ${value || "[No output]"}` });
     } catch (err) {
       this.#callOnResponse({ message: `Couldn't peek at ${escapeHtml(session.name)}: ${err}` });
@@ -245,7 +248,7 @@ export class Orchestrator {
     this.#clearSession(sessionId);
 
     try {
-      await session.query.kill();
+      await session.process.kill();
     } catch (err) {
       log.error({ err, name: session.name }, "Kill failed");
     }
@@ -253,45 +256,141 @@ export class Orchestrator {
     this.#callOnResponse({ message: `Killed <b>${escapeHtml(session.name)}</b>.` });
   }
 
+  async handleRestart(): Promise<void> {
+    const sid = this.#mainProcess?.sessionId;
+    if (sid) {
+      this.#clearSession(sid);
+    }
+    if (this.#mainProcess) {
+      try {
+        await this.#mainProcess.kill();
+      } catch (err) {
+        log.error({ err }, "Failed to kill main process during restart");
+      }
+      this.#mainProcess = null;
+    }
+    log.info({ sessionId: this.#mainSessionId }, "Main session restarted");
+    this.#callOnResponse({ message: "Session restarted." });
+  }
+
+  // --- Main process lifecycle ---
+
+  #ensureMainProcess(): ClaudeProcess<AgentOutput> {
+    if (this.#mainProcess && this.#mainProcess.state !== "dead") {
+      return this.#mainProcess;
+    }
+
+    const opts = { model: this.#config.model };
+    this.#mainProcess = this.#mainSessionId
+      ? this.#claude.resumeSession(this.#mainSessionId, responseResultType, opts)
+      : this.#claude.newSession(responseResultType, opts);
+
+    if (this.#mainProcess.sessionId !== this.#mainSessionId) {
+      this.#mainSessionId = this.#mainProcess.sessionId;
+      saveSessions({ mainSessionId: this.#mainSessionId }, this.#config.settingsDir);
+    }
+
+    log.info({ sessionId: this.#mainSessionId }, "Main process created");
+    return this.#mainProcess;
+  }
 
   // --- Internal queue handler ---
 
   async #handleRequest(request: OrchestratorRequest): Promise<void> {
     log.debug({ type: request.type }, "Incoming request");
 
-    const mainInfo = this.#mainSessionId ? this.#runningSessions.get(this.#mainSessionId) : undefined;
     let movedToBackground: string | undefined;
+    let backgroundedName: string | undefined;
+    const currentMain = this.#mainProcess;
 
-    if (mainInfo) {
-      const elapsed = Date.now() - mainInfo.lastMessageAt.getTime();
-      if (elapsed >= this.#waitThreshold) {
-        // Main has been running too long — move to background immediately
-        log.info({ name: mainInfo.name, sessionId: mainInfo.query.sessionId }, "Moving main session to background (exceeded threshold)");
-        movedToBackground = mainInfo.prompt;
-      } else {
-        // Main started recently — wait for it to finish or threshold
-        const remaining = this.#waitThreshold - elapsed;
-        const finished = await Promise.race([
-          mainInfo.query.result.then(() => true as const, () => true as const),
-          new Promise<false>((r) => setTimeout(() => r(false), remaining)),
-        ]);
-
-        if (!finished) {
-          log.info({ name: mainInfo.name, sessionId: mainInfo.query.sessionId }, "Moving main session to background (wait timed out)");
+    if (currentMain?.state === "busy") {
+      const mainInfo = this.#runningSessions.get(currentMain.sessionId);
+      if (mainInfo) {
+        const elapsed = Date.now() - mainInfo.lastMessageAt.getTime();
+        if (elapsed >= this.#waitThreshold) {
           movedToBackground = mainInfo.prompt;
+          backgroundedName = mainInfo.name;
+        } else {
+          const remaining = this.#waitThreshold - elapsed;
+          const finished = await Promise.race([
+            mainInfo.pendingResult.then(() => true as const, () => true as const),
+            new Promise<false>((r) => setTimeout(() => r(false), remaining)),
+          ]);
+
+          if (!finished) {
+            movedToBackground = mainInfo.prompt;
+            backgroundedName = mainInfo.name;
+          }
         }
-        // If finished: completion handler already delivered the result and removed from map.
       }
+    }
+
+    if (movedToBackground && currentMain) {
+      log.info({ name: backgroundedName, sessionId: currentMain.sessionId }, "Moving main session to background");
+      this.#mainProcess = this.#claude.forkSession(
+        this.#mainSessionId ?? currentMain.sessionId,
+        responseResultType,
+        { model: this.#config.model },
+      );
+      this.#mainSessionId = this.#mainProcess.sessionId;
+      saveSessions({ mainSessionId: this.#mainSessionId }, this.#config.settingsDir);
     }
 
     await writeHistoryPrompt(request);
 
     const label = Orchestrator.#requestLabel(request);
     const name = generateName(label);
-    const backgroundedName = movedToBackground ? mainInfo?.name : undefined;
     const formatted = this.#formatPrompt(request, name, backgroundedName);
 
-    this.#startMainQuery(name, label, formatted, this.#config.model);
+    this.#sendToMain(name, label, formatted);
+  }
+
+  // --- Main session send ---
+
+  #sendToMain(name: string, displayPrompt: string, formatted: string): void {
+    const process = this.#ensureMainProcess();
+    const sid = process.sessionId;
+
+    const pendingResult = process.send(formatted);
+    this.#runningSessions.set(sid, {
+      name,
+      prompt: displayPrompt,
+      model: this.#config.model,
+      process,
+      pendingResult,
+      lastMessageAt: new Date(),
+    });
+
+    log.debug({ name, sessionId: sid }, "Main query sent");
+
+    pendingResult.then(
+      async ({ value: response }) => {
+        if (!this.#runningSessions.has(sid)) {
+          log.error({ name, sessionId: sid }, "Completed session not in runningSessions — delivering anyway");
+          await this.#deliverResponse(response);
+          return;
+        }
+        this.#clearSession(sid);
+
+        if (process === this.#mainProcess) {
+          log.debug({ name, sessionId: sid }, "Main query finished, delivering directly");
+          await this.#deliverResponse(response);
+        } else {
+          log.debug({ name, sessionId: sid }, "Non-main query finished, feeding to main session");
+          process.kill().catch(() => {});
+          this.#queue.push({ type: "background-agent-result", name, response });
+        }
+      },
+      async (err) => {
+        if (!this.#runningSessions.has(sid)) {
+          log.error({ name, sessionId: sid, err }, "Failed session not in runningSessions — delivering error");
+        } else {
+          this.#clearSession(sid);
+          log.error({ name, sessionId: sid, err }, "Main query failed");
+        }
+        await this.#deliverResponse(this.#errorResponse(err));
+      },
+    );
   }
 
   // --- Response delivery ---
@@ -321,60 +420,6 @@ export class Orchestrator {
     this.#config.onResponse(response).catch((err) => {
       log.error({ err }, "onResponse callback failed");
     });
-  }
-
-  // --- Main session query ---
-
-  #startMainQuery(name: string, displayPrompt: string, formatted: string, model: string | undefined): void {
-    const opts = { model };
-    let query: RunningQuery<AgentOutput>;
-
-    if (this.#mainSessionId && this.#runningSessions.has(this.#mainSessionId)) {
-      query = this.#claude.forkSession(this.#mainSessionId, formatted, responseResultType, opts);
-    } else if (this.#mainSessionId) {
-      query = this.#claude.resumeSession(this.#mainSessionId, formatted, responseResultType, opts);
-    } else {
-      query = this.#claude.newSession(formatted, responseResultType, opts);
-    }
-
-    const sid = query.sessionId;
-    this.#runningSessions.set(sid, { name, prompt: displayPrompt, model, query, lastMessageAt: new Date() });
-
-    if (sid !== this.#mainSessionId) {
-      log.info({ oldSessionId: this.#mainSessionId, newSessionId: sid }, "Session updated");
-      this.#mainSessionId = sid;
-      saveSessions({ mainSessionId: sid }, this.#config.settingsDir);
-    }
-
-    log.debug({ name, sessionId: sid }, "Main query started");
-
-    query.result.then(
-      async ({ value: response }) => {
-        if (!this.#runningSessions.has(sid)) {
-          log.error({ name, sessionId: sid }, "Completed session not in runningSessions — delivering anyway");
-          await this.#deliverResponse(response);
-          return;
-        }
-        this.#clearSession(sid);
-
-        if (sid === this.#mainSessionId) {
-          log.debug({ name, sessionId: sid }, "Main query finished, delivering directly");
-          await this.#deliverResponse(response);
-        } else {
-          log.debug({ name, sessionId: sid }, "Non-main query finished, feeding to main session");
-          this.#queue.push({ type: "background-agent-result", name, response });
-        }
-      },
-      async (err) => {
-        if (!this.#runningSessions.has(sid)) {
-          log.error({ name, sessionId: sid, err }, "Failed session not in runningSessions — delivering error");
-        } else {
-          this.#clearSession(sid);
-          log.error({ name, sessionId: sid, err }, "Main query failed");
-        }
-        await this.#deliverResponse(this.#errorResponse(err));
-      },
-    );
   }
 
   #formatPrompt(request: OrchestratorRequest, name: string, backgroundedEvent?: string): string {
@@ -438,31 +483,32 @@ export class Orchestrator {
   }
 
   #spawnBackgroundRaw(name: string, prompt: string, formatted: string, model: string | undefined) {
-    const query = this.#mainSessionId
-      ? this.#claude.forkSession(this.#mainSessionId, formatted, responseResultType, { model })
-      : this.#claude.newSession(formatted, responseResultType, { model });
-    this.#registerBackground(name, prompt, model, query);
-  }
+    const process = this.#mainSessionId
+      ? this.#claude.forkSession(this.#mainSessionId, responseResultType, { model })
+      : this.#claude.newSession(responseResultType, { model });
 
-  #registerBackground(name: string, prompt: string, model: string | undefined, query: RunningQuery<AgentOutput>) {
-    const sid = query.sessionId;
-    const info: SessionInfo = { name, prompt, model, query, lastMessageAt: new Date() };
+    const sid = process.sessionId;
+    const pendingResult = process.send(formatted);
+
+    const info: SessionInfo = { name, prompt, model, process, pendingResult, lastMessageAt: new Date() };
     this.#runningSessions.set(sid, info);
 
     log.debug({ name, sessionId: sid }, "Background session registered");
 
     this.#scheduleHealthCheck(sid);
 
-    query.result.then(
+    pendingResult.then(
       ({ value: response }) => {
         if (!this.#runningSessions.has(sid)) return;
         this.#clearSession(sid);
+        process.kill().catch(() => {});
         log.debug({ name, message: response.message }, "Background session finished");
         this.#queue.push({ type: "background-agent-result", name, response });
       },
       (err) => {
         if (!this.#runningSessions.has(sid)) return;
         this.#clearSession(sid);
+        process.kill().catch(() => {});
         log.error({ name, err }, "Background session failed");
         this.#queue.push({ type: "background-agent-result", name, response: { action: "send", message: `[Error] ${err}`, actionReason: "bg-failed" } });
       },
@@ -502,9 +548,9 @@ export class Orchestrator {
       "Report your current status. If your task is complete, set finished=true and provide the full output. If still working, set finished=false and describe current progress in one sentence.",
     );
 
-    let query: RunningQuery<z.infer<typeof healthCheckSchema>>;
+    let hcProcess: ClaudeProcess<z.infer<typeof healthCheckSchema>>;
     try {
-      query = this.#claude.forkSession(sessionId, prompt, healthCheckResultType, { model: "haiku" });
+      hcProcess = this.#claude.forkSession(sessionId, healthCheckResultType, { model: "haiku" });
     } catch (err) {
       log.error({ name: info.name, sessionId, err }, "Health check fork failed");
       this.#scheduleHealthCheck(sessionId);
@@ -512,18 +558,20 @@ export class Orchestrator {
     }
 
     const result = await Promise.race([
-      query.result.then((r) => r.value),
+      hcProcess.send(prompt).then((r) => r.value),
       new Promise<"timeout">((r) => setTimeout(() => r("timeout"), this.#healthCheckTimeout)),
     ]);
+
+    // Always kill health check process
+    hcProcess.kill().catch(() => {});
 
     // Session may have completed/been killed while health check was running
     if (!this.#runningSessions.has(sessionId)) return;
 
     if (result === "timeout") {
       log.warn({ name: info.name, sessionId }, "Health check timed out, killing session");
-      try { await query.kill(); } catch { /* ignore */ }
       this.#clearSession(sessionId);
-      try { await info.query.kill(); } catch { /* ignore */ }
+      try { await info.process.kill(); } catch { /* ignore */ }
       this.#callOnResponse({ message: `Agent <b>${escapeHtml(info.name)}</b> appears unresponsive, killed it.` });
       return;
     }
@@ -531,7 +579,7 @@ export class Orchestrator {
     if (result.finished) {
       log.info({ name: info.name, sessionId }, "Health check: agent reports finished");
       this.#clearSession(sessionId);
-      try { await info.query.kill(); } catch { /* ignore */ }
+      try { await info.process.kill(); } catch { /* ignore */ }
       const response = result.output ?? { action: "send" as const, message: "[Agent finished but returned no output]", actionReason: "health-check-finished" };
       this.#queue.push({ type: "background-agent-result", name: info.name, response });
       return;
