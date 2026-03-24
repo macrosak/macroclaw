@@ -167,13 +167,13 @@ describe("App", () => {
     expect(bot.filterHandlers.has("callback_query:data")).toBe(true);
   });
 
-  it("registers chatid, bg, sessions, and restart commands", () => {
+  it("registers chatid, bg, sessions, and clear commands", () => {
     const app = makeApp();
     const bot = app.bot as any;
     expect(bot.commandHandlers.has("chatid")).toBe(true);
     expect(bot.commandHandlers.has("bg")).toBe(true);
     expect(bot.commandHandlers.has("sessions")).toBe(true);
-    expect(bot.commandHandlers.has("restart")).toBe(true);
+    expect(bot.commandHandlers.has("clear")).toBe(true);
   });
 
   it("registers error handler", () => {
@@ -756,10 +756,10 @@ describe("App", () => {
       expect(text).toBe("No running sessions.");
     });
 
-    it("/restart sends confirmation", async () => {
+    it("/clear sends confirmation", async () => {
       const app = makeApp();
       const bot = app.bot as any;
-      const handler = bot.commandHandlers.get("restart")!;
+      const handler = bot.commandHandlers.get("clear")!;
       const ctx = { chat: { id: 12345 } };
 
       handler(ctx);
@@ -767,13 +767,13 @@ describe("App", () => {
 
       const calls = (bot.api.sendMessage as any).mock.calls;
       const text = calls[calls.length - 1][1];
-      expect(text).toBe("Session restarted.");
+      expect(text).toBe("Session cleared.");
     });
 
-    it("/restart is ignored for unauthorized chats", async () => {
+    it("/clear is ignored for unauthorized chats", async () => {
       const app = makeApp();
       const bot = app.bot as any;
-      const handler = bot.commandHandlers.get("restart")!;
+      const handler = bot.commandHandlers.get("clear")!;
       const ctx = { chat: { id: 99999 } };
 
       handler(ctx);
@@ -822,7 +822,7 @@ describe("App", () => {
         { command: "chatid", description: "Show current chat ID" },
         { command: "bg", description: "Spawn a background agent" },
         { command: "sessions", description: "List running sessions" },
-        { command: "restart", description: "Restart the main Claude session" },
+        { command: "clear", description: "Clear session and start fresh" },
       ]);
     });
   });

@@ -1103,7 +1103,7 @@ describe("Orchestrator", () => {
     });
   });
 
-  describe("handleRestart", () => {
+  describe("handleClear", () => {
     it("kills main process and sends confirmation", async () => {
       const { process: mainProc } = pendingProcess("main-sid");
       const claude = mockClaude(() => mainProc);
@@ -1112,20 +1112,20 @@ describe("Orchestrator", () => {
       orch.handleMessage("hello");
       await waitForProcessing();
 
-      await orch.handleRestart();
+      await orch.handleClear();
       await waitForProcessing();
 
       expect(mainProc.kill).toHaveBeenCalled();
-      expect(responses.some((r) => r.message === "Session restarted.")).toBe(true);
+      expect(responses.some((r) => r.message === "Session cleared.")).toBe(true);
     });
 
-    it("creates new process for next message after restart", async () => {
+    it("creates new session (not resume) for next message after clear", async () => {
       const { process: p1, resolve: r1 } = pendingProcess("first-sid");
       let callCount = 0;
       const claude = mockClaude((): ClaudeProcess<unknown> => {
         callCount++;
         if (callCount === 1) return p1;
-        return autoProcess({ action: "send", message: "after restart", actionReason: "ok" }, "second-sid");
+        return autoProcess({ action: "send", message: "after clear", actionReason: "ok" }, "second-sid");
       });
       const { orch, responses } = makeOrchestrator(claude);
 
@@ -1134,14 +1134,16 @@ describe("Orchestrator", () => {
       r1({ action: "send", message: "first", actionReason: "ok" });
       await waitForProcessing();
 
-      await orch.handleRestart();
+      await orch.handleClear();
       await waitForProcessing();
 
       orch.handleMessage("hi again");
       await waitForProcessing();
 
       expect(callCount).toBe(2);
-      expect(responses.some((r) => r.message === "after restart")).toBe(true);
+      // After clear, should use newSession (not resumeSession)
+      expect(claude.calls[1].method).toBe("newSession");
+      expect(responses.some((r) => r.message === "after clear")).toBe(true);
     });
   });
 
