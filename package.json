@@ -24,7 +24,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "biome check",
     "lint:fix": "biome check --fix --unsafe",
-    "test": "bun test",
+    "test": "bun test --force-exit",
     "test:integration": "bun test src/*.integration-test.ts --timeout 120000",
     "claude": "set -a && . ./.env && set +a && cd ${WORKSPACE:-~/.macroclaw-workspace} && claude --resume $(node -p \"require('$HOME/.macroclaw/settings.json').sessionId\") --model ${MODEL:-sonnet}"
   },
