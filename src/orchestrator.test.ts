@@ -112,6 +112,7 @@ function makeOrchestrator(claude: Claude, extraConfig?: Partial<OrchestratorConf
     settingsDir: tmpSettingsDir,
     onResponse,
     claude,
+    healthCheckInterval: 0, // Disabled by default to prevent dangling timers; health check tests override this
     ...extraConfig,
   });
   return { orch, responses, onResponse };
