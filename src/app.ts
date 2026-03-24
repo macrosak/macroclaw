@@ -15,6 +15,7 @@ export interface AppConfig {
   settingsDir?: string;
   claude?: Claude;
   stt?: SpeechToText;
+  healthCheckInterval?: number;
 }
 
 export class App {
@@ -30,6 +31,7 @@ export class App {
       workspace: config.workspace,
       settingsDir: config.settingsDir,
       claude: config.claude,
+      healthCheckInterval: config.healthCheckInterval,
       onResponse: (r) => this.#deliverResponse(r),
     });
 

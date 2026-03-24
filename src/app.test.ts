@@ -131,6 +131,7 @@ function makeConfig(overrides?: Partial<AppConfig>): AppConfig {
     settingsDir: tmpSettingsDir,
     claude: defaultMockClaude(),
     stt: mockStt(),
+    healthCheckInterval: 0, // Disabled in tests to prevent dangling timers
     ...overrides,
   };
 }
