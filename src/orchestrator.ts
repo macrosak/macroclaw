@@ -9,7 +9,17 @@ import {
 import { writeHistoryPrompt, writeHistoryResult } from "./history";
 import { createLogger } from "./logger";
 import { generateName } from "./naming";
-import { buildEvent, type EventInput, SYSTEM_PROMPT } from "./prompts";
+import {
+  backgroundAgentProgressEvent,
+  backgroundAgentResultEvent,
+  backgroundAgentStartEvent,
+  buttonClickEvent,
+  healthCheckEvent,
+  peekEvent,
+  SYSTEM_PROMPT,
+  scheduleTriggerEvent,
+  userMessageEvent,
+} from "./prompts";
 import { Queue } from "./queue";
 import { loadSessions, saveSessions } from "./sessions";
 
@@ -136,13 +146,11 @@ export class Orchestrator {
 
   handleCron(name: string, prompt: string, model?: string, missed?: { missedBy: string; scheduledAt: string }): void {
     const cronName = `cron-${name}`;
-    const formatted = buildEvent({
-      name: cronName,
-      type: "schedule-trigger",
-      session: "background",
-      schedule: { name, missedBy: missed?.missedBy, scheduledAt: missed?.scheduledAt },
-      text: prompt,
-    });
+    const formatted = scheduleTriggerEvent(
+      cronName,
+      { name, missedBy: missed?.missedBy, scheduledAt: missed?.scheduledAt },
+      prompt,
+    );
     this.#spawnBackgroundRaw(cronName, prompt, formatted, model ?? this.#config.model);
   }
 
@@ -209,13 +217,11 @@ export class Orchestrator {
     this.#callOnResponse({ message: `Peeking at <b>${escapeHtml(session.name)}</b>...` });
 
     try {
-      const prompt = buildEvent({
-        name: `peek-${session.name}`,
-        type: "peek",
-        session: "background",
-        targetEvent: session.name,
-        instructions: `Only consider progress since the "${session.name}" event. Brief status update: done, in progress, remaining. 2-3 sentences max, plain text.`,
-      });
+      const prompt = peekEvent(
+        `peek-${session.name}`,
+        session.name,
+        `Only consider progress since the "${session.name}" event. Brief status update: done, in progress, remaining. 2-3 sentences max, plain text.`,
+      );
       const query = this.#claude.forkSession(
         sessionId,
         prompt,
@@ -372,56 +378,28 @@ export class Orchestrator {
   }
 
   #formatPrompt(request: OrchestratorRequest, name: string, backgroundedEvent?: string): string {
-    let input: EventInput;
-
     switch (request.type) {
       case "user":
-        input = {
-          name,
-          type: "user-message",
-          session: "main",
-          text: request.message || undefined,
-          files: request.files,
-          backgroundedEvent,
-        };
-        break;
+        return userMessageEvent(name, request.message || "", { files: request.files, backgroundedEvent });
       case "background-agent-result":
-        input = {
+        return backgroundAgentResultEvent(
           name,
-          type: "background-agent-result",
-          session: "main",
-          originalEvent: request.name,
-          result: {
-            text: request.response.message || "[No output]",
-            files: request.response.files,
-          },
-          backgroundedEvent,
-          instructions: "Forward this result to the user (action=\"send\"). Summarize or add context from the conversation as appropriate.",
-        };
-        break;
+          request.name,
+          { text: request.response.message || "[No output]", files: request.response.files },
+          "Forward this result to the user (action=\"send\"). Summarize or add context from the conversation as appropriate.",
+          { backgroundedEvent },
+        );
       case "background-agent-progress":
-        input = {
+        return backgroundAgentProgressEvent(
           name,
-          type: "background-agent-progress",
-          session: "main",
-          originalEvent: request.name,
-          progress: request.progress,
-          instructions: "This is an interim progress update, not a final result. Do not report to the user unless it contains exceptionally important information.",
-          backgroundedEvent,
-        };
-        break;
+          request.name,
+          request.progress,
+          "This is an interim progress update, not a final result. Do not report to the user unless it contains exceptionally important information.",
+          { backgroundedEvent },
+        );
       case "button":
-        input = {
-          name,
-          type: "button-click",
-          session: "main",
-          button: request.label,
-          backgroundedEvent,
-        };
-        break;
+        return buttonClickEvent(name, request.label, { backgroundedEvent });
     }
-
-    return buildEvent(input);
   }
 
   static #requestLabel(request: OrchestratorRequest): string {
@@ -455,12 +433,7 @@ export class Orchestrator {
   // --- Background management ---
 
   #spawnBackground(name: string, prompt: string, model: string | undefined) {
-    const formatted = buildEvent({
-      name,
-      type: "background-agent-start",
-      session: "background",
-      text: prompt,
-    });
+    const formatted = backgroundAgentStartEvent(name, prompt);
     this.#spawnBackgroundRaw(name, prompt, formatted, model);
   }
 
@@ -523,13 +496,11 @@ export class Orchestrator {
 
     log.debug({ name: info.name, sessionId }, "Running health check");
 
-    const prompt = buildEvent({
-      name: `health-check-${info.name}`,
-      type: "health-check",
-      session: "background",
-      targetEvent: info.name,
-      instructions: "Report your current status. If your task is complete, set finished=true and provide the full output. If still working, set finished=false and describe current progress in one sentence.",
-    });
+    const prompt = healthCheckEvent(
+      `health-check-${info.name}`,
+      info.name,
+      "Report your current status. If your task is complete, set finished=true and provide the full output. If still working, set finished=false and describe current progress in one sentence.",
+    );
 
     let query: RunningQuery<z.infer<typeof healthCheckSchema>>;
     try {
