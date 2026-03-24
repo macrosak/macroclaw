@@ -24,6 +24,9 @@ function assistantEvent(text = "hello"): string {
   return JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text }] } });
 }
 
+/** All mock procs created during a test — cleaned up in afterEach */
+const activeMocks: Array<{ closeStdout: () => void; resolveExited: (code: number) => void }> = [];
+
 /** Creates a controllable mock process for ClaudeProcess tests */
 function createMockProc(): {
   proc: RawProcess;
@@ -59,13 +62,18 @@ function createMockProc(): {
     kill: mock(() => {}),
   };
 
+  const closeStdout = () => {
+    try { stdoutController.close(); } catch { /* already closed */ }
+    try { stderrController.close(); } catch { /* already closed */ }
+  };
+
+  const handle = { closeStdout, resolveExited: resolveExited! };
+  activeMocks.push(handle);
+
   return {
     proc,
     emitLine: (line: string) => stdoutController.enqueue(encoder.encode(`${line}\n`)),
-    closeStdout: () => {
-      stdoutController.close();
-      stderrController.close();
-    },
+    closeStdout,
     resolveExited: resolveExited!,
     stdin,
   };
@@ -75,6 +83,11 @@ const originalSpawn = Bun.spawn;
 
 afterEach(() => {
   Bun.spawn = originalSpawn;
+  // Close all streams and resolve exited promises to free readers
+  for (const m of activeMocks.splice(0)) {
+    m.closeStdout();
+    m.resolveExited(0);
+  }
 });
 
 const TEST_WORKSPACE = "/tmp/claude2-test";
@@ -205,7 +218,8 @@ describe("ClaudeProcess", () => {
       const { proc } = createMockProc();
       const cp = new ClaudeProcess(proc, "test-sid", textResult);
 
-      cp.send("first"); // starts, goes busy
+      const pending = cp.send("first"); // starts, goes busy
+      pending.catch(() => {}); // Ignore — testing the second send
       expect(() => cp.send("second")).toThrow("Cannot send: process is busy");
     });
 
