@@ -10,16 +10,15 @@ LOG_FILE="$1"
 
 case "$(uname -s)" in
   Linux)
-    sudo systemd-run \
+    systemd-run --user \
       --unit="macroclaw-update-$(date -u +%Y%m%dT%H%M%SZ)" \
       --collect \
       --no-block \
-      --property="User=$(id -un)" \
-      --property="Group=$(id -gn)" \
-      --setenv="HOME=$HOME" \
       --setenv="PATH=$PATH" \
       /bin/bash -lc "exec macroclaw service update > \"$LOG_FILE\" 2>&1"
 
+    # --user: run in user service manager (not system), so the transient unit
+    #   has access to the user D-Bus session bus and can restart user services.
     # --collect: automatically remove the transient unit after it finishes.
     # --no-block: return immediately instead of waiting for the started job.
     ;;
