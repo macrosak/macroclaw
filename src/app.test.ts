@@ -53,6 +53,7 @@ mock.module("grammy", () => ({
 }));
 
 const tmpSettingsDir = "/tmp/macroclaw-test-settings";
+const activeApps: App[] = [];
 
 beforeEach(() => {
   mockTranscribe.mockReset();
@@ -61,7 +62,10 @@ beforeEach(() => {
   saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
 });
 
-afterEach(() => {
+afterEach(async () => {
+  for (const app of activeApps.splice(0)) {
+    await app.dispose();
+  }
   if (existsSync(tmpSettingsDir)) rmSync(tmpSettingsDir, { recursive: true });
 });
 
@@ -131,19 +135,30 @@ function makeConfig(overrides?: Partial<AppConfig>): AppConfig {
     settingsDir: tmpSettingsDir,
     claude: defaultMockClaude(),
     stt: mockStt(),
-    healthCheckInterval: 0, // Disabled in tests to prevent dangling timers
+    healthCheckInterval: 0,
     ...overrides,
   };
 }
 
+function makeApp(overrides?: Partial<AppConfig>): App {
+  const app = new App(makeConfig(overrides));
+  activeApps.push(app);
+  return app;
+}
+
+function trackApp(app: App): App {
+  activeApps.push(app);
+  return app;
+}
+
 describe("App", () => {
   it("creates bot", () => {
-    const app = new App(makeConfig());
+    const app = makeApp();
     expect(app.bot).toBeDefined();
   });
 
   it("registers message:text, message:photo, message:document, message:voice, and callback_query:data handlers", () => {
-    const app = new App(makeConfig());
+    const app = makeApp();
     const bot = app.bot as any;
     expect(bot.filterHandlers.has("message:text")).toBe(true);
     expect(bot.filterHandlers.has("message:photo")).toBe(true);
@@ -153,7 +168,7 @@ describe("App", () => {
   });
 
   it("registers chatid, bg, sessions, and restart commands", () => {
-    const app = new App(makeConfig());
+    const app = makeApp();
     const bot = app.bot as any;
     expect(bot.commandHandlers.has("chatid")).toBe(true);
     expect(bot.commandHandlers.has("bg")).toBe(true);
@@ -162,7 +177,7 @@ describe("App", () => {
   });
 
   it("registers error handler", () => {
-    const app = new App(makeConfig());
+    const app = makeApp();
     const bot = app.bot as any;
     expect(bot.errorHandler).not.toBeNull();
   });
@@ -170,7 +185,7 @@ describe("App", () => {
   describe("message handler", () => {
     it("routes messages from authorized chat to orchestrator", async () => {
       const config = makeConfig();
-      const app = new App(config);
+      const app = trackApp(new App(config));
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:text")![0];
 
@@ -183,7 +198,7 @@ describe("App", () => {
 
     it("ignores messages from unauthorized chats", async () => {
       const config = makeConfig();
-      const app = new App(config);
+      const app = trackApp(new App(config));
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:text")![0];
 
@@ -196,7 +211,7 @@ describe("App", () => {
     it("sends [No output] for empty claude response", async () => {
       const claude = mockClaude(() => autoProcess({ action: "send", message: "", actionReason: "empty" }));
       const config = makeConfig({ claude });
-      const app = new App(config);
+      const app = trackApp(new App(config));
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:text")![0];
 
@@ -211,7 +226,7 @@ describe("App", () => {
     it("skips sending when action is silent", async () => {
       const claude = mockClaude(() => autoProcess({ action: "silent", actionReason: "no new results" }));
       const config = makeConfig({ claude });
-      const app = new App(config);
+      const app = trackApp(new App(config));
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:text")![0];
 
@@ -223,7 +238,7 @@ describe("App", () => {
 
     it("does not treat bg: prefix as special", async () => {
       const config = makeConfig();
-      const app = new App(config);
+      const app = trackApp(new App(config));
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:text")![0];
 
@@ -241,7 +256,7 @@ describe("App", () => {
         return proc;
       });
       const config = makeConfig({ claude });
-      const app = new App(config);
+      const app = trackApp(new App(config));
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:text")![0];
 
@@ -261,7 +276,7 @@ describe("App", () => {
       ) as any;
 
       const config = makeConfig();
-      const app = new App(config);
+      const app = trackApp(new App(config));
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:photo")![0];
 
@@ -292,7 +307,7 @@ describe("App", () => {
       ) as any;
 
       const config = makeConfig();
-      const app = new App(config);
+      const app = trackApp(new App(config));
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:document")![0];
 
@@ -315,7 +330,7 @@ describe("App", () => {
 
     it("routes error message when photo download fails", async () => {
       const config = makeConfig();
-      const app = new App(config);
+      const app = trackApp(new App(config));
       const bot = app.bot as any;
       bot.api.getFile = mock(async () => { throw new Error("too large"); });
       const handler = bot.filterHandlers.get("message:photo")![0];
@@ -333,7 +348,7 @@ describe("App", () => {
 
     it("routes error message when document download fails", async () => {
       const config = makeConfig();
-      const app = new App(config);
+      const app = trackApp(new App(config));
       const bot = app.bot as any;
       bot.api.getFile = mock(async () => { throw new Error("too large"); });
       const handler = bot.filterHandlers.get("message:document")![0];
@@ -357,7 +372,7 @@ describe("App", () => {
       mockTranscribe.mockImplementationOnce(async () => "hello from voice");
 
       const config = makeConfig();
-      const app = new App(config);
+      const app = trackApp(new App(config));
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:voice")![0];
 
@@ -387,7 +402,7 @@ describe("App", () => {
       mockTranscribe.mockImplementationOnce(async () => { throw new Error("API error"); });
 
       const config = makeConfig();
-      const app = new App(config);
+      const app = trackApp(new App(config));
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:voice")![0];
 
@@ -413,7 +428,7 @@ describe("App", () => {
       mockTranscribe.mockImplementationOnce(async () => "  ");
 
       const config = makeConfig();
-      const app = new App(config);
+      const app = trackApp(new App(config));
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:voice")![0];
 
@@ -433,7 +448,7 @@ describe("App", () => {
 
     it("ignores voice messages from unauthorized chats", async () => {
       const config = makeConfig();
-      const app = new App(config);
+      const app = trackApp(new App(config));
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:voice")![0];
 
@@ -448,7 +463,7 @@ describe("App", () => {
 
     it("responds with unavailable message when stt is not configured", async () => {
       const config = makeConfig({ stt: undefined });
-      const app = new App(config);
+      const app = trackApp(new App(config));
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:voice")![0];
 
@@ -465,7 +480,7 @@ describe("App", () => {
 
     it("ignores photo messages from unauthorized chats", async () => {
       const config = makeConfig();
-      const app = new App(config);
+      const app = trackApp(new App(config));
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:photo")![0];
 
@@ -489,7 +504,7 @@ describe("App", () => {
         files: [tmpFile],
       }));
       const config = makeConfig({ claude });
-      const app = new App(config);
+      const app = trackApp(new App(config));
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:text")![0];
 
@@ -511,7 +526,7 @@ describe("App", () => {
         buttons: ["Yes", "No"],
       }));
       const config = makeConfig({ claude });
-      const app = new App(config);
+      const app = trackApp(new App(config));
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:text")![0];
 
@@ -525,7 +540,7 @@ describe("App", () => {
 
     it("handles callback_query by routing button event to orchestrator", async () => {
       const config = makeConfig();
-      const app = new App(config);
+      const app = trackApp(new App(config));
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("callback_query:data")![0];
 
@@ -548,7 +563,7 @@ describe("App", () => {
 
     it("handles _dismiss callback by removing reply markup", async () => {
       const config = makeConfig();
-      const app = new App(config);
+      const app = trackApp(new App(config));
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("callback_query:data")![0];
 
@@ -569,7 +584,7 @@ describe("App", () => {
 
     it("handles detail: callback by routing to orchestrator.handleDetail", async () => {
       const config = makeConfig();
-      const app = new App(config);
+      const app = trackApp(new App(config));
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("callback_query:data")![0];
 
@@ -592,7 +607,7 @@ describe("App", () => {
 
     it("handles peek: callback by routing to orchestrator.handlePeek", async () => {
       const config = makeConfig();
-      const app = new App(config);
+      const app = trackApp(new App(config));
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("callback_query:data")![0];
 
@@ -615,7 +630,7 @@ describe("App", () => {
 
     it("handles kill: callback by routing to orchestrator.handleKill", async () => {
       const config = makeConfig();
-      const app = new App(config);
+      const app = trackApp(new App(config));
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("callback_query:data")![0];
 
@@ -638,7 +653,7 @@ describe("App", () => {
 
     it("ignores callback_query from unauthorized chats", async () => {
       const config = makeConfig();
-      const app = new App(config);
+      const app = trackApp(new App(config));
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("callback_query:data")![0];
 
@@ -664,7 +679,7 @@ describe("App", () => {
         files: ["/tmp/nonexistent-xyz.png"],
       }));
       const config = makeConfig({ claude });
-      const app = new App(config);
+      const app = trackApp(new App(config));
       const bot = app.bot as any;
       const handler = bot.filterHandlers.get("message:text")![0];
 
@@ -678,7 +693,7 @@ describe("App", () => {
 
   describe("commands", () => {
     it("/chatid replies with chat ID", () => {
-      const app = new App(makeConfig());
+      const app = makeApp();
       const bot = app.bot as any;
       const handler = bot.commandHandlers.get("chatid")!;
       const ctx = { chat: { id: 12345 }, reply: mock(() => {}) };
@@ -689,7 +704,7 @@ describe("App", () => {
 
     it("/bg without prompt sends usage hint", async () => {
       const config = makeConfig();
-      const app = new App(config);
+      const app = trackApp(new App(config));
       const bot = app.bot as any;
       const handler = bot.commandHandlers.get("bg")!;
       const ctx = { chat: { id: 12345 }, match: "" };
@@ -713,7 +728,7 @@ describe("App", () => {
         } as unknown as ClaudeProcess<unknown>;
       });
       const config = makeConfig({ claude });
-      const app = new App(config);
+      const app = trackApp(new App(config));
       const bot = app.bot as any;
       const handler = bot.commandHandlers.get("bg")!;
       const ctx = { chat: { id: 12345 }, match: "research pricing" };
@@ -728,7 +743,7 @@ describe("App", () => {
     });
 
     it("/sessions lists running sessions via sendMessage", async () => {
-      const app = new App(makeConfig());
+      const app = makeApp();
       const bot = app.bot as any;
       const handler = bot.commandHandlers.get("sessions")!;
       const ctx = { chat: { id: 12345 } };
@@ -742,7 +757,7 @@ describe("App", () => {
     });
 
     it("/restart sends confirmation", async () => {
-      const app = new App(makeConfig());
+      const app = makeApp();
       const bot = app.bot as any;
       const handler = bot.commandHandlers.get("restart")!;
       const ctx = { chat: { id: 12345 } };
@@ -756,7 +771,7 @@ describe("App", () => {
     });
 
     it("/restart is ignored for unauthorized chats", async () => {
-      const app = new App(makeConfig());
+      const app = makeApp();
       const bot = app.bot as any;
       const handler = bot.commandHandlers.get("restart")!;
       const ctx = { chat: { id: 99999 } };
@@ -768,7 +783,7 @@ describe("App", () => {
     });
 
     it("/sessions is ignored for unauthorized chats", async () => {
-      const app = new App(makeConfig());
+      const app = makeApp();
       const bot = app.bot as any;
       const handler = bot.commandHandlers.get("sessions")!;
       const ctx = { chat: { id: 99999 } };
@@ -785,7 +800,7 @@ describe("App", () => {
 
   describe("error handler", () => {
     it("does not throw on bot errors", () => {
-      const app = new App(makeConfig());
+      const app = makeApp();
       const bot = app.bot as any;
 
       expect(() => bot.errorHandler({ message: "connection lost" })).not.toThrow();
@@ -794,12 +809,12 @@ describe("App", () => {
 
   describe("start", () => {
     it("starts the bot and logs info", () => {
-      const app = new App(makeConfig());
+      const app = makeApp();
       expect(() => app.start()).not.toThrow();
     });
 
     it("registers commands with Telegram on start", () => {
-      const app = new App(makeConfig());
+      const app = makeApp();
       const bot = app.bot as any;
 
       app.start();

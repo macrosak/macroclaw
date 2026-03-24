@@ -6,15 +6,8 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
-      - run: bun run typecheck
-      - run: bun run lint
-      # Bun test runner on Linux may hang after all tests pass due to uncollected
-      # ReadableStream handles in test workers. The 60s timeout ensures CI proceeds
-      # when tests pass but the runner doesn't exit — exit code 124 = timeout.
-      - run: timeout 60 bun test || [ $? -eq 124 ]
-      - run: bun run depcheck
+      - run: bun run check

@@ -273,6 +273,17 @@ export class Orchestrator {
     this.#callOnResponse({ message: "Session restarted." });
   }
 
+  /** Tear down all sessions and the main process. Used in tests. */
+  async dispose(): Promise<void> {
+    for (const sid of [...this.#runningSessions.keys()]) {
+      this.#clearSession(sid);
+    }
+    if (this.#mainProcess) {
+      await this.#mainProcess.kill().catch(() => {});
+      this.#mainProcess = null;
+    }
+  }
+
   // --- Main process lifecycle ---
 
   #ensureMainProcess(): ClaudeProcess<AgentOutput> {

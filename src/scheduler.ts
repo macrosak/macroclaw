@@ -47,7 +47,6 @@ export class Scheduler {
 	start(): void {
 		this.#tick();
 		this.#timer = setInterval(() => this.#tick(), TICK_INTERVAL);
-		this.#timer.unref();
 	}
 
 	stop(): void {

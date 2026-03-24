@@ -74,12 +74,15 @@ export interface RawProcess {
   kill(): void;
 }
 
+type StreamReader = { read(): Promise<{ done: boolean; value?: Uint8Array }>; cancel(reason?: unknown): Promise<void> };
+
 export class ClaudeProcess<T = unknown> {
   readonly sessionId: string;
   readonly startedAt: Date;
   #state: ProcessState = "idle";
   #proc: RawProcess;
   #resultType: ResultType;
+  #reader: StreamReader;
   #lines: AsyncGenerator<string>;
 
   constructor(proc: RawProcess, sessionId: string, resultType: ResultType) {
@@ -87,12 +90,14 @@ export class ClaudeProcess<T = unknown> {
     this.sessionId = sessionId;
     this.#resultType = resultType;
     this.startedAt = new Date();
-    this.#lines = ClaudeProcess.#readLines(proc.stdout);
+    this.#reader = proc.stdout.getReader();
+    this.#lines = ClaudeProcess.#readLines(this.#reader);
 
     proc.exited.then((code) => {
       if (this.#state !== "dead") {
         log.warn({ sessionId, exitCode: code }, "Process exited unexpectedly");
         this.#state = "dead";
+        this.#reader.cancel().catch(() => {});
       }
     });
   }
@@ -147,6 +152,7 @@ export class ClaudeProcess<T = unknown> {
   async kill(): Promise<void> {
     if (this.#state === "dead") return;
     this.#state = "dead";
+    this.#reader.cancel().catch(() => {});
     this.#proc.kill();
     await this.#proc.exited;
   }
@@ -174,25 +180,20 @@ export class ClaudeProcess<T = unknown> {
     return { value, sessionId: sid, duration, cost };
   }
 
-  static async *#readLines(stream: ReadableStream<Uint8Array>): AsyncGenerator<string> {
-    const reader = stream.getReader();
+  static async *#readLines(reader: StreamReader): AsyncGenerator<string> {
     const decoder = new TextDecoder();
     let buffer = "";
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-        for (const line of lines) {
-          if (line.trim()) yield line;
-        }
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (line.trim()) yield line;
       }
-      if (buffer.trim()) yield buffer;
-    } finally {
-      reader.releaseLock();
     }
+    if (buffer.trim()) yield buffer;
   }
 }
 
@@ -261,6 +262,6 @@ export class Claude {
 
     const proc = Bun.spawn(args, { cwd: this.#workspace, env, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
 
-    return new ClaudeProcess<InferResult<R>>(proc as unknown as RawProcess, sessionId, resultType);
+    return new ClaudeProcess<InferResult<R>>(proc, sessionId, resultType);
   }
 }
