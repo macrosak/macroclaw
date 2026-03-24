@@ -256,7 +256,7 @@ export class Orchestrator {
     this.#callOnResponse({ message: `Killed <b>${escapeHtml(session.name)}</b>.` });
   }
 
-  async handleRestart(): Promise<void> {
+  async handleClear(): Promise<void> {
     const sid = this.#mainProcess?.sessionId;
     if (sid) {
       this.#clearSession(sid);
@@ -265,12 +265,14 @@ export class Orchestrator {
       try {
         await this.#mainProcess.kill();
       } catch (err) {
-        log.error({ err }, "Failed to kill main process during restart");
+        log.error({ err }, "Failed to kill main process during clear");
       }
       this.#mainProcess = null;
     }
-    log.info({ sessionId: this.#mainSessionId }, "Main session restarted");
-    this.#callOnResponse({ message: "Session restarted." });
+    this.#mainSessionId = undefined;
+    saveSessions({}, this.#config.settingsDir);
+    log.info("Session cleared");
+    this.#callOnResponse({ message: "Session cleared." });
   }
 
   /** Tear down all sessions and the main process. Used in tests. */
