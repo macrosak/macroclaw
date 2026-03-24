@@ -42,6 +42,10 @@ export class App {
     return this.#bot;
   }
 
+  async dispose(): Promise<void> {
+    await this.#orchestrator.dispose();
+  }
+
   start() {
     log.info("Starting macroclaw...");
     const scheduler = new Scheduler(this.#config.workspace, {

@@ -7,6 +7,8 @@ import { saveSessions } from "./sessions";
 const tmpSettingsDir = "/tmp/macroclaw-test-orchestrator-settings";
 const TEST_WORKSPACE = "/tmp/macroclaw-test-workspace";
 
+const activeOrchestrators: Orchestrator[] = [];
+
 function cleanup() {
   try {
     if (existsSync(tmpSettingsDir)) rmSync(tmpSettingsDir, { recursive: true });
@@ -14,7 +16,12 @@ function cleanup() {
 }
 
 beforeEach(cleanup);
-afterEach(cleanup);
+afterEach(async () => {
+  for (const orch of activeOrchestrators.splice(0)) {
+    await orch.dispose();
+  }
+  cleanup();
+});
 
 interface CallInfo {
   method: "newSession" | "resumeSession" | "forkSession";
@@ -112,9 +119,10 @@ function makeOrchestrator(claude: Claude, extraConfig?: Partial<OrchestratorConf
     settingsDir: tmpSettingsDir,
     onResponse,
     claude,
-    healthCheckInterval: 0, // Disabled by default to prevent dangling timers; health check tests override this
+    healthCheckInterval: 0,
     ...extraConfig,
   });
+  activeOrchestrators.push(orch);
   return { orch, responses, onResponse };
 }
 
