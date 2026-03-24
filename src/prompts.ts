@@ -67,26 +67,11 @@ Each button gets its own row. Max 27 characters per label — if options need mo
 
 // --- Event builder ---
 
-export function escapeXml(text: string): string {
+function escapeXml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-export type SessionType = "main" | "background";
-
-export type EventType =
-  | "user-message"
-  | "button-click"
-  | "schedule-trigger"
-  | "background-agent-start"
-  | "background-agent-result"
-  | "background-agent-progress"
-  | "peek"
-  | "health-check";
-
-export interface EventInput {
-  name: string;
-  type: EventType;
-  session: SessionType;
+interface BuildXmlFields {
   text?: string;
   files?: string[];
   button?: string;
@@ -99,46 +84,40 @@ export interface EventInput {
   result?: { text: string; files?: string[] };
 }
 
-export function buildEvent(input: EventInput): string {
+function buildXml(name: string, type: string, session: string, fields: BuildXmlFields): string {
   const lines: string[] = [
-    `<event name="${escapeXml(input.name)}" type="${input.type}" session="${input.session}">`,
+    `<event name="${escapeXml(name)}" type="${type}" session="${session}">`,
   ];
 
-  // Backgrounded event (always before content for visibility)
-  if (input.backgroundedEvent) {
-    lines.push(`<backgrounded-event name="${escapeXml(input.backgroundedEvent)}" />`);
+  if (fields.backgroundedEvent) {
+    lines.push(`<backgrounded-event name="${escapeXml(fields.backgroundedEvent)}" />`);
   }
 
-  // Schedule metadata
-  if (input.schedule) {
-    const attrs = [`name="${escapeXml(input.schedule.name)}"`];
-    if (input.schedule.missedBy) attrs.push(`missed-by="${escapeXml(input.schedule.missedBy)}"`);
-    if (input.schedule.scheduledAt) attrs.push(`scheduled-at="${escapeXml(input.schedule.scheduledAt)}"`);
+  if (fields.schedule) {
+    const attrs = [`name="${escapeXml(fields.schedule.name)}"`];
+    if (fields.schedule.missedBy) attrs.push(`missed-by="${escapeXml(fields.schedule.missedBy)}"`);
+    if (fields.schedule.scheduledAt) attrs.push(`scheduled-at="${escapeXml(fields.schedule.scheduledAt)}"`);
     lines.push(`<schedule ${attrs.join(" ")} />`);
   }
 
-  // Original event reference (for background-agent-result)
-  if (input.originalEvent) {
-    lines.push(`<original-event name="${escapeXml(input.originalEvent)}" />`);
+  if (fields.originalEvent) {
+    lines.push(`<original-event name="${escapeXml(fields.originalEvent)}" />`);
   }
 
-  // Target event reference (for peek)
-  if (input.targetEvent) {
-    lines.push(`<target-event name="${escapeXml(input.targetEvent)}" />`);
+  if (fields.targetEvent) {
+    lines.push(`<target-event name="${escapeXml(fields.targetEvent)}" />`);
   }
 
-  // Progress (for background-agent-progress)
-  if (input.progress) {
-    lines.push(`<progress>${escapeXml(input.progress)}</progress>`);
+  if (fields.progress) {
+    lines.push(`<progress>${escapeXml(fields.progress)}</progress>`);
   }
 
-  // Result block (for background-agent-result)
-  if (input.result) {
+  if (fields.result) {
     lines.push("<result>");
-    lines.push(`<text>${escapeXml(input.result.text)}</text>`);
-    if (input.result.files?.length) {
+    lines.push(`<text>${escapeXml(fields.result.text)}</text>`);
+    if (fields.result.files?.length) {
       lines.push("<files>");
-      for (const f of input.result.files) {
+      for (const f of fields.result.files) {
         lines.push(`  <file path="${escapeXml(f)}" />`);
       }
       lines.push("</files>");
@@ -146,30 +125,60 @@ export function buildEvent(input: EventInput): string {
     lines.push("</result>");
   }
 
-  // Button label
-  if (input.button) {
-    lines.push(`<button>${escapeXml(input.button)}</button>`);
+  if (fields.button) {
+    lines.push(`<button>${escapeXml(fields.button)}</button>`);
   }
 
-  // Text content
-  if (input.text) {
-    lines.push(`<text>${escapeXml(input.text)}</text>`);
+  if (fields.text) {
+    lines.push(`<text>${escapeXml(fields.text)}</text>`);
   }
 
-  // Files
-  if (input.files?.length) {
+  if (fields.files?.length) {
     lines.push("<files>");
-    for (const f of input.files) {
+    for (const f of fields.files) {
       lines.push(`  <file path="${escapeXml(f)}" />`);
     }
     lines.push("</files>");
   }
 
-  // Instructions (inline guidance for long sessions)
-  if (input.instructions) {
-    lines.push(`<instructions>${escapeXml(input.instructions)}</instructions>`);
+  if (fields.instructions) {
+    lines.push(`<instructions>${escapeXml(fields.instructions)}</instructions>`);
   }
 
   lines.push("</event>");
   return lines.join("\n");
+}
+
+// --- Per-type event builders ---
+
+export function userMessageEvent(name: string, text: string, opts?: { files?: string[]; backgroundedEvent?: string }): string {
+  return buildXml(name, "user-message", "main", { text, files: opts?.files, backgroundedEvent: opts?.backgroundedEvent });
+}
+
+export function buttonClickEvent(name: string, button: string, opts?: { backgroundedEvent?: string }): string {
+  return buildXml(name, "button-click", "main", { button, backgroundedEvent: opts?.backgroundedEvent });
+}
+
+export function scheduleTriggerEvent(name: string, schedule: { name: string; missedBy?: string; scheduledAt?: string }, text: string): string {
+  return buildXml(name, "schedule-trigger", "background", { schedule, text });
+}
+
+export function backgroundAgentStartEvent(name: string, text: string): string {
+  return buildXml(name, "background-agent-start", "background", { text });
+}
+
+export function backgroundAgentResultEvent(name: string, originalEvent: string, result: { text: string; files?: string[] }, instructions: string, opts?: { backgroundedEvent?: string }): string {
+  return buildXml(name, "background-agent-result", "main", { originalEvent, result, instructions, backgroundedEvent: opts?.backgroundedEvent });
+}
+
+export function backgroundAgentProgressEvent(name: string, originalEvent: string, progress: string, instructions: string, opts?: { backgroundedEvent?: string }): string {
+  return buildXml(name, "background-agent-progress", "main", { originalEvent, progress, instructions, backgroundedEvent: opts?.backgroundedEvent });
+}
+
+export function peekEvent(name: string, targetEvent: string, instructions: string): string {
+  return buildXml(name, "peek", "background", { targetEvent, instructions });
+}
+
+export function healthCheckEvent(name: string, targetEvent: string, instructions: string): string {
+  return buildXml(name, "health-check", "background", { targetEvent, instructions });
 }
