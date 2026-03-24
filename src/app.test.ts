@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { existsSync, rmSync } from "node:fs";
 import { App, type AppConfig } from "./app";
-import { type Claude, QueryProcessError, type QueryResult, type RunningQuery } from "./claude";
+import { type Claude, type ClaudeProcess, type ProcessState, QueryProcessError, type QueryResult } from "./claude";
 import { saveSessions } from "./sessions";
 import type { SpeechToText } from "./speech-to-text";
 
@@ -69,47 +69,57 @@ function queryResult<T>(value: T, sessionId = "test-session-id"): QueryResult<T>
   return { value, sessionId, duration: "1.0s", cost: "$0.05" };
 }
 
-function resolvedQuery<T>(value: T, sessionId = "test-session-id"): RunningQuery<T> {
+function autoProcess(value: unknown, sessionId = "test-sid"): ClaudeProcess<unknown> {
   return {
     sessionId,
     startedAt: new Date(),
-    result: Promise.resolve(queryResult(value, sessionId)),
+    get state(): ProcessState { return "idle"; },
+    send: mock(async (_prompt: string) => queryResult(value, sessionId)),
     kill: mock(async () => {}),
-  };
+  } as unknown as ClaudeProcess<unknown>;
 }
 
 interface CallInfo {
   method: string;
-  prompt: string;
   sessionId?: string;
 }
 
-function mockClaude(handler: (info: CallInfo) => RunningQuery<unknown>): Claude & { calls: CallInfo[] } {
+function mockClaude(handler: (info: CallInfo) => ClaudeProcess<unknown>): Claude & { calls: CallInfo[]; processes: ClaudeProcess<unknown>[] } {
   const calls: CallInfo[] = [];
+  const processes: ClaudeProcess<unknown>[] = [];
+
+  function handleCall(info: CallInfo): ClaudeProcess<unknown> {
+    calls.push(info);
+    const proc = handler(info);
+    processes.push(proc);
+    return proc;
+  }
+
   const claude = {
-    newSession: mock((prompt: string, _resultType: unknown, _options?: any) => {
-      const info: CallInfo = { method: "newSession", prompt };
-      calls.push(info);
-      return handler(info);
+    newSession: mock((_resultType: unknown, _options?: unknown) => {
+      return handleCall({ method: "newSession" });
     }),
-    resumeSession: mock((sessionId: string, prompt: string, _resultType: unknown, _options?: any) => {
-      const info: CallInfo = { method: "resumeSession", sessionId, prompt };
-      calls.push(info);
-      return handler(info);
+    resumeSession: mock((sessionId: string, _resultType: unknown, _options?: unknown) => {
+      return handleCall({ method: "resumeSession", sessionId });
     }),
-    forkSession: mock((sessionId: string, prompt: string, _resultType: unknown, _options?: any) => {
-      const info: CallInfo = { method: "forkSession", sessionId, prompt };
-      calls.push(info);
-      return handler(info);
+    forkSession: mock((sessionId: string, _resultType: unknown, _options?: unknown) => {
+      return handleCall({ method: "forkSession", sessionId });
     }),
     calls,
-  } as unknown as Claude & { calls: CallInfo[] };
+    processes,
+  } as unknown as Claude & { calls: CallInfo[]; processes: ClaudeProcess<unknown>[] };
   return claude;
 }
 
-function defaultMockClaude(): Claude & { calls: CallInfo[] } {
-  return mockClaude((info) =>
-    resolvedQuery({ action: "send", message: `Response to: ${info.prompt}`, actionReason: "user message" }),
+function defaultMockClaude(): Claude & { calls: CallInfo[]; processes: ClaudeProcess<unknown>[] } {
+  return mockClaude(() =>
+    autoProcess({ action: "send", message: "Response", actionReason: "user message" }),
+  );
+}
+
+function sentPrompts(claude: { processes: ClaudeProcess<unknown>[] }): string[] {
+  return claude.processes.flatMap((p) =>
+    (p.send as ReturnType<typeof mock>).mock.calls.map((c: unknown[]) => c[0] as string),
   );
 }
 
@@ -141,12 +151,13 @@ describe("App", () => {
     expect(bot.filterHandlers.has("callback_query:data")).toBe(true);
   });
 
-  it("registers chatid, bg, and sessions commands", () => {
+  it("registers chatid, bg, sessions, and restart commands", () => {
     const app = new App(makeConfig());
     const bot = app.bot as any;
     expect(bot.commandHandlers.has("chatid")).toBe(true);
     expect(bot.commandHandlers.has("bg")).toBe(true);
     expect(bot.commandHandlers.has("sessions")).toBe(true);
+    expect(bot.commandHandlers.has("restart")).toBe(true);
   });
 
   it("registers error handler", () => {
@@ -165,8 +176,8 @@ describe("App", () => {
       handler({ chat: { id: 12345 }, message: { text: "hello" } });
       await new Promise((r) => setTimeout(r, 50));
 
-      const claude = config.claude as Claude & { calls: CallInfo[] };
-      expect(claude.calls[0].prompt).toContain("<text>hello</text>");
+      const claude = config.claude as Claude & { calls: CallInfo[]; processes: ClaudeProcess<unknown>[] };
+      expect(sentPrompts(claude)[0]).toContain("<text>hello</text>");
     });
 
     it("ignores messages from unauthorized chats", async () => {
@@ -178,11 +189,11 @@ describe("App", () => {
       handler({ chat: { id: 99999 }, message: { text: "hello" } });
       await new Promise((r) => setTimeout(r, 50));
 
-      expect((config.claude as Claude & { calls: CallInfo[] }).calls).toHaveLength(0);
+      expect((config.claude as Claude & { calls: CallInfo[]; processes: ClaudeProcess<unknown>[] }).calls).toHaveLength(0);
     });
 
     it("sends [No output] for empty claude response", async () => {
-      const claude = mockClaude(() => resolvedQuery({ action: "send", message: "", actionReason: "empty" }));
+      const claude = mockClaude(() => autoProcess({ action: "send", message: "", actionReason: "empty" }));
       const config = makeConfig({ claude });
       const app = new App(config);
       const bot = app.bot as any;
@@ -197,7 +208,7 @@ describe("App", () => {
     });
 
     it("skips sending when action is silent", async () => {
-      const claude = mockClaude(() => resolvedQuery({ action: "silent", actionReason: "no new results" }));
+      const claude = mockClaude(() => autoProcess({ action: "silent", actionReason: "no new results" }));
       const config = makeConfig({ claude });
       const app = new App(config);
       const bot = app.bot as any;
@@ -218,17 +229,16 @@ describe("App", () => {
       handler({ chat: { id: 12345 }, message: { text: "bg: research pricing" } });
       await new Promise((r) => setTimeout(r, 50));
 
-      const claude = config.claude as Claude & { calls: CallInfo[] };
-      expect(claude.calls[0].prompt).toContain("<text>bg: research pricing</text>");
+      const claude = config.claude as Claude & { calls: CallInfo[]; processes: ClaudeProcess<unknown>[] };
+      expect(sentPrompts(claude)[0]).toContain("<text>bg: research pricing</text>");
     });
 
     it("sends error wrapped in response", async () => {
-      const claude = mockClaude((): RunningQuery<unknown> => ({
-        sessionId: "err-sid",
-        startedAt: new Date(),
-        result: Promise.reject(new QueryProcessError(1, "spawn failed")),
-        kill: mock(async () => {}),
-      }));
+      const claude = mockClaude((): ClaudeProcess<unknown> => {
+        const proc = autoProcess(null, "err-sid");
+        (proc as any).send = mock(async () => { throw new QueryProcessError(1, "spawn failed"); });
+        return proc;
+      });
       const config = makeConfig({ claude });
       const app = new App(config);
       const bot = app.bot as any;
@@ -267,9 +277,9 @@ describe("App", () => {
       await new Promise((r) => setTimeout(r, 50));
 
       expect(bot.api.getFile).toHaveBeenCalledWith("large");
-      const claude = config.claude as Claude & { calls: CallInfo[] };
+      const claude = config.claude as Claude & { calls: CallInfo[]; processes: ClaudeProcess<unknown>[] };
       expect(claude.calls).toHaveLength(1);
-      expect(claude.calls[0].prompt).toContain("<file path=");
+      expect(sentPrompts(claude)[0]).toContain("<file path=");
 
       globalThis.fetch = origFetch;
     });
@@ -295,9 +305,9 @@ describe("App", () => {
       await new Promise((r) => setTimeout(r, 50));
 
       expect(bot.api.getFile).toHaveBeenCalledWith("doc-id");
-      const claude = config.claude as Claude & { calls: CallInfo[] };
+      const claude = config.claude as Claude & { calls: CallInfo[]; processes: ClaudeProcess<unknown>[] };
       expect(claude.calls).toHaveLength(1);
-      expect(claude.calls[0].prompt).toContain("<file path=");
+      expect(sentPrompts(claude)[0]).toContain("<file path=");
 
       globalThis.fetch = origFetch;
     });
@@ -315,9 +325,9 @@ describe("App", () => {
       });
       await new Promise((r) => setTimeout(r, 50));
 
-      const claude = config.claude as Claude & { calls: CallInfo[] };
+      const claude = config.claude as Claude & { calls: CallInfo[]; processes: ClaudeProcess<unknown>[] };
       expect(claude.calls).toHaveLength(1);
-      expect(claude.calls[0].prompt).toContain("[File download failed: photo.jpg]");
+      expect(sentPrompts(claude)[0]).toContain("[File download failed: photo.jpg]");
     });
 
     it("routes error message when document download fails", async () => {
@@ -333,9 +343,9 @@ describe("App", () => {
       });
       await new Promise((r) => setTimeout(r, 50));
 
-      const claude = config.claude as Claude & { calls: CallInfo[] };
+      const claude = config.claude as Claude & { calls: CallInfo[]; processes: ClaudeProcess<unknown>[] };
       expect(claude.calls).toHaveLength(1);
-      expect(claude.calls[0].prompt).toContain("[File download failed: huge.pdf]");
+      expect(sentPrompts(claude)[0]).toContain("[File download failed: huge.pdf]");
     });
 
     it("handles voice messages by transcribing and routing text to orchestrator", async () => {
@@ -361,9 +371,9 @@ describe("App", () => {
       expect(echoCall).toBeDefined();
       expect(echoCall[1]).toContain("hello from voice");
 
-      const claude = config.claude as Claude & { calls: CallInfo[] };
+      const claude = config.claude as Claude & { calls: CallInfo[]; processes: ClaudeProcess<unknown>[] };
       expect(claude.calls).toHaveLength(1);
-      expect(claude.calls[0].prompt).toContain("<text>hello from voice</text>");
+      expect(sentPrompts(claude)[0]).toContain("<text>hello from voice</text>");
 
       globalThis.fetch = origFetch;
     });
@@ -389,7 +399,7 @@ describe("App", () => {
       const sendCalls = (bot.api.sendMessage as any).mock.calls;
       const errorCall = sendCalls.find((c: any) => c[1].includes("[Failed to transcribe audio]"));
       expect(errorCall).toBeDefined();
-      expect((config.claude as Claude & { calls: CallInfo[] }).calls).toHaveLength(0);
+      expect((config.claude as Claude & { calls: CallInfo[]; processes: ClaudeProcess<unknown>[] }).calls).toHaveLength(0);
 
       globalThis.fetch = origFetch;
     });
@@ -415,7 +425,7 @@ describe("App", () => {
       const sendCalls = (bot.api.sendMessage as any).mock.calls;
       const emptyCall = sendCalls.find((c: any) => c[1].includes("[Could not understand audio]"));
       expect(emptyCall).toBeDefined();
-      expect((config.claude as Claude & { calls: CallInfo[] }).calls).toHaveLength(0);
+      expect((config.claude as Claude & { calls: CallInfo[]; processes: ClaudeProcess<unknown>[] }).calls).toHaveLength(0);
 
       globalThis.fetch = origFetch;
     });
@@ -432,7 +442,7 @@ describe("App", () => {
       });
       await new Promise((r) => setTimeout(r, 50));
 
-      expect((config.claude as Claude & { calls: CallInfo[] }).calls).toHaveLength(0);
+      expect((config.claude as Claude & { calls: CallInfo[]; processes: ClaudeProcess<unknown>[] }).calls).toHaveLength(0);
     });
 
     it("responds with unavailable message when stt is not configured", async () => {
@@ -449,7 +459,7 @@ describe("App", () => {
       const sendCalls = (bot.api.sendMessage as any).mock.calls;
       const call = sendCalls.find((c: any) => c[1].includes("openaiApiKey"));
       expect(call).toBeDefined();
-      expect((config.claude as Claude & { calls: CallInfo[] }).calls).toHaveLength(0);
+      expect((config.claude as Claude & { calls: CallInfo[]; processes: ClaudeProcess<unknown>[] }).calls).toHaveLength(0);
     });
 
     it("ignores photo messages from unauthorized chats", async () => {
@@ -464,14 +474,14 @@ describe("App", () => {
       });
       await new Promise((r) => setTimeout(r, 50));
 
-      expect((config.claude as Claude & { calls: CallInfo[] }).calls).toHaveLength(0);
+      expect((config.claude as Claude & { calls: CallInfo[]; processes: ClaudeProcess<unknown>[] }).calls).toHaveLength(0);
     });
 
     it("sends outbound files before text message (onResponse delivery)", async () => {
       const tmpFile = `/tmp/macroclaw-test-outbound-${Date.now()}.png`;
       await Bun.write(tmpFile, "fake png");
 
-      const claude = mockClaude(() => resolvedQuery({
+      const claude = mockClaude(() => autoProcess({
         action: "send",
         message: "Here's your chart",
         actionReason: "ok",
@@ -493,7 +503,7 @@ describe("App", () => {
     });
 
     it("passes buttons to sendResponse (onResponse delivery)", async () => {
-      const claude = mockClaude(() => resolvedQuery({
+      const claude = mockClaude(() => autoProcess({
         action: "send",
         message: "Choose one",
         actionReason: "ok",
@@ -530,9 +540,9 @@ describe("App", () => {
 
       expect(ctx.answerCallbackQuery).toHaveBeenCalled();
       expect(ctx.editMessageReplyMarkup).toHaveBeenCalledWith({ reply_markup: { inline_keyboard: [[{ text: "✓ Yes", callback_data: "_noop" }]] } });
-      const claude = config.claude as Claude & { calls: CallInfo[] };
+      const claude = config.claude as Claude & { calls: CallInfo[]; processes: ClaudeProcess<unknown>[] };
       expect(claude.calls).toHaveLength(1);
-      expect(claude.calls[0].prompt).toContain('<button>Yes</button>');
+      expect(sentPrompts(claude)[0]).toContain('<button>Yes</button>');
     });
 
     it("handles _dismiss callback by removing reply markup", async () => {
@@ -553,7 +563,7 @@ describe("App", () => {
 
       expect(ctx.answerCallbackQuery).toHaveBeenCalled();
       expect(ctx.editMessageReplyMarkup).toHaveBeenCalledWith({ reply_markup: undefined });
-      expect((config.claude as Claude & { calls: CallInfo[] }).calls).toHaveLength(0);
+      expect((config.claude as Claude & { calls: CallInfo[]; processes: ClaudeProcess<unknown>[] }).calls).toHaveLength(0);
     });
 
     it("handles detail: callback by routing to orchestrator.handleDetail", async () => {
@@ -642,11 +652,11 @@ describe("App", () => {
       await new Promise((r) => setTimeout(r, 50));
 
       expect(ctx.answerCallbackQuery).toHaveBeenCalled();
-      expect((config.claude as Claude & { calls: CallInfo[] }).calls).toHaveLength(0);
+      expect((config.claude as Claude & { calls: CallInfo[]; processes: ClaudeProcess<unknown>[] }).calls).toHaveLength(0);
     });
 
     it("skips outbound files that don't exist", async () => {
-      const claude = mockClaude(() => resolvedQuery({
+      const claude = mockClaude(() => autoProcess({
         action: "send",
         message: "Done",
         actionReason: "ok",
@@ -686,18 +696,21 @@ describe("App", () => {
       handler(ctx);
       await new Promise((r) => setTimeout(r, 50));
 
-      expect((config.claude as Claude & { calls: CallInfo[] }).calls).toHaveLength(0);
+      expect((config.claude as Claude & { calls: CallInfo[]; processes: ClaudeProcess<unknown>[] }).calls).toHaveLength(0);
       const calls = (bot.api.sendMessage as any).mock.calls;
       expect(calls[calls.length - 1][1]).toBe("Usage: /bg &lt;prompt&gt;");
     });
 
     it("/bg with prompt spawns a background agent via sendMessage", async () => {
-      const claude = mockClaude((): RunningQuery<unknown> => ({
-        sessionId: "bg-sid",
-        startedAt: new Date(),
-        result: new Promise(() => {}),
-        kill: mock(async () => {}),
-      }));
+      const claude = mockClaude((): ClaudeProcess<unknown> => {
+        return {
+          sessionId: "bg-sid",
+          startedAt: new Date(),
+          get state(): ProcessState { return "busy"; },
+          send: mock(async () => new Promise(() => {})),
+          kill: mock(async () => {}),
+        } as unknown as ClaudeProcess<unknown>;
+      });
       const config = makeConfig({ claude });
       const app = new App(config);
       const bot = app.bot as any;
@@ -725,6 +738,32 @@ describe("App", () => {
       const calls = (bot.api.sendMessage as any).mock.calls;
       const text = calls[calls.length - 1][1];
       expect(text).toBe("No running sessions.");
+    });
+
+    it("/restart sends confirmation", async () => {
+      const app = new App(makeConfig());
+      const bot = app.bot as any;
+      const handler = bot.commandHandlers.get("restart")!;
+      const ctx = { chat: { id: 12345 } };
+
+      handler(ctx);
+      await new Promise((r) => setTimeout(r, 50));
+
+      const calls = (bot.api.sendMessage as any).mock.calls;
+      const text = calls[calls.length - 1][1];
+      expect(text).toBe("Session restarted.");
+    });
+
+    it("/restart is ignored for unauthorized chats", async () => {
+      const app = new App(makeConfig());
+      const bot = app.bot as any;
+      const handler = bot.commandHandlers.get("restart")!;
+      const ctx = { chat: { id: 99999 } };
+
+      handler(ctx);
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect((bot.api.sendMessage as any).mock.calls.length).toBe(0);
     });
 
     it("/sessions is ignored for unauthorized chats", async () => {
@@ -767,6 +806,7 @@ describe("App", () => {
         { command: "chatid", description: "Show current chat ID" },
         { command: "bg", description: "Spawn a background agent" },
         { command: "sessions", description: "List running sessions" },
+        { command: "restart", description: "Restart the main Claude session" },
       ]);
     });
   });

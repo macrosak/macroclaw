@@ -26,51 +26,89 @@ const fullSchema = z.object({
   })).optional(),
 });
 
-const objectResultType = (schema: z.ZodType) => ({ type: "object" as const, schema });
+function objectResultType<T>(schema: z.ZodType<T>) {
+  return { type: "object" as const, schema };
+}
+const textResultType = { type: "text" } as const;
 
-describe("claude CLI structured output", () => {
-  it("simple schema without system prompt", async () => {
+describe("stream-json persistent process", () => {
+  it("receives structured output via stream-json with single send", async () => {
     const claude = new Claude({ workspace: WORKSPACE });
-    const { value } = await claude.newSession("Say hello", objectResultType(simpleSchema), { model: "haiku" }).result;
+    const process = claude.newSession(objectResultType(simpleSchema), { model: "haiku" });
 
-    console.log("Simple (no sysprompt):", JSON.stringify(value, null, 2));
+    const { value } = await process.send("Say hello briefly");
+
+    console.log("Stream-json structured output:", JSON.stringify(value, null, 2));
     expect(value).not.toBeNull();
+    expect(value.action).toBeDefined();
+
+    await process.kill();
   }, 60_000);
 
-  it("simple schema with system prompt", async () => {
+  it("receives text output via stream-json", async () => {
     const claude = new Claude({ workspace: WORKSPACE });
-    const { value } = await claude.newSession(
-      "Say hello",
-      objectResultType(simpleSchema),
-      { model: "haiku", systemPrompt: "You are a helpful assistant. This is a direct message from the user." },
-    ).result;
+    const process = claude.newSession(textResultType, { model: "haiku" });
 
-    console.log("Simple (with sysprompt):", JSON.stringify(value, null, 2));
-    expect(value).not.toBeNull();
+    const { value } = await process.send("Say hello in one word");
+
+    console.log("Stream-json text output:", value);
+    expect(typeof value).toBe("string");
+    expect(value.length).toBeGreaterThan(0);
+
+    await process.kill();
   }, 60_000);
+
+  it("supports multiple sends to the same process (persistent)", async () => {
+    const claude = new Claude({ workspace: WORKSPACE });
+    const process = claude.newSession(objectResultType(simpleSchema), { model: "haiku" });
+
+    // First message
+    const r1 = await process.send("Say hello");
+    console.log("First response:", JSON.stringify(r1.value, null, 2));
+    expect(r1.value.action).toBeDefined();
+
+    // Second message — same process, same session
+    const r2 = await process.send("Say goodbye");
+    console.log("Second response:", JSON.stringify(r2.value, null, 2));
+    expect(r2.value.action).toBeDefined();
+
+    // Session IDs should match (same session)
+    expect(r1.sessionId).toBe(r2.sessionId);
+
+    await process.kill();
+  }, 120_000);
 
   it("full schema with system prompt", async () => {
     const claude = new Claude({ workspace: WORKSPACE });
-    const { value } = await claude.newSession(
-      "Say hello",
+    const process = claude.newSession(
       objectResultType(fullSchema),
       { model: "haiku", systemPrompt: "You are a helpful assistant. This is a direct message from the user." },
-    ).result;
+    );
 
-    console.log("Full (with sysprompt):", JSON.stringify(value, null, 2));
+    const { value } = await process.send("Say hello");
+
+    console.log("Full schema (with sysprompt):", JSON.stringify(value, null, 2));
     expect(value).not.toBeNull();
+
+    await process.kill();
   }, 60_000);
 
-  it("full schema with real system prompt and workspace", async () => {
-    const workspace = process.env.MACROCLAW_WORKSPACE ?? WORKSPACE;
-    const claude = new Claude({ workspace });
-    const { value } = await claude.newSession(
-      "Say hello",
-      objectResultType(fullSchema),
-      { model: "sonnet", systemPrompt: "You are an AI assistant running inside macroclaw. This is a direct message from the user." },
-    ).result;
+  it("resume session works with stream-json", async () => {
+    const claude = new Claude({ workspace: WORKSPACE });
 
-    console.log("Full (real workspace):", JSON.stringify(value, null, 2));
-    expect(value).not.toBeNull();
+    // Create a session
+    const p1 = claude.newSession(objectResultType(simpleSchema), { model: "haiku" });
+    const r1 = await p1.send("Remember the word 'banana'");
+    const sessionId = r1.sessionId;
+    console.log("Created session:", sessionId);
+    await p1.kill();
+
+    // Resume the session in a new process
+    const p2 = claude.resumeSession(sessionId, objectResultType(simpleSchema), { model: "haiku" });
+    const r2 = await p2.send("What word did I ask you to remember?");
+    console.log("Resumed response:", JSON.stringify(r2.value, null, 2));
+    expect(r2.value.action).toBeDefined();
+
+    await p2.kill();
   }, 120_000);
 });

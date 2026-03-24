@@ -50,6 +50,7 @@ export class App {
       { command: "chatid", description: "Show current chat ID" },
       { command: "bg", description: "Spawn a background agent" },
       { command: "sessions", description: "List running sessions" },
+      { command: "restart", description: "Restart the main Claude session" },
     ]).catch((err) => log.error({ err }, "Failed to set commands"));
     this.#bot.start({
       onStart: (botInfo) => {
@@ -89,6 +90,12 @@ export class App {
       if (ctx.chat.id.toString() !== this.#config.authorizedChatId) return;
       log.debug("Command /sessions");
       this.#orchestrator.handleSessions();
+    });
+
+    this.#bot.command("restart", (ctx) => {
+      if (ctx.chat.id.toString() !== this.#config.authorizedChatId) return;
+      log.debug("Command /restart");
+      this.#orchestrator.handleRestart();
     });
 
     this.#bot.on("message:photo", async (ctx) => {

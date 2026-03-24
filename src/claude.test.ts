@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, mock } from "bun:test";
 import { z } from "zod/v4";
-import { Claude, QueryParseError, QueryProcessError, QueryValidationError } from "./claude";
+import { Claude, ClaudeProcess, QueryProcessError, QueryValidationError, type RawProcess } from "./claude";
 
-function envelope(opts: { structuredOutput?: unknown; result?: string; sessionId?: string; durationMs?: number; costUsd?: number }): string {
+const encoder = new TextEncoder();
+
+function resultEnvelope(opts: { structuredOutput?: unknown; result?: string; sessionId?: string; durationMs?: number; costUsd?: number }): string {
   return JSON.stringify({
     type: "result",
     subtype: "success",
@@ -14,36 +16,66 @@ function envelope(opts: { structuredOutput?: unknown; result?: string; sessionId
   });
 }
 
+function systemEvent(): string {
+  return JSON.stringify({ type: "system", subtype: "init", session_id: "sid", tools: [] });
+}
+
+function assistantEvent(text = "hello"): string {
+  return JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text }] } });
+}
+
+/** Creates a controllable mock process for ClaudeProcess tests */
+function createMockProc(): {
+  proc: RawProcess;
+  emitLine: (line: string) => void;
+  closeStdout: () => void;
+  resolveExited: (code: number) => void;
+  stdin: { write: ReturnType<typeof mock>; flush: ReturnType<typeof mock>; end: ReturnType<typeof mock> };
+} {
+  let stdoutController: ReadableStreamDefaultController<Uint8Array>;
+  const stdout = new ReadableStream<Uint8Array>({
+    start(c) { stdoutController = c; },
+  });
+
+  let stderrController: ReadableStreamDefaultController<Uint8Array>;
+  const stderr = new ReadableStream<Uint8Array>({
+    start(c) { stderrController = c; },
+  });
+
+  let resolveExited: (code: number) => void;
+  const exited = new Promise<number>((resolve) => { resolveExited = resolve; });
+
+  const stdin = {
+    write: mock(() => {}),
+    flush: mock(() => {}),
+    end: mock(() => {}),
+  };
+
+  const proc: RawProcess = {
+    stdin,
+    stdout,
+    stderr,
+    exited,
+    kill: mock(() => {}),
+  };
+
+  return {
+    proc,
+    emitLine: (line: string) => stdoutController.enqueue(encoder.encode(`${line}\n`)),
+    closeStdout: () => {
+      stdoutController.close();
+      stderrController.close();
+    },
+    resolveExited: resolveExited!,
+    stdin,
+  };
+}
+
 const originalSpawn = Bun.spawn;
 
 afterEach(() => {
   Bun.spawn = originalSpawn;
 });
-
-function mockSpawn(opts: { stdout?: string; stderr?: string; exitCode?: number }) {
-  const proc = {
-    stdout: new Response(opts.stdout ?? "").body,
-    stderr: new Response(opts.stderr ?? "").body,
-    exited: Promise.resolve(opts.exitCode ?? 0),
-    kill: mock(() => {}),
-  };
-  Bun.spawn = mock((() => proc) as any);
-  return proc;
-}
-
-function mockHangingSpawn(stdout: string) {
-  let resolveExited!: (code: number) => void;
-  const proc = {
-    stdout: new Response(stdout).body,
-    stderr: new Response("").body,
-    exited: new Promise<number>((resolve) => {
-      resolveExited = resolve;
-    }),
-    kill: mock(() => {}),
-  };
-  Bun.spawn = mock((() => proc) as any);
-  return { proc, resolveExited };
-}
 
 const TEST_WORKSPACE = "/tmp/claude2-test";
 
@@ -61,210 +93,189 @@ function spawnArgs(): string[] {
   return (Bun.spawn as any).mock.calls[0][0] as string[];
 }
 
-describe("Claude", () => {
-  describe("newSession", () => {
-    it("uses --session-id with a generated UUID", async () => {
-      mockSpawn({ stdout: envelope({ result: "hi" }), exitCode: 0 });
-      const claude = makeClaude();
-      const query = claude.newSession("hello", textResult);
+function spawnOpts(): Record<string, unknown> {
+  return (Bun.spawn as any).mock.calls[0][1] as Record<string, unknown>;
+}
 
-      expect(query.sessionId).toMatch(/^[0-9a-f-]{36}$/);
-      const args = spawnArgs();
-      expect(args).toContain("--session-id");
-      expect(args).toContain(query.sessionId);
-      expect(args).not.toContain("--resume");
-      expect(args).not.toContain("--fork-session");
+/** Helper to mock Bun.spawn and return a controllable mock process */
+function mockSpawn() {
+  const mockProc = createMockProc();
+  (Bun as any).spawn = mock(() => mockProc.proc);
+  return mockProc;
+}
 
-      await query.result;
-    });
+describe("ClaudeProcess", () => {
+  describe("send", () => {
+    it("writes NDJSON to stdin and resolves on result event", async () => {
+      const { proc, emitLine, stdin } = createMockProc();
+      const cp = new ClaudeProcess(proc, "test-sid", textResult);
 
-    it("returns text value for text resultType", async () => {
-      mockSpawn({ stdout: envelope({ result: "hello world" }), exitCode: 0 });
-      const claude = makeClaude();
-      const { value } = await claude.newSession("hi", textResult).result;
+      const promise = cp.send("hello");
+
+      emitLine(systemEvent());
+      emitLine(assistantEvent());
+      emitLine(resultEnvelope({ result: "hello world" }));
+
+      const { value } = await promise;
       expect(value).toBe("hello world");
+      expect(stdin.write).toHaveBeenCalledTimes(1);
+      const written = stdin.write.mock.calls[0][0] as string;
+      const parsed = JSON.parse(written);
+      expect(parsed.type).toBe("user");
+      expect(parsed.message.content).toBe("hello");
+      expect(stdin.flush).toHaveBeenCalledTimes(1);
     });
 
     it("returns parsed value for object resultType", async () => {
-      mockSpawn({ stdout: envelope({ structuredOutput: { action: "send", message: "hi" } }), exitCode: 0 });
-      const claude = makeClaude();
-      const schema = objectResult();
-      const { value } = await claude.newSession("hi", schema).result;
-      expect(value).toEqual({ action: "send", message: "hi" });
-    });
-  });
+      const schema = z.object({ count: z.number() });
+      const { proc, emitLine } = createMockProc();
+      const cp = new ClaudeProcess(proc, "test-sid", objectResult(schema));
 
-  describe("resumeSession", () => {
-    it("uses --resume with the provided sessionId", async () => {
-      mockSpawn({ stdout: envelope({ result: "resumed" }), exitCode: 0 });
-      const claude = makeClaude();
-      const query = claude.resumeSession("existing-sid", "continue", textResult);
+      const promise = cp.send("hi");
+      emitLine(resultEnvelope({ structuredOutput: { count: 5 } }));
 
-      expect(query.sessionId).toBe("existing-sid");
-      const args = spawnArgs();
-      expect(args).toContain("--resume");
-      expect(args).toContain("existing-sid");
-      expect(args).not.toContain("--session-id");
-      expect(args).not.toContain("--fork-session");
-
-      await query.result;
-    });
-  });
-
-  describe("forkSession", () => {
-    it("generates a new session ID and passes parent via --resume", async () => {
-      mockSpawn({ stdout: envelope({ result: "forked" }), exitCode: 0 });
-      const claude = makeClaude();
-      const query = claude.forkSession("parent-sid", "bg task", textResult);
-
-      expect(query.sessionId).toMatch(/^[0-9a-f-]{36}$/);
-      expect(query.sessionId).not.toBe("parent-sid");
-      const args = spawnArgs();
-      expect(args).toContain("--resume");
-      expect(args).toContain("parent-sid");
-      expect(args).toContain("--fork-session");
-      expect(args).toContain("--session-id");
-      expect(args).toContain(query.sessionId);
-
-      await query.result;
-    });
-  });
-
-  describe("options", () => {
-    it("uses constructor model as default", async () => {
-      mockSpawn({ stdout: envelope({ result: "ok" }), exitCode: 0 });
-      const claude = makeClaude({ model: "sonnet" });
-      await claude.newSession("hi", textResult).result;
-      expect(spawnArgs()).toContain("sonnet");
-    });
-
-    it("per-call model overrides constructor model", async () => {
-      mockSpawn({ stdout: envelope({ result: "ok" }), exitCode: 0 });
-      const claude = makeClaude({ model: "sonnet" });
-      await claude.newSession("hi", textResult, { model: "haiku" }).result;
-      const args = spawnArgs();
-      expect(args).toContain("haiku");
-      expect(args).not.toContain("sonnet");
-    });
-
-    it("uses constructor systemPrompt as default", async () => {
-      mockSpawn({ stdout: envelope({ result: "ok" }), exitCode: 0 });
-      const claude = makeClaude({ systemPrompt: "Be helpful." });
-      await claude.newSession("hi", textResult).result;
-      const args = spawnArgs();
-      expect(args).toContain("--append-system-prompt");
-      expect(args).toContain("Be helpful.");
-    });
-
-    it("per-call systemPrompt overrides constructor systemPrompt", async () => {
-      mockSpawn({ stdout: envelope({ result: "ok" }), exitCode: 0 });
-      const claude = makeClaude({ systemPrompt: "Be helpful." });
-      await claude.newSession("hi", textResult, { systemPrompt: "Be brief." }).result;
-      const args = spawnArgs();
-      expect(args).toContain("Be brief.");
-      expect(args).not.toContain("Be helpful.");
-    });
-
-    it("omits --model when none specified", async () => {
-      mockSpawn({ stdout: envelope({ result: "ok" }), exitCode: 0 });
-      const claude = makeClaude();
-      await claude.newSession("hi", textResult).result;
-      expect(spawnArgs()).not.toContain("--model");
-    });
-
-    it("omits --append-system-prompt when none specified", async () => {
-      mockSpawn({ stdout: envelope({ result: "ok" }), exitCode: 0 });
-      const claude = makeClaude();
-      await claude.newSession("hi", textResult).result;
-      expect(spawnArgs()).not.toContain("--append-system-prompt");
-    });
-  });
-
-  describe("resultType", () => {
-    it("omits --json-schema for text resultType", async () => {
-      mockSpawn({ stdout: envelope({ result: "plain" }), exitCode: 0 });
-      const claude = makeClaude();
-      await claude.newSession("hi", textResult).result;
-      expect(spawnArgs()).not.toContain("--json-schema");
-    });
-
-    it("passes --json-schema for object resultType", async () => {
-      mockSpawn({ stdout: envelope({ structuredOutput: { ok: true } }), exitCode: 0 });
-      const claude = makeClaude();
-      const schema = objectResult();
-      await claude.newSession("hi", schema).result;
-      const args = spawnArgs();
-      expect(args).toContain("--json-schema");
-    });
-
-    it("validates structured output through schema.parse", async () => {
-      mockSpawn({ stdout: envelope({ structuredOutput: { count: 5 } }), exitCode: 0 });
-      const claude = makeClaude();
-      const schema = objectResult(z.object({ count: z.number() }));
-      const { value } = await claude.newSession("hi", schema).result;
+      const { value } = await promise;
       expect(value).toEqual({ count: 5 });
     });
-  });
 
-  describe("metadata", () => {
-    it("returns duration and cost", async () => {
-      mockSpawn({ stdout: envelope({ result: "ok", durationMs: 2500, costUsd: 0.123 }), exitCode: 0 });
-      const claude = makeClaude();
-      const { duration, cost } = await claude.newSession("hi", textResult).result;
+    it("skips non-result events", async () => {
+      const { proc, emitLine } = createMockProc();
+      const cp = new ClaudeProcess(proc, "test-sid", textResult);
+
+      const promise = cp.send("hi");
+      emitLine(systemEvent());
+      emitLine(assistantEvent());
+      emitLine(JSON.stringify({ type: "rate_limit_event" }));
+      emitLine(resultEnvelope({ result: "done" }));
+
+      const { value } = await promise;
+      expect(value).toBe("done");
+    });
+
+    it("skips non-JSON lines", async () => {
+      const { proc, emitLine } = createMockProc();
+      const cp = new ClaudeProcess(proc, "test-sid", textResult);
+
+      const promise = cp.send("hi");
+      emitLine("not json at all");
+      emitLine(resultEnvelope({ result: "ok" }));
+
+      const { value } = await promise;
+      expect(value).toBe("ok");
+    });
+
+    it("returns duration and cost from result envelope", async () => {
+      const { proc, emitLine } = createMockProc();
+      const cp = new ClaudeProcess(proc, "test-sid", textResult);
+
+      const promise = cp.send("hi");
+      emitLine(resultEnvelope({ result: "ok", durationMs: 2500, costUsd: 0.123 }));
+
+      const { duration, cost } = await promise;
       expect(duration).toBe("2.5s");
       expect(cost).toBe("$0.1230");
     });
 
-    it("returns sessionId from server envelope", async () => {
-      mockSpawn({ stdout: envelope({ result: "ok", sessionId: "server-returned-sid" }), exitCode: 0 });
-      const claude = makeClaude();
-      const { sessionId } = await claude.newSession("hi", textResult).result;
+    it("returns sessionId from result envelope", async () => {
+      const { proc, emitLine } = createMockProc();
+      const cp = new ClaudeProcess(proc, "test-sid", textResult);
+
+      const promise = cp.send("hi");
+      emitLine(resultEnvelope({ result: "ok", sessionId: "server-returned-sid" }));
+
+      const { sessionId } = await promise;
       expect(sessionId).toBe("server-returned-sid");
     });
 
-    it("sets startedAt on the running query", () => {
-      mockSpawn({ stdout: envelope({ result: "ok" }), exitCode: 0 });
-      const claude = makeClaude();
-      const before = new Date();
-      const query = claude.newSession("hi", textResult);
-      const after = new Date();
-      expect(query.startedAt.getTime()).toBeGreaterThanOrEqual(before.getTime());
-      expect(query.startedAt.getTime()).toBeLessThanOrEqual(after.getTime());
-    });
-  });
+    it("transitions state: idle -> busy -> idle", async () => {
+      const { proc, emitLine } = createMockProc();
+      const cp = new ClaudeProcess(proc, "test-sid", textResult);
 
-  describe("errors", () => {
-    it("rejects with QueryProcessError on non-zero exit", async () => {
-      mockSpawn({ stderr: "boom", exitCode: 1 });
-      const claude = makeClaude();
+      expect(cp.state).toBe("idle");
+      const promise = cp.send("hi");
+      // After send starts, state is busy
+      expect(cp.state).toBe("busy");
+
+      emitLine(resultEnvelope({ result: "ok" }));
+      await promise;
+      expect(cp.state).toBe("idle");
+    });
+
+    it("throws when called while busy", async () => {
+      const { proc } = createMockProc();
+      const cp = new ClaudeProcess(proc, "test-sid", textResult);
+
+      cp.send("first"); // starts, goes busy
+      expect(() => cp.send("second")).toThrow("Cannot send: process is busy");
+    });
+
+    it("throws when called while dead", async () => {
+      const { proc, resolveExited } = createMockProc();
+      const cp = new ClaudeProcess(proc, "test-sid", textResult);
+
+      resolveExited(0);
+      await cp.kill();
+      expect(() => cp.send("hi")).toThrow("Cannot send: process is dead");
+    });
+
+    it("supports multiple sequential sends", async () => {
+      const { proc, emitLine } = createMockProc();
+      const cp = new ClaudeProcess(proc, "test-sid", textResult);
+
+      const p1 = cp.send("first");
+      emitLine(resultEnvelope({ result: "response 1" }));
+      const r1 = await p1;
+      expect(r1.value).toBe("response 1");
+
+      const p2 = cp.send("second");
+      emitLine(resultEnvelope({ result: "response 2" }));
+      const r2 = await p2;
+      expect(r2.value).toBe("response 2");
+    });
+
+    it("rejects with QueryProcessError when process exits mid-send", async () => {
+      const { proc, closeStdout, resolveExited } = createMockProc();
+      const cp = new ClaudeProcess(proc, "test-sid", textResult);
+
+      const promise = cp.send("hi");
+      closeStdout();
+      resolveExited(1);
+
       try {
-        await claude.newSession("hi", textResult).result;
+        await promise;
         expect.unreachable("should have thrown");
       } catch (err) {
         expect(err).toBeInstanceOf(QueryProcessError);
         expect((err as QueryProcessError).exitCode).toBe(1);
-        expect((err as QueryProcessError).stderr).toBe("boom");
       }
+      expect(cp.state).toBe("dead");
     });
 
-    it("rejects with QueryParseError on invalid JSON", async () => {
-      mockSpawn({ stdout: "not json", exitCode: 0 });
-      const claude = makeClaude();
+    it("rejects with QueryProcessError when stdin write fails", async () => {
+      const { proc, stdin } = createMockProc();
+      stdin.write.mockImplementation(() => { throw new Error("broken pipe"); });
+      const cp = new ClaudeProcess(proc, "test-sid", textResult);
+
       try {
-        await claude.newSession("hi", textResult).result;
+        await cp.send("hi");
         expect.unreachable("should have thrown");
       } catch (err) {
-        expect(err).toBeInstanceOf(QueryParseError);
-        expect((err as QueryParseError).raw).toBe("not json");
+        expect(err).toBeInstanceOf(QueryProcessError);
+        expect((err as QueryProcessError).stderr).toContain("broken pipe");
       }
+      expect(cp.state).toBe("dead");
     });
 
     it("rejects with QueryValidationError when schema.parse throws", async () => {
-      mockSpawn({ stdout: envelope({ structuredOutput: { bad: true } }), exitCode: 0 });
-      const claude = makeClaude();
-      const schema = objectResult(z.object({ count: z.number() }).strict());
+      const schema = z.object({ count: z.number() }).strict();
+      const { proc, emitLine } = createMockProc();
+      const cp = new ClaudeProcess(proc, "test-sid", objectResult(schema));
+
+      const promise = cp.send("hi");
+      emitLine(resultEnvelope({ structuredOutput: { bad: true } }));
+
       try {
-        await claude.newSession("hi", schema).result;
+        await promise;
         expect.unreachable("should have thrown");
       } catch (err) {
         expect(err).toBeInstanceOf(QueryValidationError);
@@ -274,42 +285,197 @@ describe("Claude", () => {
   });
 
   describe("kill", () => {
-    it("kills the process and waits for exit", async () => {
-      const { proc, resolveExited } = mockHangingSpawn(envelope({ result: "done" }));
-      const claude = makeClaude();
-      const query = claude.newSession("hi", textResult);
+    it("kills the process and transitions to dead", async () => {
+      const { proc, resolveExited } = createMockProc();
+      const cp = new ClaudeProcess(proc, "test-sid", textResult);
 
-      const killPromise = query.kill();
+      const killPromise = cp.kill();
       resolveExited(0);
       await killPromise;
+
+      expect(cp.state).toBe("dead");
       expect(proc.kill).toHaveBeenCalled();
+    });
+
+    it("is idempotent when already dead", async () => {
+      const { proc, resolveExited } = createMockProc();
+      const cp = new ClaudeProcess(proc, "test-sid", textResult);
+
+      const p1 = cp.kill();
+      resolveExited(0);
+      await p1;
+
+      // Second kill should be a no-op
+      await cp.kill();
+      expect(proc.kill).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("unexpected exit", () => {
+    it("sets state to dead when process exits while idle", async () => {
+      const { proc, resolveExited } = createMockProc();
+      const cp = new ClaudeProcess(proc, "test-sid", textResult);
+
+      expect(cp.state).toBe("idle");
+      resolveExited(1);
+      // Give microtask a chance to run
+      await new Promise((r) => setTimeout(r, 10));
+      expect(cp.state).toBe("dead");
+    });
+  });
+});
+
+describe("Claude factory", () => {
+  describe("newSession", () => {
+    it("spawns with --session-id and stream-json flags", () => {
+      mockSpawn();
+      const claude = makeClaude();
+      const process = claude.newSession(textResult);
+
+      expect(process.sessionId).toMatch(/^[0-9a-f-]{36}$/);
+      const args = spawnArgs();
+      expect(args).toContain("--session-id");
+      expect(args).toContain(process.sessionId);
+      expect(args).toContain("--input-format");
+      expect(args).toContain("stream-json");
+      expect(args).toContain("--output-format");
+      expect(args).toContain("--verbose");
+      expect(args).not.toContain("--resume");
+      expect(args).not.toContain("--fork-session");
+    });
+  });
+
+  describe("resumeSession", () => {
+    it("spawns with --resume and the provided sessionId", () => {
+      mockSpawn();
+      const claude = makeClaude();
+      const process = claude.resumeSession("existing-sid", textResult);
+
+      expect(process.sessionId).toBe("existing-sid");
+      const args = spawnArgs();
+      expect(args).toContain("--resume");
+      expect(args).toContain("existing-sid");
+      expect(args).not.toContain("--session-id");
+      expect(args).not.toContain("--fork-session");
+    });
+  });
+
+  describe("forkSession", () => {
+    it("spawns with --resume parent, --fork-session, and new --session-id", () => {
+      mockSpawn();
+      const claude = makeClaude();
+      const process = claude.forkSession("parent-sid", textResult);
+
+      expect(process.sessionId).toMatch(/^[0-9a-f-]{36}$/);
+      expect(process.sessionId).not.toBe("parent-sid");
+      const args = spawnArgs();
+      expect(args).toContain("--resume");
+      expect(args).toContain("parent-sid");
+      expect(args).toContain("--fork-session");
+      expect(args).toContain("--session-id");
+      expect(args).toContain(process.sessionId);
+    });
+  });
+
+  describe("options", () => {
+    it("uses constructor model as default", () => {
+      mockSpawn();
+      const claude = makeClaude({ model: "sonnet" });
+      claude.newSession(textResult);
+      expect(spawnArgs()).toContain("sonnet");
+    });
+
+    it("per-call model overrides constructor model", () => {
+      mockSpawn();
+      const claude = makeClaude({ model: "sonnet" });
+      claude.newSession(textResult, { model: "haiku" });
+      const args = spawnArgs();
+      expect(args).toContain("haiku");
+      expect(args).not.toContain("sonnet");
+    });
+
+    it("uses constructor systemPrompt as default", () => {
+      mockSpawn();
+      const claude = makeClaude({ systemPrompt: "Be helpful." });
+      claude.newSession(textResult);
+      const args = spawnArgs();
+      expect(args).toContain("--append-system-prompt");
+      expect(args).toContain("Be helpful.");
+    });
+
+    it("per-call systemPrompt overrides constructor systemPrompt", () => {
+      mockSpawn();
+      const claude = makeClaude({ systemPrompt: "Be helpful." });
+      claude.newSession(textResult, { systemPrompt: "Be brief." });
+      const args = spawnArgs();
+      expect(args).toContain("Be brief.");
+      expect(args).not.toContain("Be helpful.");
+    });
+
+    it("omits --model when none specified", () => {
+      mockSpawn();
+      const claude = makeClaude();
+      claude.newSession(textResult);
+      expect(spawnArgs()).not.toContain("--model");
+    });
+
+    it("omits --append-system-prompt when none specified", () => {
+      mockSpawn();
+      const claude = makeClaude();
+      claude.newSession(textResult);
+      expect(spawnArgs()).not.toContain("--append-system-prompt");
+    });
+  });
+
+  describe("resultType", () => {
+    it("omits --json-schema for text resultType", () => {
+      mockSpawn();
+      const claude = makeClaude();
+      claude.newSession(textResult);
+      expect(spawnArgs()).not.toContain("--json-schema");
+    });
+
+    it("passes --json-schema for object resultType", () => {
+      mockSpawn();
+      const claude = makeClaude();
+      claude.newSession(objectResult());
+      expect(spawnArgs()).toContain("--json-schema");
     });
   });
 
   describe("environment", () => {
-    it("strips CLAUDECODE env var", async () => {
-      mockSpawn({ stdout: envelope({ result: "ok" }), exitCode: 0 });
+    it("strips CLAUDECODE env var", () => {
+      mockSpawn();
       const claude = makeClaude();
-      await claude.newSession("hi", textResult).result;
-      const spawnOpts = (Bun.spawn as any).mock.calls[0][1];
-      expect(spawnOpts.env).not.toHaveProperty("CLAUDECODE");
+      claude.newSession(textResult);
+      const opts = spawnOpts();
+      expect(opts.env).not.toHaveProperty("CLAUDECODE");
     });
 
-    it("spawns in the configured workspace directory", async () => {
-      mockSpawn({ stdout: envelope({ result: "ok" }), exitCode: 0 });
+    it("spawns in the configured workspace directory", () => {
+      mockSpawn();
       const claude = makeClaude();
-      await claude.newSession("hi", textResult).result;
-      const spawnOpts = (Bun.spawn as any).mock.calls[0][1];
-      expect(spawnOpts.cwd).toBe(TEST_WORKSPACE);
+      claude.newSession(textResult);
+      expect(spawnOpts().cwd).toBe(TEST_WORKSPACE);
     });
 
-    it("includes disallowedTools in CLI args", async () => {
-      mockSpawn({ stdout: envelope({ result: "ok" }), exitCode: 0 });
+    it("includes disallowedTools in CLI args", () => {
+      mockSpawn();
       const claude = makeClaude();
-      await claude.newSession("hi", textResult).result;
+      claude.newSession(textResult);
       const args = spawnArgs();
       expect(args).toContain("--disallowedTools");
       expect(args).toContain("CronList,CronDelete,CronCreate,AskUserQuestion");
+    });
+
+    it("spawns with stdin: pipe, stdout: pipe, stderr: pipe", () => {
+      mockSpawn();
+      const claude = makeClaude();
+      claude.newSession(textResult);
+      const opts = spawnOpts();
+      expect(opts.stdin).toBe("pipe");
+      expect(opts.stdout).toBe("pipe");
+      expect(opts.stderr).toBe("pipe");
     });
   });
 });

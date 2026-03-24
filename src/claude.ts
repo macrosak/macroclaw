@@ -34,14 +34,6 @@ export interface QueryResult<T> {
   cost?: string;
 }
 
-/** A running query — result is always deferred */
-export interface RunningQuery<T> {
-  sessionId: string;
-  startedAt: Date;
-  result: Promise<QueryResult<T>>;
-  kill: () => Promise<void>;
-}
-
 /** Claude process exited with non-zero code */
 export class QueryProcessError extends Error {
   constructor(
@@ -69,15 +61,152 @@ export class QueryValidationError extends Error {
   }
 }
 
+// --- ClaudeProcess ---
+
+export type ProcessState = "idle" | "busy" | "dead";
+
+/** Minimal interface for the underlying process — matches Bun.spawn output when stdin/stdout/stderr are "pipe" */
+export interface RawProcess {
+  stdin: { write(data: string): void; flush(): void; end(): void };
+  stdout: ReadableStream<Uint8Array>;
+  stderr: ReadableStream<Uint8Array>;
+  exited: Promise<number>;
+  kill(): void;
+}
+
+export class ClaudeProcess<T = unknown> {
+  readonly sessionId: string;
+  readonly startedAt: Date;
+  #state: ProcessState = "idle";
+  #proc: RawProcess;
+  #resultType: ResultType;
+  #lines: AsyncGenerator<string>;
+
+  constructor(proc: RawProcess, sessionId: string, resultType: ResultType) {
+    this.#proc = proc;
+    this.sessionId = sessionId;
+    this.#resultType = resultType;
+    this.startedAt = new Date();
+    this.#lines = ClaudeProcess.#readLines(proc.stdout);
+
+    proc.exited.then((code) => {
+      if (this.#state !== "dead") {
+        log.warn({ sessionId, exitCode: code }, "Process exited unexpectedly");
+        this.#state = "dead";
+      }
+    });
+  }
+
+  get state(): ProcessState {
+    return this.#state;
+  }
+
+  async send(prompt: string): Promise<QueryResult<T>> {
+    if (this.#state !== "idle") {
+      throw new Error(`Cannot send: process is ${this.#state}`);
+    }
+    this.#state = "busy";
+
+    const msg = `${JSON.stringify({ type: "user", message: { role: "user", content: prompt } })}\n`;
+
+    try {
+      this.#proc.stdin.write(msg);
+      this.#proc.stdin.flush();
+    } catch (err) {
+      this.#state = "dead";
+      throw new QueryProcessError(-1, `Failed to write to stdin: ${err}`);
+    }
+
+    log.debug({ sessionId: this.sessionId, promptLen: prompt.length }, "Sent to Claude");
+
+    while (true) {
+      const { done, value: line } = await this.#lines.next();
+      if (done) {
+        this.#state = "dead";
+        const exitCode = await this.#proc.exited;
+        const stderr = await new Response(this.#proc.stderr).text();
+        log.error({ exitCode, stderr: stderr.slice(0, 200) }, "Claude process ended unexpectedly");
+        throw new QueryProcessError(exitCode, stderr);
+      }
+
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = JSON.parse(line) as Record<string, unknown>;
+      } catch {
+        log.debug({ line: line.slice(0, 100) }, "Skipping non-JSON line");
+        continue;
+      }
+
+      if (parsed.type !== "result") continue;
+
+      this.#state = "idle";
+      return this.#parseResult(parsed);
+    }
+  }
+
+  async kill(): Promise<void> {
+    if (this.#state === "dead") return;
+    this.#state = "dead";
+    this.#proc.kill();
+    await this.#proc.exited;
+  }
+
+  #parseResult(envelope: Record<string, unknown>): QueryResult<T> {
+    const sid = typeof envelope.session_id === "string" ? envelope.session_id : this.sessionId;
+    const durationMs = typeof envelope.duration_ms === "number" ? envelope.duration_ms : undefined;
+    const costUsd = typeof envelope.total_cost_usd === "number" ? envelope.total_cost_usd : undefined;
+    const duration = durationMs ? `${(durationMs / 1000).toFixed(1)}s` : undefined;
+    const cost = costUsd ? `$${costUsd.toFixed(4)}` : undefined;
+
+    let value: T;
+    if (this.#resultType.type === "text") {
+      value = (typeof envelope.result === "string" ? envelope.result : "") as T;
+    } else {
+      const raw = envelope.structured_output;
+      try {
+        value = (this.#resultType as { type: "object"; schema: z.ZodType }).schema.parse(raw) as T;
+      } catch (err) {
+        throw new QueryValidationError(raw, err);
+      }
+    }
+
+    log.debug({ duration, cost, sessionId: sid }, "Claude response received");
+    return { value, sessionId: sid, duration, cost };
+  }
+
+  static async *#readLines(stream: ReadableStream<Uint8Array>): AsyncGenerator<string> {
+    const reader = stream.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          if (line.trim()) yield line;
+        }
+      }
+      if (buffer.trim()) yield buffer;
+    } finally {
+      reader.releaseLock();
+    }
+  }
+}
+
+// --- Claude factory ---
+
 type SessionMode =
   | { kind: "new" }
   | { kind: "resume"; sessionId: string }
   | { kind: "fork"; sessionId: string };
 
 export class Claude {
-  #workspace: string;
-  #model?: string;
-  #systemPrompt?: string;
+  readonly #workspace: string;
+  readonly #model?: string;
+  readonly #systemPrompt?: string;
 
   constructor(config: ClaudeConfig) {
     this.#workspace = config.workspace;
@@ -85,19 +214,19 @@ export class Claude {
     this.#systemPrompt = config.systemPrompt;
   }
 
-  newSession<R extends ResultType>(prompt: string, resultType: R, options?: QueryOptions): RunningQuery<InferResult<R>> {
-    return this.#spawn({ kind: "new" }, prompt, resultType, options);
+  newSession<R extends ResultType>(resultType: R, options?: QueryOptions): ClaudeProcess<InferResult<R>> {
+    return this.#spawn({ kind: "new" }, resultType, options);
   }
 
-  resumeSession<R extends ResultType>(sessionId: string, prompt: string, resultType: R, options?: QueryOptions): RunningQuery<InferResult<R>> {
-    return this.#spawn({ kind: "resume", sessionId }, prompt, resultType, options);
+  resumeSession<R extends ResultType>(sessionId: string, resultType: R, options?: QueryOptions): ClaudeProcess<InferResult<R>> {
+    return this.#spawn({ kind: "resume", sessionId }, resultType, options);
   }
 
-  forkSession<R extends ResultType>(sessionId: string, prompt: string, resultType: R, options?: QueryOptions): RunningQuery<InferResult<R>> {
-    return this.#spawn({ kind: "fork", sessionId }, prompt, resultType, options);
+  forkSession<R extends ResultType>(sessionId: string, resultType: R, options?: QueryOptions): ClaudeProcess<InferResult<R>> {
+    return this.#spawn({ kind: "fork", sessionId }, resultType, options);
   }
 
-  #spawn<R extends ResultType>(mode: SessionMode, prompt: string, resultType: R, options?: QueryOptions): RunningQuery<InferResult<R>> {
+  #spawn<R extends ResultType>(mode: SessionMode, resultType: R, options?: QueryOptions): ClaudeProcess<InferResult<R>> {
     const env = { ...process.env };
     delete env.CLAUDECODE;
 
@@ -105,7 +234,13 @@ export class Claude {
     const systemPrompt = options?.systemPrompt ?? this.#systemPrompt;
     const sessionId = mode.kind === "resume" ? mode.sessionId : crypto.randomUUID();
 
-    const args = ["claude", "-p", "--output-format", "json", "--disallowedTools", "CronList,CronDelete,CronCreate,AskUserQuestion"];
+    const args = [
+      "claude", "-p",
+      "--input-format", "stream-json",
+      "--output-format", "stream-json",
+      "--verbose",
+      "--disallowedTools", "CronList,CronDelete,CronCreate,AskUserQuestion",
+    ];
 
     if (mode.kind === "resume") {
       args.push("--resume", sessionId);
@@ -121,60 +256,11 @@ export class Claude {
 
     if (model) args.push("--model", model);
     if (systemPrompt) args.push("--append-system-prompt", systemPrompt);
-    args.push(prompt);
 
-    log.debug({ model, sessionId, promptLen: prompt.length, mode: mode.kind, hasSystemPrompt: !!systemPrompt, prompt }, "Sending to Claude");
+    log.debug({ model, sessionId, mode: mode.kind, hasSystemPrompt: !!systemPrompt }, "Spawning Claude process");
 
-    const proc = Bun.spawn(args, { cwd: this.#workspace, env, stdout: "pipe", stderr: "pipe" });
-    const startedAt = new Date();
+    const proc = Bun.spawn(args, { cwd: this.#workspace, env, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
 
-    const result = (async (): Promise<QueryResult<InferResult<R>>> => {
-      const exitCode = await proc.exited;
-      if (exitCode !== 0) {
-        const stderr = await new Response(proc.stderr).text();
-        log.error({ exitCode, stderr: stderr.slice(0, 200) }, "Claude process failed");
-        throw new QueryProcessError(exitCode, stderr);
-      }
-
-      const stdout = await new Response(proc.stdout).text();
-      let envelope: Record<string, unknown>;
-      try {
-        envelope = JSON.parse(stdout) as Record<string, unknown>;
-      } catch {
-        log.warn({ stdout: stdout.slice(0, 200) }, "Failed to parse Claude stdout as JSON");
-        throw new QueryParseError(stdout);
-      }
-
-      const sid = typeof envelope.session_id === "string" ? envelope.session_id : sessionId;
-      const durationMs = typeof envelope.duration_ms === "number" ? envelope.duration_ms : undefined;
-      const costUsd = typeof envelope.total_cost_usd === "number" ? envelope.total_cost_usd : undefined;
-      const duration = durationMs ? `${(durationMs / 1000).toFixed(1)}s` : undefined;
-      const cost = costUsd ? `$${costUsd.toFixed(4)}` : undefined;
-
-      let value: InferResult<R>;
-      if (resultType.type === "text") {
-        value = (typeof envelope.result === "string" ? envelope.result : "") as InferResult<R>;
-      } else {
-        const raw = envelope.structured_output;
-        try {
-          value = resultType.schema.parse(raw) as InferResult<R>;
-        } catch (err) {
-          throw new QueryValidationError(raw, err);
-        }
-      }
-
-      log.debug({ duration, cost, sessionId: sid }, "Claude response received");
-      return { value, sessionId: sid, duration, cost };
-    })();
-
-    return {
-      sessionId,
-      startedAt,
-      result,
-      kill: async () => {
-        proc.kill();
-        await proc.exited;
-      },
-    };
+    return new ClaudeProcess<InferResult<R>>(proc as unknown as RawProcess, sessionId, resultType);
   }
 }
