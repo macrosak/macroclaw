@@ -59,12 +59,7 @@ Don't ask permission. Just do it.
 
 ## Scheduled Events
 
-Scheduled events are created by the `schedule` skill and stored in `data/schedule.json`. Scheduled events arrive as `<event type="schedule-trigger">` XML blocks with a `<schedule>` element containing the job name. The agent decides whether to respond:
-
-- **action: "send"** — the response goes to Telegram
-- **action: "silent"** — the response is logged but not sent
-
-Use `silent` when a scheduled check finds nothing new. Only send when there's something worth reading.
+Scheduled events are defined in `data/schedule.json` and managed by the `schedule` skill.
 
 ## Skills
 
