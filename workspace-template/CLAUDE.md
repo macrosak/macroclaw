@@ -57,10 +57,6 @@ Don't ask permission. Just do it.
   - bullet points (plain text bullet character)
   - No markdown syntax. No # headings. No [links](url). No *stars*.
 
-## Scheduled Events
-
-Scheduled events are defined in `data/schedule.json` and managed by the `schedule` skill.
-
 ## Skills
 
 Skills live in `.claude/skills/`.
