@@ -18,6 +18,8 @@ export interface ClaudeConfig {
   workspace: string;
   model?: string;
   systemPrompt?: string;
+  /** Extra environment variables to set when spawning the Claude process */
+  envVars?: Record<string, string>;
 }
 
 /** Per-call overrides */
@@ -221,11 +223,13 @@ export class Claude {
   readonly #workspace: string;
   readonly #model?: string;
   readonly #systemPrompt?: string;
+  readonly #envVars: Record<string, string>;
 
   constructor(config: ClaudeConfig) {
     this.#workspace = config.workspace;
     this.#model = config.model;
     this.#systemPrompt = config.systemPrompt;
+    this.#envVars = config.envVars ?? {};
   }
 
   newSession<R extends ResultType>(resultType: R, options?: QueryOptions): ClaudeProcess<InferResult<R>> {
@@ -241,7 +245,7 @@ export class Claude {
   }
 
   #spawn<R extends ResultType>(mode: SessionMode, resultType: R, options?: QueryOptions): ClaudeProcess<InferResult<R>> {
-    const env = { ...process.env };
+    const env = { ...process.env, ...this.#envVars };
     delete env.CLAUDECODE;
 
     const model = options?.model ?? this.#model;

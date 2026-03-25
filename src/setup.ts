@@ -84,6 +84,13 @@ export class SetupWizard {
       const defaultWorkspace = this.#default("workspace", "~/.macroclaw-workspace");
       const workspace = await this.#askValidated("workspace", `Workspace [${defaultWorkspace}]: `, defaultWorkspace);
 
+      // Timezone
+      this.#io.write("\nLocal timezone for the agent's clock and scheduled events.\n");
+      this.#io.write("Use an IANA timezone name (e.g. Europe/Prague, America/New_York, UTC).\n\n");
+      const detectedTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const defaultTimezone = this.#default("timezone", detectedTz || "UTC");
+      const timezone = await this.#askValidated("timezone", `Timezone [${defaultTimezone}]: `, defaultTimezone);
+
       // OpenAI API key
       this.#io.write("\nMacroclaw uses OpenAI's Whisper API to transcribe voice messages.\n");
       this.#io.write("Without this key, voice messages will be ignored.\n\n");
@@ -99,6 +106,7 @@ export class SetupWizard {
         chatId,
         model,
         workspace,
+        timezone,
         openaiApiKey,
         ...(logLevel && { logLevel }),
       });
@@ -157,7 +165,7 @@ export class SetupWizard {
     let value = await this.#io.ask(prompt) || fallback;
     while (true) {
       const result = schema.safeParse(value);
-      if (result.success) return value;
+      if (result.success) return result.data as string;
       const issue = result.error?.issues?.[0];
       this.#io.write(`Invalid value: ${issue?.message ?? "validation failed"}. Please try again.\n`);
       value = await this.#io.ask(prompt) || fallback;

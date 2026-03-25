@@ -116,6 +116,8 @@ function makeOrchestrator(claude: Claude, extraConfig?: Partial<OrchestratorConf
   const onResponse = mock(async (r: OrchestratorResponse) => { responses.push(r); });
   const orch = new Orchestrator({
     workspace: TEST_WORKSPACE,
+    model: "sonnet",
+    timezone: "UTC",
     settingsDir: tmpSettingsDir,
     onResponse,
     claude,
@@ -737,7 +739,7 @@ describe("Orchestrator", () => {
       const detailResponse = responses[responses.length - 1];
       expect(detailResponse.message).toContain("research-pricing");
       expect(detailResponse.message).toContain("research pricing");
-      expect(detailResponse.message).toContain("default");
+      expect(detailResponse.message).toContain("sonnet");
       expect(detailResponse.message).toContain("Status: running");
       expect(detailResponse.buttons).toHaveLength(3);
       expect(detailResponse.buttons![0]).toEqual({ text: "Peek", data: `peek:${sessionId}` });
@@ -1153,6 +1155,8 @@ describe("Orchestrator", () => {
       const failingOnResponse = mock(async (_r: OrchestratorResponse) => { throw new Error("send failed"); });
       const orch = new Orchestrator({
         workspace: TEST_WORKSPACE,
+        model: "sonnet",
+        timezone: "UTC",
         settingsDir: tmpSettingsDir,
         onResponse: failingOnResponse,
         claude,

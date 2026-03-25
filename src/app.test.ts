@@ -132,6 +132,8 @@ function makeConfig(overrides?: Partial<AppConfig>): AppConfig {
     botToken: "test-token",
     authorizedChatId: "12345",
     workspace: "/tmp/macroclaw-test-workspace",
+    model: "sonnet",
+    timezone: "UTC",
     settingsDir: tmpSettingsDir,
     claude: defaultMockClaude(),
     stt: mockStt(),

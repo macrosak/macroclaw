@@ -1,18 +1,20 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { IANAZone } from "luxon";
 import { z } from "zod/v4";
 import { createLogger } from "./logger";
 
 const log = createLogger("settings");
 
 export const settingsSchema = z.object({
-  botToken: z.string(),
-  chatId: z.string().regex(/^-?\d+$/, "Must be a numeric Telegram chat ID"),
-  model: z.enum(["haiku", "sonnet", "opus"]).default("sonnet"),
-  workspace: z.string().default("~/.macroclaw-workspace"),
-  openaiApiKey: z.string().optional(),
-  logLevel: z.enum(["debug", "info", "warn", "error"]).default("info"),
-  pinoramaUrl: z.string().optional(),
+  botToken: z.string().trim(),
+  chatId: z.string().trim().regex(/^-?\d+$/, "Must be a numeric Telegram chat ID"),
+  model: z.string().trim().pipe(z.enum(["haiku", "sonnet", "opus"])).default("sonnet"),
+  workspace: z.string().trim().default("~/.macroclaw-workspace"),
+  timezone: z.string().trim().refine((tz) => IANAZone.isValidZone(tz), "Must be a valid IANA timezone").default("UTC"),
+  openaiApiKey: z.string().trim().optional(),
+  logLevel: z.string().trim().pipe(z.enum(["debug", "info", "warn", "error"])).default("info"),
+  pinoramaUrl: z.string().trim().optional(),
 });
 
 export type Settings = z.infer<typeof settingsSchema>;
@@ -35,6 +37,7 @@ export class SettingsManager {
     chatId: "AUTHORIZED_CHAT_ID",
     model: "MODEL",
     workspace: "WORKSPACE",
+    timezone: "TIMEZONE",
     openaiApiKey: "OPENAI_API_KEY",
     logLevel: "LOG_LEVEL",
     pinoramaUrl: "PINORAMA_URL",
@@ -88,18 +91,24 @@ export class SettingsManager {
   }
 
   applyEnvOverrides(settings: Settings): { settings: Settings; overrides: Set<string> } {
-    const merged = { ...settings };
+    const merged: Record<string, unknown> = { ...settings };
     const overrides = new Set<string>();
 
     for (const [key, envVar] of Object.entries(SettingsManager.envMapping)) {
       const value = process.env[envVar];
       if (value !== undefined) {
-        (merged as Record<string, unknown>)[key] = value;
+        merged[key] = value;
         overrides.add(key);
       }
     }
 
-    return { settings: merged, overrides };
+    const result = settingsSchema.safeParse(merged);
+    if (!result.success) {
+      log.error({ issues: result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`) }, "settings env override validation failed");
+      process.exit(1);
+    }
+
+    return { settings: result.data, overrides };
   }
 
   print(settings: Settings, overrides: Set<string>): void {

@@ -10,6 +10,7 @@ const validSettings: Settings = {
   chatId: "12345678",
   model: "sonnet",
   workspace: "~/.macroclaw-workspace",
+  timezone: "UTC",
   logLevel: "debug",
 };
 
@@ -39,7 +40,33 @@ describe("SettingsManager.load", () => {
       chatId: "12345678",
       model: "sonnet",
       workspace: "~/.macroclaw-workspace",
+      timezone: "UTC",
       logLevel: "info",
+    });
+  });
+
+  it("trims string settings loaded from file", () => {
+    mkdirSync(tmpDir, { recursive: true });
+    writeFileSync(join(tmpDir, "settings.json"), JSON.stringify({
+      botToken: "  123:ABC  ",
+      chatId: " 12345678 ",
+      model: " opus ",
+      workspace: "  /custom/workspace  ",
+      timezone: "  Europe/Prague  ",
+      openaiApiKey: "  sk-test  ",
+      logLevel: " warn ",
+      pinoramaUrl: "  http://localhost:6200  ",
+    }));
+    const settings = new SettingsManager(tmpDir).load();
+    expect(settings).toEqual({
+      botToken: "123:ABC",
+      chatId: "12345678",
+      model: "opus",
+      workspace: "/custom/workspace",
+      timezone: "Europe/Prague",
+      openaiApiKey: "sk-test",
+      logLevel: "warn",
+      pinoramaUrl: "http://localhost:6200",
     });
   });
 
@@ -60,6 +87,7 @@ describe("SettingsManager.load", () => {
       chatId: "123",
       model: "opus",
       workspace: "/custom",
+      timezone: "UTC",
       openaiApiKey: "sk-test",
       logLevel: "info",
       pinoramaUrl: "http://localhost:6200",
@@ -123,6 +151,28 @@ describe("SettingsManager.load", () => {
     expect(mockExit).toHaveBeenCalledWith(1);
     process.exit = origExit;
   });
+
+  it("exits with code 1 when validation fails (invalid timezone)", () => {
+    mkdirSync(tmpDir, { recursive: true });
+    writeFileSync(join(tmpDir, "settings.json"), JSON.stringify({
+      botToken: "tok",
+      chatId: "123",
+      timezone: "Europe/Prgaaue",
+    }));
+
+    const mockExit = mock(() => { throw new Error("exit"); });
+    const origExit = process.exit;
+    process.exit = mockExit as any;
+
+    try {
+      new SettingsManager(tmpDir).load();
+    } catch {
+      // expected
+    }
+
+    expect(mockExit).toHaveBeenCalledWith(1);
+    process.exit = origExit;
+  });
 });
 
 describe("SettingsManager.save", () => {
@@ -169,7 +219,7 @@ describe("SettingsManager.loadRaw", () => {
 describe("SettingsManager.applyEnvOverrides", () => {
   const envVars = [
     "TELEGRAM_BOT_TOKEN", "AUTHORIZED_CHAT_ID", "MODEL",
-    "WORKSPACE", "OPENAI_API_KEY", "LOG_LEVEL", "PINORAMA_URL",
+    "WORKSPACE", "TIMEZONE", "OPENAI_API_KEY", "LOG_LEVEL", "PINORAMA_URL",
   ];
   const savedEnv: Record<string, string | undefined> = {};
 
@@ -222,6 +272,37 @@ describe("SettingsManager.applyEnvOverrides", () => {
     expect(overrides.has("workspace")).toBe(true);
     expect(overrides.has("logLevel")).toBe(true);
     expect(overrides.has("pinoramaUrl")).toBe(true);
+  });
+
+  it("trims env override values before returning settings", () => {
+    process.env.MODEL = " opus ";
+    process.env.WORKSPACE = " /override/path ";
+    process.env.TIMEZONE = " Europe/Prague ";
+    process.env.LOG_LEVEL = " error ";
+    process.env.PINORAMA_URL = " http://override:6200 ";
+    const { settings } = new SettingsManager(tmpDir).applyEnvOverrides(validSettings);
+    expect(settings.model).toBe("opus");
+    expect(settings.workspace).toBe("/override/path");
+    expect(settings.timezone).toBe("Europe/Prague");
+    expect(settings.logLevel).toBe("error");
+    expect(settings.pinoramaUrl).toBe("http://override:6200");
+  });
+
+  it("exits with code 1 when an env override is invalid", () => {
+    process.env.TIMEZONE = "Europe/Prgaaue";
+
+    const mockExit = mock(() => { throw new Error("exit"); });
+    const origExit = process.exit;
+    process.exit = mockExit as any;
+
+    try {
+      new SettingsManager(tmpDir).applyEnvOverrides(validSettings);
+    } catch {
+      // expected
+    }
+
+    expect(mockExit).toHaveBeenCalledWith(1);
+    process.exit = origExit;
   });
 });
 

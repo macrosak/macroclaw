@@ -491,5 +491,13 @@ describe("Claude factory", () => {
       expect(opts.stdout).toBe("pipe");
       expect(opts.stderr).toBe("pipe");
     });
+
+    it("merges envVars into the process environment", () => {
+      mockSpawn();
+      const claude = new Claude({ workspace: TEST_WORKSPACE, envVars: { TZ: "Europe/Prague" } });
+      claude.newSession(textResult);
+      const opts = spawnOpts();
+      expect((opts.env as Record<string, string>).TZ).toBe("Europe/Prague");
+    });
   });
 });
