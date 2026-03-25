@@ -73,7 +73,7 @@ Two job types, discriminated by field:
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `name` | yes | Short kebab-case identifier (e.g. `dentist-reminder`). Appears in the `[Context: cron/<name>]` prefix when fired. |
+| `name` | yes | Short kebab-case identifier (e.g. `dentist-reminder`). Appears in the `<schedule name="...">` element and event name when fired. |
 | `cron` | for recurring | Standard cron expression (local time). See reference below. |
 | `fireAt` | for one-time | ISO 8601 timestamp (e.g. `2026-03-15T08:00:00`). Can include a timezone offset (e.g. `2026-03-15T08:00:00+01:00`); without one, the time is interpreted in the configured timezone. |
 | `prompt` | yes | The message sent to the agent when the event fires. Write it as a natural instruction. |
@@ -105,4 +105,4 @@ Common patterns:
 - Changes are hot-reloaded — no restart needed
 - File location: `<workspace>/data/schedule.json`
 - One-shot events (`fireAt`) are cleaned up automatically after firing
-- Missed one-shot events (e.g. service was down) are fired with a `[missed event]` prefix when the service restarts (up to 7 days late)
+- Missed one-shot events (e.g. service was down) are fired when the service restarts (up to 7 days late) with `missed-by` and `scheduled-at` attributes on the `<schedule>` element
