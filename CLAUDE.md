@@ -45,18 +45,19 @@ Two layers with unidirectional dependency: App → Orchestrator. App knows nothi
 
 ```
 App (app.ts)                        — I/O layer: Telegram + Cron
-├── CronScheduler (cron.ts)         — reads data/schedule.json, fires onJob callback
+├── Scheduler (scheduler.ts)        — reads data/schedule.json, fires onJob callback
 └── Orchestrator (orchestrator.ts)  — processing layer: Claude, queue, sessions, background
     ├── Queue (queue.ts)            — serial FIFO processing (internal)
-    └── Claude (claude.ts)          — spawns `claude` CLI, handles timeouts/deferred results
+    ├── PromptBuilder (prompt-builder.ts) — builds context prefix for Claude prompts
+    └── Claude (claude.ts)          — persistent `claude` process, stream-json protocol
 ```
 
 ### App (I/O Layer)
 
 - Receives Telegram messages, commands, buttons, file uploads
-- Routes to `orchestrator.handleMessage/handleButton/handleCron/handleBackgroundCommand/handleBackgroundList/handleSessionCommand`
+- Routes to `orchestrator.handleMessage/handleButton/handleCron/handleBackgroundCommand/handleSessions/handleClear`
 - Delivers `OrchestratorResponse` to Telegram via `onResponse` callback (files, text, buttons)
-- Owns CronScheduler, wires its `onJob` to `orchestrator.handleCron`
+- Owns Scheduler, wires its `onJob` to `orchestrator.handleCron`
 - Only module that imports Grammy/Telegram
 
 ### Orchestrator (Processing Layer)
@@ -70,9 +71,9 @@ App (app.ts)                        — I/O layer: Telegram + Cron
 
 ### Supporting Modules
 
-- `createBot` (telegram.ts) and `createLogger` (logger.ts) — plain functions, thin wrappers with no state
+- `createBot` (telegram.ts), `createLogger` (logger.ts), `history.ts` — plain functions, thin wrappers with no state
 - All classes use runtime private fields (`#`) for encapsulation
-- `Claude` holds stable config (workspace, jsonSchema); per-request params go on `run()`
+- `Claude` holds stable config (workspace, model); spawns `ClaudeProcess` instances via `new/resume/fork`
 
 ## Conventions
 

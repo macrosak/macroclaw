@@ -25,7 +25,7 @@ bunx macroclaw setup
 This runs the setup wizard, which:
 1. Asks for your **Telegram bot token** (from [@BotFather](https://t.me/BotFather))
 2. Starts the bot temporarily so you can send `/chatid` to discover your chat ID
-3. Asks for your **chat ID**, **model** preference, **workspace path**, and optional **OpenAI API key**
+3. Asks for your **chat ID**, **model** preference, **workspace path**, **timezone**, and optional **OpenAI API key**
 4. Saves settings to `~/.macroclaw/settings.json`
 5. Offers to install as a system service — this installs macroclaw globally (`bun install -g`), registers it as a **launchd** agent (macOS) or **systemd** unit (Linux), and starts the bridge automatically
 
@@ -43,9 +43,12 @@ Settings are stored in `~/.macroclaw/settings.json` and validated on startup.
 | `chatId`       | `AUTHORIZED_CHAT_ID`   | —                          | Yes      |
 | `model`        | `MODEL`                | `sonnet`                   | No       |
 | `workspace`    | `WORKSPACE`            | `~/.macroclaw-workspace`   | No       |
+| `timezone`     | `TIMEZONE`             | `UTC`                      | No       |
 | `openaiApiKey` | `OPENAI_API_KEY`       | —                          | No       |
-| `logLevel`     | `LOG_LEVEL`            | `debug`                    | No       |
+| `logLevel`     | `LOG_LEVEL`            | `info`                     | No       |
 | `pinoramaUrl`  | `PINORAMA_URL`         | —                          | No       |
+
+**`timezone`** sets the agent's local timezone (IANA format, e.g. `Europe/Prague`, `America/New_York`). Used for the agent's clock display and scheduled event timing.
 
 **`openaiApiKey`** is used for voice message transcription via [OpenAI Whisper](https://platform.openai.com/docs/guides/speech-to-text). Without it, voice messages are ignored.
 
@@ -66,7 +69,10 @@ Run `macroclaw --help` or `macroclaw <command> --help` for the complete referenc
 | `macroclaw service uninstall` | Stop and remove the system service |
 | `macroclaw service start` | Start the system service |
 | `macroclaw service stop` | Stop the system service |
+| `macroclaw service restart` | Restart the system service |
 | `macroclaw service update` | Reinstall latest version and restart |
+| `macroclaw service status` | Show service installation and running status |
+| `macroclaw service logs` | Print the command to view service logs |
 
 ### Running as a service
 
@@ -80,7 +86,7 @@ macroclaw service install
 
 Both paths install macroclaw globally via `bun install -g`, register it as a **launchd** agent (macOS) or **systemd** unit (Linux) with auto-restart, and start the bridge.
 
-On Linux, the command runs as a normal user. Only the privileged operations (writing to `/etc/systemd/system/`, systemctl commands) are elevated via `sudo`, which prompts for a password when needed. Package installation and path resolution stay in the user's environment.
+On Linux, the service is installed as a **systemd user unit** (`~/.config/systemd/user/`). Only `loginctl enable-linger` is elevated via `sudo` (so the service runs without an active login session). All other operations run unprivileged.
 
 ## Docker
 
