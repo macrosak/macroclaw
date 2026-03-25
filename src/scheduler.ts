@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CronExpressionParser } from "cron-parser";
+import { DateTime } from "luxon";
 import { z } from "zod/v4";
 import { createLogger } from "./logger";
 
@@ -27,6 +28,7 @@ export interface MissedInfo {
 }
 
 export interface SchedulerConfig {
+	timezone: string;
 	onJob: (name: string, prompt: string, model?: string, missed?: MissedInfo) => void;
 }
 
@@ -37,11 +39,13 @@ export class Scheduler {
 	#lastMinute = -1;
 	#schedulePath: string;
 	#config: SchedulerConfig;
+	#timezone: string;
 	#timer: Timer | null = null;
 
 	constructor(workspace: string, config: SchedulerConfig) {
 		this.#schedulePath = join(workspace, "data", "schedule.json");
 		this.#config = config;
+		this.#timezone = config.timezone;
 	}
 
 	start(): void {
@@ -116,7 +120,7 @@ export class Scheduler {
 
 	#evaluateCronJob(job: { name: string; cron: string; prompt: string; model?: string }, now: Date): void {
 		try {
-			const interval = CronExpressionParser.parse(job.cron);
+			const interval = CronExpressionParser.parse(job.cron, { tz: this.#timezone });
 			const prev = interval.prev();
 			const diff = Math.abs(now.getTime() - prev.getTime());
 			if (diff < 60_000) {
@@ -128,11 +132,22 @@ export class Scheduler {
 		}
 	}
 
+	/** Parse a fireAt string, interpreting offset-less timestamps in the given timezone. */
+	static #parseFireAt(fireAt: string, timezone: string): Date {
+		const probe = DateTime.fromISO(fireAt, { setZone: true });
+		if (probe.isValid && probe.isOffsetFixed) {
+			// Has explicit offset (Z, +HH:MM, etc.) — use as-is
+			return probe.toJSDate();
+		}
+		// No offset — interpret as local time in the configured timezone
+		return DateTime.fromISO(fireAt, { zone: timezone }).toJSDate();
+	}
+
 	#evaluateFireAtJob(
 		job: { name: string; fireAt: string; prompt: string; model?: string },
 		now: Date,
 	): "remove" | "keep" {
-		const fireAt = new Date(job.fireAt);
+		const fireAt = Scheduler.#parseFireAt(job.fireAt, this.#timezone);
 		if (Number.isNaN(fireAt.getTime())) {
 			log.warn({ name: job.name, fireAt: job.fireAt }, "Invalid fireAt date");
 			return "keep";

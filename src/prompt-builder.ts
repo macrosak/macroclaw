@@ -1,4 +1,6 @@
-export const SYSTEM_PROMPT = `\
+import { DateTime } from "luxon";
+
+const SYSTEM_PROMPT_BASE = `\
 AI assistant running in macroclaw, an autonomous agent platform. \
 Persistent workspace at cwd with config, memory, skills. \
 Refer to workspace CLAUDE.md for identity, personality, conventions.
@@ -16,6 +18,7 @@ Architecture: message bridge connecting chat interface and scheduled tasks. \
 Persistent session — conversation history carries across messages. Workspace persists across sessions.
 
 Event format: every incoming message is wrapped in an <event> XML block. Attributes:
+- time — local time when the event was created (ISO 8601, minute precision).
 - name — short identifier for this event (e.g. "check-logs", "cron-daily").
 - type — what triggered this event. One of:
   - user-message — direct user message. Content in <text>, optional <files>.
@@ -65,12 +68,6 @@ Use "silent" when check finds nothing new, "send" when noteworthy.
 MessageButtons: include a buttons field (flat array of label strings) to attach inline buttons below your message. \
 Each button gets its own row. Max 27 characters per label — if options need more detail, describe them in the message and use short labels on buttons.`;
 
-// --- Event builder ---
-
-function escapeXml(text: string): string {
-  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-
 interface BuildXmlFields {
   text?: string;
   files?: string[];
@@ -84,101 +81,120 @@ interface BuildXmlFields {
   result?: { text: string; files?: string[] };
 }
 
-function buildXml(name: string, type: string, session: string, fields: BuildXmlFields): string {
-  const lines: string[] = [
-    `<event name="${escapeXml(name)}" type="${type}" session="${session}">`,
-  ];
+export class PromptBuilder {
+  readonly #timezone: string;
 
-  if (fields.backgroundedEvent) {
-    lines.push(`<backgrounded-event name="${escapeXml(fields.backgroundedEvent)}" />`);
+  constructor(timezone: string) {
+    this.#timezone = timezone;
   }
 
-  if (fields.schedule) {
-    const attrs = [`name="${escapeXml(fields.schedule.name)}"`];
-    if (fields.schedule.missedBy) attrs.push(`missed-by="${escapeXml(fields.schedule.missedBy)}"`);
-    if (fields.schedule.scheduledAt) attrs.push(`scheduled-at="${escapeXml(fields.schedule.scheduledAt)}"`);
-    lines.push(`<schedule ${attrs.join(" ")} />`);
+  get systemPrompt(): string {
+    return `${SYSTEM_PROMPT_BASE}\n\nTimezone: ${this.#timezone}. TZ env var is set — \`date\` and other CLI tools return local time.`;
   }
 
-  if (fields.originalEvent) {
-    lines.push(`<original-event name="${escapeXml(fields.originalEvent)}" />`);
+  #localTime(): string {
+    return DateTime.now().setZone(this.#timezone).toFormat("yyyy-MM-dd'T'HH:mm");
   }
 
-  if (fields.targetEvent) {
-    lines.push(`<target-event name="${escapeXml(fields.targetEvent)}" />`);
+  static #escapeXml(text: string): string {
+    return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
 
-  if (fields.progress) {
-    lines.push(`<progress>${escapeXml(fields.progress)}</progress>`);
-  }
+  static #buildXml(name: string, type: string, session: string, time: string, fields: BuildXmlFields): string {
+    const esc = PromptBuilder.#escapeXml;
+    const lines: string[] = [
+      `<event time="${time}" name="${esc(name)}" type="${type}" session="${session}">`,
+    ];
 
-  if (fields.result) {
-    lines.push("<result>");
-    lines.push(`<text>${escapeXml(fields.result.text)}</text>`);
-    if (fields.result.files?.length) {
+    if (fields.backgroundedEvent) {
+      lines.push(`<backgrounded-event name="${esc(fields.backgroundedEvent)}" />`);
+    }
+
+    if (fields.schedule) {
+      const attrs = [`name="${esc(fields.schedule.name)}"`];
+      if (fields.schedule.missedBy) attrs.push(`missed-by="${esc(fields.schedule.missedBy)}"`);
+      if (fields.schedule.scheduledAt) attrs.push(`scheduled-at="${esc(fields.schedule.scheduledAt)}"`);
+      lines.push(`<schedule ${attrs.join(" ")} />`);
+    }
+
+    if (fields.originalEvent) {
+      lines.push(`<original-event name="${esc(fields.originalEvent)}" />`);
+    }
+
+    if (fields.targetEvent) {
+      lines.push(`<target-event name="${esc(fields.targetEvent)}" />`);
+    }
+
+    if (fields.progress) {
+      lines.push(`<progress>${esc(fields.progress)}</progress>`);
+    }
+
+    if (fields.result) {
+      lines.push("<result>");
+      lines.push(`<text>${esc(fields.result.text)}</text>`);
+      if (fields.result.files?.length) {
+        lines.push("<files>");
+        for (const f of fields.result.files) {
+          lines.push(`  <file path="${esc(f)}" />`);
+        }
+        lines.push("</files>");
+      }
+      lines.push("</result>");
+    }
+
+    if (fields.button) {
+      lines.push(`<button>${esc(fields.button)}</button>`);
+    }
+
+    if (fields.text) {
+      lines.push(`<text>${esc(fields.text)}</text>`);
+    }
+
+    if (fields.files?.length) {
       lines.push("<files>");
-      for (const f of fields.result.files) {
-        lines.push(`  <file path="${escapeXml(f)}" />`);
+      for (const f of fields.files) {
+        lines.push(`  <file path="${esc(f)}" />`);
       }
       lines.push("</files>");
     }
-    lines.push("</result>");
-  }
 
-  if (fields.button) {
-    lines.push(`<button>${escapeXml(fields.button)}</button>`);
-  }
-
-  if (fields.text) {
-    lines.push(`<text>${escapeXml(fields.text)}</text>`);
-  }
-
-  if (fields.files?.length) {
-    lines.push("<files>");
-    for (const f of fields.files) {
-      lines.push(`  <file path="${escapeXml(f)}" />`);
+    if (fields.instructions) {
+      lines.push(`<instructions>${esc(fields.instructions)}</instructions>`);
     }
-    lines.push("</files>");
+
+    lines.push("</event>");
+    return lines.join("\n");
   }
 
-  if (fields.instructions) {
-    lines.push(`<instructions>${escapeXml(fields.instructions)}</instructions>`);
+  userMessage(name: string, text: string, opts?: { files?: string[]; backgroundedEvent?: string }): string {
+    return PromptBuilder.#buildXml(name, "user-message", "main", this.#localTime(), { text, files: opts?.files, backgroundedEvent: opts?.backgroundedEvent });
   }
 
-  lines.push("</event>");
-  return lines.join("\n");
-}
+  buttonClick(name: string, button: string, opts?: { backgroundedEvent?: string }): string {
+    return PromptBuilder.#buildXml(name, "button-click", "main", this.#localTime(), { button, backgroundedEvent: opts?.backgroundedEvent });
+  }
 
-// --- Per-type event builders ---
+  scheduleTrigger(name: string, schedule: { name: string; missedBy?: string; scheduledAt?: string }, text: string): string {
+    return PromptBuilder.#buildXml(name, "schedule-trigger", "background", this.#localTime(), { schedule, text });
+  }
 
-export function userMessageEvent(name: string, text: string, opts?: { files?: string[]; backgroundedEvent?: string }): string {
-  return buildXml(name, "user-message", "main", { text, files: opts?.files, backgroundedEvent: opts?.backgroundedEvent });
-}
+  backgroundAgentStart(name: string, text: string): string {
+    return PromptBuilder.#buildXml(name, "background-agent-start", "background", this.#localTime(), { text });
+  }
 
-export function buttonClickEvent(name: string, button: string, opts?: { backgroundedEvent?: string }): string {
-  return buildXml(name, "button-click", "main", { button, backgroundedEvent: opts?.backgroundedEvent });
-}
+  backgroundAgentResult(name: string, originalEvent: string, result: { text: string; files?: string[] }, instructions: string, opts?: { backgroundedEvent?: string }): string {
+    return PromptBuilder.#buildXml(name, "background-agent-result", "main", this.#localTime(), { originalEvent, result, instructions, backgroundedEvent: opts?.backgroundedEvent });
+  }
 
-export function scheduleTriggerEvent(name: string, schedule: { name: string; missedBy?: string; scheduledAt?: string }, text: string): string {
-  return buildXml(name, "schedule-trigger", "background", { schedule, text });
-}
+  backgroundAgentProgress(name: string, originalEvent: string, progress: string, instructions: string, opts?: { backgroundedEvent?: string }): string {
+    return PromptBuilder.#buildXml(name, "background-agent-progress", "main", this.#localTime(), { originalEvent, progress, instructions, backgroundedEvent: opts?.backgroundedEvent });
+  }
 
-export function backgroundAgentStartEvent(name: string, text: string): string {
-  return buildXml(name, "background-agent-start", "background", { text });
-}
+  peek(name: string, targetEvent: string, instructions: string): string {
+    return PromptBuilder.#buildXml(name, "peek", "background", this.#localTime(), { targetEvent, instructions });
+  }
 
-export function backgroundAgentResultEvent(name: string, originalEvent: string, result: { text: string; files?: string[] }, instructions: string, opts?: { backgroundedEvent?: string }): string {
-  return buildXml(name, "background-agent-result", "main", { originalEvent, result, instructions, backgroundedEvent: opts?.backgroundedEvent });
-}
-
-export function backgroundAgentProgressEvent(name: string, originalEvent: string, progress: string, instructions: string, opts?: { backgroundedEvent?: string }): string {
-  return buildXml(name, "background-agent-progress", "main", { originalEvent, progress, instructions, backgroundedEvent: opts?.backgroundedEvent });
-}
-
-export function peekEvent(name: string, targetEvent: string, instructions: string): string {
-  return buildXml(name, "peek", "background", { targetEvent, instructions });
-}
-
-export function healthCheckEvent(name: string, targetEvent: string, instructions: string): string {
-  return buildXml(name, "health-check", "background", { targetEvent, instructions });
+  healthCheck(name: string, targetEvent: string, instructions: string): string {
+    return PromptBuilder.#buildXml(name, "health-check", "background", this.#localTime(), { targetEvent, instructions });
+  }
 }

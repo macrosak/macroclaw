@@ -11,7 +11,8 @@ export interface AppConfig {
   botToken: string;
   authorizedChatId: string;
   workspace: string;
-  model?: string;
+  model: string;
+  timezone: string;
   settingsDir?: string;
   claude?: Claude;
   stt?: SpeechToText;
@@ -29,6 +30,7 @@ export class App {
     this.#orchestrator = new Orchestrator({
       model: config.model,
       workspace: config.workspace,
+      timezone: config.timezone,
       settingsDir: config.settingsDir,
       claude: config.claude,
       healthCheckInterval: config.healthCheckInterval,
@@ -49,6 +51,7 @@ export class App {
   start() {
     log.info("Starting macroclaw...");
     const scheduler = new Scheduler(this.#config.workspace, {
+      timezone: this.#config.timezone,
       onJob: (name, prompt, model, missed) => this.#orchestrator.handleCron(name, prompt, model, missed),
     });
     scheduler.start();

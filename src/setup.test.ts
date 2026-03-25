@@ -79,7 +79,7 @@ function createMockIO(inputs: string[]): SetupIo & { written: string[] } {
 }
 
 // Save/restore env vars
-const envVars = ["TELEGRAM_BOT_TOKEN", "AUTHORIZED_CHAT_ID", "MODEL", "WORKSPACE", "OPENAI_API_KEY", "LOG_LEVEL"];
+const envVars = ["TELEGRAM_BOT_TOKEN", "AUTHORIZED_CHAT_ID", "MODEL", "WORKSPACE", "TIMEZONE", "OPENAI_API_KEY", "LOG_LEVEL"];
 const savedEnv: Record<string, string | undefined> = {};
 
 beforeEach(() => {
@@ -107,12 +107,13 @@ afterEach(() => {
 describe("SetupWizard", () => {
   it("collects all required fields via prompts", async () => {
     const io = createMockIO([
-      "123:ABC",   // bot token
-      "12345678",  // chat ID
-      "opus",      // model
-      "/my/ws",    // workspace
-      "sk-test",   // openai key
-      "",          // no service install
+      "123:ABC",        // bot token
+      "12345678",       // chat ID
+      "opus",           // model
+      "/my/ws",         // workspace
+      "Europe/Prague",  // timezone
+      "sk-test",        // openai key
+      "",               // no service install
     ]);
 
     const settings = await runSetup(io);
@@ -121,6 +122,7 @@ describe("SetupWizard", () => {
     expect(settings.chatId).toBe("12345678");
     expect(settings.model).toBe("opus");
     expect(settings.workspace).toBe("/my/ws");
+    expect(settings.timezone).toBe("Europe/Prague");
     expect(settings.openaiApiKey).toBe("sk-test");
     expect(settings.logLevel).toBe("info");
   });
@@ -130,6 +132,7 @@ describe("SetupWizard", () => {
     process.env.AUTHORIZED_CHAT_ID = "99887766";
     process.env.MODEL = "haiku";
     process.env.WORKSPACE = "/env/ws";
+    process.env.TIMEZONE = "America/New_York";
     process.env.OPENAI_API_KEY = "sk-env";
 
     const io = createMockIO([
@@ -137,6 +140,7 @@ describe("SetupWizard", () => {
       "",  // accept default chat ID
       "",  // accept default model
       "",  // accept default workspace
+      "",  // accept default timezone
       "",  // accept default openai key
       "",  // no service install
     ]);
@@ -147,6 +151,7 @@ describe("SetupWizard", () => {
     expect(settings.chatId).toBe("99887766");
     expect(settings.model).toBe("haiku");
     expect(settings.workspace).toBe("/env/ws");
+    expect(settings.timezone).toBe("America/New_York");
     expect(settings.openaiApiKey).toBe("sk-env");
   });
 
@@ -156,6 +161,7 @@ describe("SetupWizard", () => {
       "123",
       "",       // press enter for default model
       "",       // press enter for default workspace
+      "",       // press enter for default timezone
       "",       // press enter for no openai key
       "",       // no service install
     ]);
@@ -173,6 +179,7 @@ describe("SetupWizard", () => {
       "123",
       "",
       "",
+      "",  // timezone
       "",
       "",  // no service install
     ]);
@@ -196,6 +203,7 @@ describe("SetupWizard", () => {
       "good-token",  // second attempt — succeeds
       "123",
       "",
+      "",  // timezone
       "",
       "",
       "",  // no service install
@@ -213,6 +221,7 @@ describe("SetupWizard", () => {
       "actual-token",
       "123",
       "",
+      "",  // timezone
       "",
       "",
       "",  // no service install
@@ -229,6 +238,7 @@ describe("SetupWizard", () => {
       "",        // empty — re-prompt
       "456",
       "",
+      "",  // timezone
       "",
       "",
       "",  // no service install
@@ -245,6 +255,7 @@ describe("SetupWizard", () => {
       "not-a-number",  // invalid — re-prompt
       "456",
       "",
+      "",  // timezone
       "",
       "",
       "",  // no service install
@@ -263,6 +274,7 @@ describe("SetupWizard", () => {
       "xxx",     // invalid — re-prompt
       "opus",    // valid
       "",
+      "",  // timezone
       "",
       "",  // no service install
     ]);
@@ -279,6 +291,7 @@ describe("SetupWizard", () => {
       "123",
       "",
       "",
+      "",  // timezone
       "",
       "",  // no service install
     ]);
@@ -297,6 +310,7 @@ describe("SetupWizard", () => {
       "123",
       "",
       "",
+      "",  // timezone
       "",
       "",  // no service install
     ]);
@@ -317,6 +331,7 @@ it("installs service when user answers yes", async () => {
       "123",
       "",
       "",
+      "",  // timezone
       "",
       "y",
       "sk-test-token",  // oauth token (macOS)
@@ -336,6 +351,7 @@ it("installs service when user answers yes", async () => {
       "123",
       "",
       "",
+      "",  // timezone
       "",
       "n",  // no to service install
     ]);
@@ -353,6 +369,7 @@ it("installs service when user answers yes", async () => {
       "123",
       "",
       "",
+      "",  // timezone
       "",
       "y",
       "",  // empty oauth token
@@ -373,6 +390,7 @@ it("installs service when user answers yes", async () => {
       "123",
       "",
       "",
+      "",  // timezone
       "",
       "yes",
       "sk-test-token",  // oauth token (macOS)

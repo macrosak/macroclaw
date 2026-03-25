@@ -10,17 +10,7 @@ import {
 import { writeHistoryPrompt, writeHistoryResult } from "./history";
 import { createLogger } from "./logger";
 import { generateName } from "./naming";
-import {
-  backgroundAgentProgressEvent,
-  backgroundAgentResultEvent,
-  backgroundAgentStartEvent,
-  buttonClickEvent,
-  healthCheckEvent,
-  peekEvent,
-  SYSTEM_PROMPT,
-  scheduleTriggerEvent,
-  userMessageEvent,
-} from "./prompts";
+import { PromptBuilder } from "./prompt-builder";
 import { Queue } from "./queue";
 import { loadSessions, saveSessions } from "./sessions";
 
@@ -100,8 +90,9 @@ interface SessionInfo {
 }
 
 export interface OrchestratorConfig {
-  model?: string;
+  model: string;
   workspace: string;
+  timezone: string;
   settingsDir?: string;
   onResponse: (response: OrchestratorResponse) => Promise<void>;
   claude?: Claude;
@@ -116,6 +107,7 @@ export interface OrchestratorConfig {
 export class Orchestrator {
   #config: Omit<OrchestratorConfig , 'claude'>;
   #claude: Claude;
+  #prompts: PromptBuilder;
   #waitThreshold: number;
   #healthCheckInterval: number;
   #healthCheckTimeout: number;
@@ -127,7 +119,9 @@ export class Orchestrator {
 
   constructor(config: OrchestratorConfig) {
     this.#config = config;
-    this.#claude = config.claude ?? new Claude({ workspace: config.workspace, systemPrompt: SYSTEM_PROMPT });
+    this.#prompts = new PromptBuilder(config.timezone);
+    const envVars: Record<string, string> = { TZ: config.timezone };
+    this.#claude = config.claude ?? new Claude({ workspace: config.workspace, systemPrompt: this.#prompts.systemPrompt, envVars });
     this.#waitThreshold = config.waitThreshold ?? WAIT_THRESHOLD;
     this.#healthCheckInterval = config.healthCheckInterval ?? HEALTH_CHECK_INTERVAL_MS;
     this.#healthCheckTimeout = config.healthCheckTimeout ?? HEALTH_CHECK_TIMEOUT_MS;
@@ -149,7 +143,7 @@ export class Orchestrator {
 
   handleCron(name: string, prompt: string, model?: string, missed?: { missedBy: string; scheduledAt: string }): void {
     const cronName = `cron-${name}`;
-    const formatted = scheduleTriggerEvent(
+    const formatted = this.#prompts.scheduleTrigger(
       cronName,
       { name, missedBy: missed?.missedBy, scheduledAt: missed?.scheduledAt },
       prompt,
@@ -220,7 +214,7 @@ export class Orchestrator {
     this.#callOnResponse({ message: `Peeking at <b>${escapeHtml(session.name)}</b>...` });
 
     try {
-      const prompt = peekEvent(
+      const prompt = this.#prompts.peek(
         `peek-${session.name}`,
         session.name,
         `Only consider progress since the "${session.name}" event. Brief status update: done, in progress, remaining. 2-3 sentences max, plain text.`,
@@ -438,9 +432,9 @@ export class Orchestrator {
   #formatPrompt(request: OrchestratorRequest, name: string, backgroundedEvent?: string): string {
     switch (request.type) {
       case "user":
-        return userMessageEvent(name, request.message || "", { files: request.files, backgroundedEvent });
+        return this.#prompts.userMessage(name, request.message || "", { files: request.files, backgroundedEvent });
       case "background-agent-result":
-        return backgroundAgentResultEvent(
+        return this.#prompts.backgroundAgentResult(
           name,
           request.name,
           { text: request.response.message || "[No output]", files: request.response.files },
@@ -448,7 +442,7 @@ export class Orchestrator {
           { backgroundedEvent },
         );
       case "background-agent-progress":
-        return backgroundAgentProgressEvent(
+        return this.#prompts.backgroundAgentProgress(
           name,
           request.name,
           request.progress,
@@ -456,7 +450,7 @@ export class Orchestrator {
           { backgroundedEvent },
         );
       case "button":
-        return buttonClickEvent(name, request.label, { backgroundedEvent });
+        return this.#prompts.buttonClick(name, request.label, { backgroundedEvent });
     }
   }
 
@@ -491,7 +485,7 @@ export class Orchestrator {
   // --- Background management ---
 
   #spawnBackground(name: string, prompt: string, model: string | undefined) {
-    const formatted = backgroundAgentStartEvent(name, prompt);
+    const formatted = this.#prompts.backgroundAgentStart(name, prompt);
     this.#spawnBackgroundRaw(name, prompt, formatted, model);
   }
 
@@ -555,7 +549,7 @@ export class Orchestrator {
 
     log.debug({ name: info.name, sessionId }, "Running health check");
 
-    const prompt = healthCheckEvent(
+    const prompt = this.#prompts.healthCheck(
       `health-check-${info.name}`,
       info.name,
       "Report your current status. If your task is complete, set finished=true and provide the full output. If still working, set finished=false and describe current progress in one sentence.",

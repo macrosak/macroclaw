@@ -40,6 +40,7 @@ export async function start(): Promise<void> {
     authorizedChatId: resolved.chatId,
     workspace,
     model: resolved.model,
+    timezone: resolved.timezone,
     stt: resolved.openaiApiKey ? new SpeechToText(resolved.openaiApiKey) : undefined,
   };
 

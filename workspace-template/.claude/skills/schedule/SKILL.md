@@ -19,7 +19,7 @@ Schedule a new event by adding it to `data/schedule.json`.
 1. Run `date` to get the current date and time
 2. Read `data/schedule.json` (create with `{"jobs": []}` if missing)
 3. Determine job type:
-   - **Recurring** → convert to a cron expression (UTC). See reference below.
+   - **Recurring** → convert to a cron expression in local time. See reference below.
    - **One-time** → compute an ISO 8601 timestamp with the user's timezone offset for `fireAt`
 4. **Be proactive about timing**: if the user says "next week" or "tomorrow" without a specific time, pick the best time based on what you know (their routine, calendar, context)
 5. Append the new job to the `jobs` array
@@ -30,14 +30,16 @@ Schedule a new event by adding it to `data/schedule.json`.
 
 The user's timezone is in their profile (CLAUDE.md/USER.md).
 
-**One-time events** use `fireAt` with the user's timezone offset:
-- "in 5 minutes" → compute exact time, e.g. `"fireAt": "2026-03-16T10:05:00+01:00"`
-- "tomorrow at 10am" → `"fireAt": "2026-03-14T10:00:00+01:00"`
-- "next Monday" → `"fireAt": "2026-03-17T09:00:00+01:00"` (pick a sensible time)
+**One-time events** use `fireAt` in local time (no offset needed — interpreted in the configured timezone):
+- "in 5 minutes" → compute exact time, e.g. `"fireAt": "2026-03-16T10:05:00"`
+- "tomorrow at 10am" → `"fireAt": "2026-03-14T10:00:00"`
+- "next Monday" → `"fireAt": "2026-03-17T09:00:00"` (pick a sensible time)
 
-**Recurring events** use `cron` in UTC:
-- "every morning" → `"cron": "0 7 * * *"` (adjust for timezone)
-- "every weekday at 9" → `"cron": "0 7 * * 1-5"` (UTC)
+Only add a timezone offset when the event targets a different timezone than the configured one (e.g. the user is traveling or scheduling for another location).
+
+**Recurring events** use `cron` in local time:
+- "every morning" → `"cron": "0 7 * * *"`
+- "every weekday at 9" → `"cron": "0 9 * * 1-5"`
 - "every 30 minutes" → `"cron": "*/30 * * * *"`
 
 ## schedule.json format
@@ -60,7 +62,7 @@ Two job types, discriminated by field:
     },
     {
       "name": "dentist-reminder",
-      "fireAt": "2026-03-15T08:00:00+01:00",
+      "fireAt": "2026-03-15T08:00:00",
       "prompt": "Reminder: call the dentist to reschedule your appointment"
     }
   ]
@@ -72,14 +74,14 @@ Two job types, discriminated by field:
 | Field | Required | Description |
 |-------|----------|-------------|
 | `name` | yes | Short kebab-case identifier (e.g. `dentist-reminder`). Appears in the `[Context: cron/<name>]` prefix when fired. |
-| `cron` | for recurring | Standard cron expression (UTC). See reference below. |
-| `fireAt` | for one-time | ISO 8601 timestamp, preferably with timezone offset (e.g. `2026-03-15T08:00:00+01:00`). Any format parseable by JavaScript `Date` works. |
+| `cron` | for recurring | Standard cron expression (local time). See reference below. |
+| `fireAt` | for one-time | ISO 8601 timestamp (e.g. `2026-03-15T08:00:00`). Can include a timezone offset (e.g. `2026-03-15T08:00:00+01:00`); without one, the time is interpreted in the configured timezone. |
 | `prompt` | yes | The message sent to the agent when the event fires. Write it as a natural instruction. |
 | `model` | no | Override the model. Use `haiku` for cheap checks, `opus` for complex reasoning. Omit for default. |
 
 Each job must have exactly one of `cron` or `fireAt` (not both).
 
-## Cron expression reference (UTC)
+## Cron expression reference (local time)
 
 ```
 ┌───────── minute (0-59)
@@ -92,11 +94,11 @@ Each job must have exactly one of `cron` or `fireAt` (not both).
 ```
 
 Common patterns:
-- `0 9 * * *` — daily at 9:00 UTC
-- `0 7 * * 1-5` — weekdays at 7:00 UTC
+- `0 9 * * *` — daily at 9:00
+- `0 7 * * 1-5` — weekdays at 7:00
 - `*/30 * * * *` — every 30 minutes
 - `0 */2 * * *` — every 2 hours
-- `0 9,18 * * *` — at 9:00 and 18:00 UTC
+- `0 9,18 * * *` — at 9:00 and 18:00
 
 ## Notes
 
