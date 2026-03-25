@@ -75,6 +75,11 @@ export class Cli {
 				console.log(`Service started. Check logs:\n  ${logCmd}`);
 				break;
 			}
+			case "restart": {
+				const logCmd = this.#serviceManager.restart();
+				console.log(`Service restarted. Check logs:\n  ${logCmd}`);
+				break;
+			}
 			case "status": {
 				const s = this.#serviceManager.status();
 				const lines = [
@@ -173,6 +178,11 @@ const serviceStatusCommand = defineCommand({
 	run: () => { try { defaultCli.service("status"); } catch (err) { handleError(err); } },
 });
 
+const serviceRestartCommand = defineCommand({
+	meta: { name: "restart", description: "Restart the service" },
+	run: () => { try { defaultCli.service("restart"); } catch (err) { handleError(err); } },
+});
+
 const serviceLogsCommand = defineCommand({
 	meta: { name: "logs", description: "Print the command to view service logs" },
 	args: {
@@ -188,6 +198,7 @@ const serviceCommand = defineCommand({
 		uninstall: serviceUninstallCommand,
 		start: serviceStartCommand,
 		stop: serviceStopCommand,
+		restart: serviceRestartCommand,
 		update: serviceUpdateCommand,
 		status: serviceStatusCommand,
 		logs: serviceLogsCommand,

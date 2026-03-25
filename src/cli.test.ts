@@ -133,6 +133,7 @@ function mockService(overrides?: Record<string, unknown>): SystemServiceManager 
 		uninstall: mock(() => {}),
 		start: mock(() => ""),
 		stop: mock(() => {}),
+		restart: mock(() => ""),
 		update: mock(() => ({ previousVersion: "0.6.0", currentVersion: "0.7.0" })),
 		isRunning: false,
 		status: mock(() => ({ installed: false, running: false, platform: "systemd" as const })),
@@ -168,6 +169,13 @@ describe("Cli.service", () => {
 		const cli = new Cli({ systemService: mockService({ stop }) });
 		cli.service("stop");
 		expect(stop).toHaveBeenCalled();
+	});
+
+	it("runs restart action", () => {
+		const restart = mock(() => "tail -f /logs");
+		const cli = new Cli({ systemService: mockService({ restart }) });
+		cli.service("restart");
+		expect(restart).toHaveBeenCalled();
 	});
 
 	it("runs update action — stops and starts when running", () => {
