@@ -82,18 +82,18 @@ interface BuildXmlFields {
 }
 
 export class PromptBuilder {
-  readonly #timezone: string;
+  readonly #timeZone: string;
 
-  constructor(timezone: string) {
-    this.#timezone = timezone;
+  constructor(timeZone: string) {
+    this.#timeZone = timeZone;
   }
 
   get systemPrompt(): string {
-    return `${SYSTEM_PROMPT_BASE}\n\nTimezone: ${this.#timezone}. TZ env var is set — \`date\` and other CLI tools return local time.`;
+    return `${SYSTEM_PROMPT_BASE}\n\nTimezone: ${this.#timeZone}. TZ env var is set — \`date\` and other CLI tools return local time.`;
   }
 
   #localTime(): string {
-    return DateTime.now().setZone(this.#timezone).toFormat("yyyy-MM-dd'T'HH:mm");
+    return DateTime.now().setZone(this.#timeZone).toFormat("yyyy-MM-dd'T'HH:mm");
   }
 
   static #escapeXml(text: string): string {

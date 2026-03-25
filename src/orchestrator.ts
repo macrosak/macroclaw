@@ -92,7 +92,7 @@ interface SessionInfo {
 export interface OrchestratorConfig {
   model: string;
   workspace: string;
-  timezone: string;
+  timeZone: string;
   settingsDir?: string;
   onResponse: (response: OrchestratorResponse) => Promise<void>;
   claude?: Claude;
@@ -119,8 +119,8 @@ export class Orchestrator {
 
   constructor(config: OrchestratorConfig) {
     this.#config = config;
-    this.#prompts = new PromptBuilder(config.timezone);
-    const envVars: Record<string, string> = { TZ: config.timezone };
+    this.#prompts = new PromptBuilder(config.timeZone);
+    const envVars: Record<string, string> = { TZ: config.timeZone };
     this.#claude = config.claude ?? new Claude({ workspace: config.workspace, systemPrompt: this.#prompts.systemPrompt, envVars });
     this.#waitThreshold = config.waitThreshold ?? WAIT_THRESHOLD;
     this.#healthCheckInterval = config.healthCheckInterval ?? HEALTH_CHECK_INTERVAL_MS;

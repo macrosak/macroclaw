@@ -117,7 +117,7 @@ function makeOrchestrator(claude: Claude, extraConfig?: Partial<OrchestratorConf
   const orch = new Orchestrator({
     workspace: TEST_WORKSPACE,
     model: "sonnet",
-    timezone: "UTC",
+    timeZone: "UTC",
     settingsDir: tmpSettingsDir,
     onResponse,
     claude,
@@ -1156,7 +1156,7 @@ describe("Orchestrator", () => {
       const orch = new Orchestrator({
         workspace: TEST_WORKSPACE,
         model: "sonnet",
-        timezone: "UTC",
+        timeZone: "UTC",
         settingsDir: tmpSettingsDir,
         onResponse: failingOnResponse,
         claude,
