@@ -641,6 +641,50 @@ describe("stop", () => {
 	});
 });
 
+describe("restart", () => {
+	it("throws when service is not installed", () => {
+		const mgr = createManager({ platform: "darwin", home: "/nonexistent" });
+		expect(() => mgr.restart()).toThrow(
+			"Service not installed. Run `macroclaw service install` first.",
+		);
+	});
+
+	it("stops then starts when running (launchd)", () => {
+		const tmpHome = `/tmp/macroclaw-test-restartld-${Date.now()}`;
+		mkdirSync(join(tmpHome, "Library/LaunchAgents"), { recursive: true });
+		writeFileSync(join(tmpHome, "Library/LaunchAgents/com.macroclaw.plist"), "test");
+
+		let stopped = false;
+		mockExecSync.mockImplementation((cmd: string) => {
+			if (cmd.startsWith("launchctl list ")) return stopped ? LAUNCHD_STOPPED : LAUNCHD_RUNNING;
+			if (cmd.includes("launchctl unload")) { stopped = true; return ""; }
+			return "";
+		});
+		const mgr = createManager({ platform: "darwin", home: tmpHome });
+		mgr.restart();
+		expect(mockExecSync).toHaveBeenCalledWith(expect.stringContaining("launchctl unload"), expect.anything());
+		expect(mockExecSync).toHaveBeenCalledWith(expect.stringContaining("launchctl load"), expect.anything());
+		rmSync(tmpHome, { recursive: true });
+	});
+
+	it("skips stop and starts when not running (systemd)", () => {
+		const tmpHome = `/tmp/macroclaw-test-restartsys-${Date.now()}`;
+		const unitDir = join(tmpHome, ".config/systemd/user");
+		mkdirSync(unitDir, { recursive: true });
+		writeFileSync(join(unitDir, "macroclaw.service"), "test");
+
+		mockExecSync.mockImplementation((cmd: string) => {
+			if (cmd === "systemctl --user is-active macroclaw") throw new Error("inactive");
+			return "";
+		});
+		const mgr = createManager({ platform: "linux", home: tmpHome });
+		mgr.restart();
+		expect(mockExecSync).not.toHaveBeenCalledWith("systemctl --user stop macroclaw", expect.anything());
+		expect(mockExecSync).toHaveBeenCalledWith("systemctl --user start macroclaw", expect.anything());
+		rmSync(tmpHome, { recursive: true });
+	});
+});
+
 describe("update", () => {
 	it("throws when service is not installed", () => {
 		const mgr = createManager({ platform: "darwin", home: "/nonexistent" });

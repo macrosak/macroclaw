@@ -171,6 +171,16 @@ export class SystemServiceManager {
 		return this.#logTailCommand();
 	}
 
+	restart(): string {
+		this.#requireInstalled();
+
+		if (this.isRunning) {
+			this.stop();
+		}
+
+		return this.start();
+	}
+
 	stop(): void {
 		this.#requireInstalled();
 
