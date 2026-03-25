@@ -1121,6 +1121,24 @@ describe("Orchestrator", () => {
       expect(responses.some((r) => r.message === "Session cleared.")).toBe(true);
     });
 
+    it("does not deliver error when clear kills a busy main process", async () => {
+      const { process: mainProc, reject } = pendingProcess("main-sid");
+      const claude = mockClaude(() => mainProc);
+      const { orch, responses } = makeOrchestrator(claude);
+
+      orch.handleMessage("hello");
+      await waitForProcessing();
+
+      await orch.handleClear();
+      // Simulate process exit after kill (exit code 143 = SIGTERM)
+      reject(new QueryProcessError(143, ""));
+      await waitForProcessing();
+
+      const messages = responses.map((r) => r.message);
+      expect(messages).toContain("Session cleared.");
+      expect(messages).not.toContainEqual(expect.stringContaining("[Error]"));
+    });
+
     it("creates new session (not resume) for next message after clear", async () => {
       const { process: p1, resolve: r1 } = pendingProcess("first-sid");
       let callCount = 0;

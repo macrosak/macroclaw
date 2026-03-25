@@ -390,11 +390,11 @@ export class Orchestrator {
       },
       async (err) => {
         if (!this.#runningSessions.has(sid)) {
-          log.error({ name, sessionId: sid, err }, "Failed session not in runningSessions — delivering error");
-        } else {
-          this.#clearSession(sid);
-          log.error({ name, sessionId: sid, err }, "Main query failed");
+          log.debug({ name, sessionId: sid }, "Cleared session failed (expected)");
+          return;
         }
+        this.#clearSession(sid);
+        log.error({ name, sessionId: sid, err }, "Main query failed");
         await this.#deliverResponse(this.#errorResponse(err));
       },
     );
