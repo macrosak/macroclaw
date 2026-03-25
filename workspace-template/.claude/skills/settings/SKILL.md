@@ -1,9 +1,9 @@
 ---
 name: settings
-description: "Read or change macroclaw settings (model, timezone). Use when the user asks about current settings, wants to switch the Claude model, change the timezone, or asks what model/timezone is configured."
+description: "Read or change macroclaw settings (model, timeZone). Use when the user asks about current settings, wants to switch the Claude model, change the timezone, or asks what model/timezone is configured."
 ---
 
-Read or change macroclaw settings. Only `model` and `timezone` can be changed through this skill.
+Read or change macroclaw settings. Only `model` and `timeZone` can be changed through this skill.
 
 ## Settings file
 
@@ -11,7 +11,7 @@ Location: `~/.macroclaw/settings.json`
 
 ## Reading settings
 
-When the user asks about current settings ("what model am I on?", "what's the timezone?"):
+When the user asks about current settings ("what model am I on?", "what's the time zone?"):
 
 1. Read `~/.macroclaw/settings.json`
 2. Report the requested value
@@ -20,7 +20,7 @@ When the user asks about current settings ("what model am I on?", "what's the ti
 
 Allowed changes:
 - **model**: `haiku`, `sonnet`, or `opus`
-- **timezone**: any valid IANA timezone (e.g. `Europe/Prague`, `America/New_York`, `UTC`)
+- **timeZone**: any valid IANA timezone (e.g. `Europe/Prague`, `America/New_York`, `UTC`)
 
 All other settings (botToken, chatId, workspace, etc.) cannot be changed through this skill — tell the user to run `macroclaw setup` instead.
 

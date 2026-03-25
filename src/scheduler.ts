@@ -28,7 +28,7 @@ export interface MissedInfo {
 }
 
 export interface SchedulerConfig {
-	timezone: string;
+	timeZone: string;
 	onJob: (name: string, prompt: string, model?: string, missed?: MissedInfo) => void;
 }
 
@@ -39,13 +39,13 @@ export class Scheduler {
 	#lastMinute = -1;
 	#schedulePath: string;
 	#config: SchedulerConfig;
-	#timezone: string;
+	#timeZone: string;
 	#timer: Timer | null = null;
 
 	constructor(workspace: string, config: SchedulerConfig) {
 		this.#schedulePath = join(workspace, "data", "schedule.json");
 		this.#config = config;
-		this.#timezone = config.timezone;
+		this.#timeZone = config.timeZone;
 	}
 
 	start(): void {
@@ -120,7 +120,7 @@ export class Scheduler {
 
 	#evaluateCronJob(job: { name: string; cron: string; prompt: string; model?: string }, now: Date): void {
 		try {
-			const interval = CronExpressionParser.parse(job.cron, { tz: this.#timezone });
+			const interval = CronExpressionParser.parse(job.cron, { tz: this.#timeZone });
 			const prev = interval.prev();
 			const diff = Math.abs(now.getTime() - prev.getTime());
 			if (diff < 60_000) {
@@ -132,22 +132,22 @@ export class Scheduler {
 		}
 	}
 
-	/** Parse a fireAt string, interpreting offset-less timestamps in the given timezone. */
-	static #parseFireAt(fireAt: string, timezone: string): Date {
+	/** Parse a fireAt string, interpreting offset-less timestamps in the given time zone. */
+	static #parseFireAt(fireAt: string, timeZone: string): Date {
 		const probe = DateTime.fromISO(fireAt, { setZone: true });
 		if (probe.isValid && probe.isOffsetFixed) {
 			// Has explicit offset (Z, +HH:MM, etc.) — use as-is
 			return probe.toJSDate();
 		}
-		// No offset — interpret as local time in the configured timezone
-		return DateTime.fromISO(fireAt, { zone: timezone }).toJSDate();
+		// No offset — interpret as local time in the configured time zone
+		return DateTime.fromISO(fireAt, { zone: timeZone }).toJSDate();
 	}
 
 	#evaluateFireAtJob(
 		job: { name: string; fireAt: string; prompt: string; model?: string },
 		now: Date,
 	): "remove" | "keep" {
-		const fireAt = Scheduler.#parseFireAt(job.fireAt, this.#timezone);
+		const fireAt = Scheduler.#parseFireAt(job.fireAt, this.#timeZone);
 		if (Number.isNaN(fireAt.getTime())) {
 			log.warn({ name: job.name, fireAt: job.fireAt }, "Invalid fireAt date");
 			return "keep";

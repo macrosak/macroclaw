@@ -10,7 +10,7 @@ const validSettings: Settings = {
   chatId: "12345678",
   model: "sonnet",
   workspace: "~/.macroclaw-workspace",
-  timezone: "UTC",
+  timeZone: "UTC",
   logLevel: "debug",
 };
 
@@ -40,7 +40,7 @@ describe("SettingsManager.load", () => {
       chatId: "12345678",
       model: "sonnet",
       workspace: "~/.macroclaw-workspace",
-      timezone: "UTC",
+      timeZone: "UTC",
       logLevel: "info",
     });
   });
@@ -52,7 +52,7 @@ describe("SettingsManager.load", () => {
       chatId: " 12345678 ",
       model: " opus ",
       workspace: "  /custom/workspace  ",
-      timezone: "  Europe/Prague  ",
+      timeZone: "  Europe/Prague  ",
       openaiApiKey: "  sk-test  ",
       logLevel: " warn ",
       pinoramaUrl: "  http://localhost:6200  ",
@@ -63,7 +63,7 @@ describe("SettingsManager.load", () => {
       chatId: "12345678",
       model: "opus",
       workspace: "/custom/workspace",
-      timezone: "Europe/Prague",
+      timeZone: "Europe/Prague",
       openaiApiKey: "sk-test",
       logLevel: "warn",
       pinoramaUrl: "http://localhost:6200",
@@ -87,7 +87,7 @@ describe("SettingsManager.load", () => {
       chatId: "123",
       model: "opus",
       workspace: "/custom",
-      timezone: "UTC",
+      timeZone: "UTC",
       openaiApiKey: "sk-test",
       logLevel: "info",
       pinoramaUrl: "http://localhost:6200",
@@ -152,12 +152,12 @@ describe("SettingsManager.load", () => {
     process.exit = origExit;
   });
 
-  it("exits with code 1 when validation fails (invalid timezone)", () => {
+  it("exits with code 1 when validation fails (invalid timeZone)", () => {
     mkdirSync(tmpDir, { recursive: true });
     writeFileSync(join(tmpDir, "settings.json"), JSON.stringify({
       botToken: "tok",
       chatId: "123",
-      timezone: "Europe/Prgaaue",
+      timeZone: "Europe/Prgaaue",
     }));
 
     const mockExit = mock(() => { throw new Error("exit"); });
@@ -283,7 +283,7 @@ describe("SettingsManager.applyEnvOverrides", () => {
     const { settings } = new SettingsManager(tmpDir).applyEnvOverrides(validSettings);
     expect(settings.model).toBe("opus");
     expect(settings.workspace).toBe("/override/path");
-    expect(settings.timezone).toBe("Europe/Prague");
+    expect(settings.timeZone).toBe("Europe/Prague");
     expect(settings.logLevel).toBe("error");
     expect(settings.pinoramaUrl).toBe("http://override:6200");
   });

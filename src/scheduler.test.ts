@@ -73,7 +73,7 @@ describe("Scheduler — cron jobs", () => {
 		});
 
 		const onJob = makeOnJob();
-		const s = new Scheduler(TEST_DIR, { timezone: "UTC", onJob });
+		const s = new Scheduler(TEST_DIR, { timeZone: "UTC", onJob });
 		s.start();
 		s.stop();
 
@@ -86,7 +86,7 @@ describe("Scheduler — cron jobs", () => {
 		});
 
 		const onJob = makeOnJob();
-		const s = new Scheduler(TEST_DIR, { timezone: "UTC", onJob });
+		const s = new Scheduler(TEST_DIR, { timeZone: "UTC", onJob });
 		s.start();
 		s.stop();
 
@@ -102,7 +102,7 @@ describe("Scheduler — cron jobs", () => {
 		});
 
 		const onJob = makeOnJob();
-		const s = new Scheduler(TEST_DIR, { timezone: "UTC", onJob });
+		const s = new Scheduler(TEST_DIR, { timeZone: "UTC", onJob });
 		s.start();
 		s.stop();
 
@@ -119,7 +119,7 @@ describe("Scheduler — cron jobs", () => {
 		});
 
 		const onJob = makeOnJob();
-		const s = new Scheduler(TEST_DIR, { timezone: "UTC", onJob });
+		const s = new Scheduler(TEST_DIR, { timeZone: "UTC", onJob });
 		s.start();
 		s.stop();
 
@@ -134,7 +134,7 @@ describe("Scheduler — cron jobs", () => {
 		});
 
 		const onJob = makeOnJob();
-		const s = new Scheduler(TEST_DIR, { timezone: "UTC", onJob });
+		const s = new Scheduler(TEST_DIR, { timeZone: "UTC", onJob });
 		s.start();
 		s.stop();
 
@@ -147,7 +147,7 @@ describe("Scheduler — cron jobs", () => {
 		});
 
 		const onJob = makeOnJob();
-		const s = new Scheduler(TEST_DIR, { timezone: "UTC", onJob });
+		const s = new Scheduler(TEST_DIR, { timeZone: "UTC", onJob });
 		s.start();
 		s.stop();
 
@@ -164,7 +164,7 @@ describe("Scheduler — fireAt jobs", () => {
 		});
 
 		const onJob = makeOnJob();
-		const s = new Scheduler(TEST_DIR, { timezone: "UTC", onJob });
+		const s = new Scheduler(TEST_DIR, { timeZone: "UTC", onJob });
 		s.start();
 		s.stop();
 
@@ -181,7 +181,7 @@ describe("Scheduler — fireAt jobs", () => {
 		});
 
 		const onJob = makeOnJob();
-		const s = new Scheduler(TEST_DIR, { timezone: "UTC", onJob });
+		const s = new Scheduler(TEST_DIR, { timeZone: "UTC", onJob });
 		s.start();
 		s.stop();
 
@@ -197,7 +197,7 @@ describe("Scheduler — fireAt jobs", () => {
 		});
 
 		const onJob = makeOnJob();
-		const s = new Scheduler(TEST_DIR, { timezone: "UTC", onJob });
+		const s = new Scheduler(TEST_DIR, { timeZone: "UTC", onJob });
 		s.start();
 		s.stop();
 
@@ -214,7 +214,7 @@ describe("Scheduler — fireAt jobs", () => {
 		});
 
 		const onJob = makeOnJob();
-		const s = new Scheduler(TEST_DIR, { timezone: "UTC", onJob });
+		const s = new Scheduler(TEST_DIR, { timeZone: "UTC", onJob });
 		s.start();
 		s.stop();
 
@@ -236,7 +236,7 @@ describe("Scheduler — fireAt jobs", () => {
 		});
 
 		const onJob = makeOnJob();
-		const s = new Scheduler(TEST_DIR, { timezone: "UTC", onJob });
+		const s = new Scheduler(TEST_DIR, { timeZone: "UTC", onJob });
 		s.start();
 		s.stop();
 
@@ -252,7 +252,7 @@ describe("Scheduler — fireAt jobs", () => {
 		});
 
 		const onJob = makeOnJob();
-		const s = new Scheduler(TEST_DIR, { timezone: "UTC", onJob });
+		const s = new Scheduler(TEST_DIR, { timeZone: "UTC", onJob });
 		s.start();
 		s.stop();
 
@@ -273,7 +273,7 @@ describe("Scheduler — fireAt jobs", () => {
 		});
 
 		const onJob = makeOnJob();
-		const s = new Scheduler(TEST_DIR, { timezone: "UTC", onJob });
+		const s = new Scheduler(TEST_DIR, { timeZone: "UTC", onJob });
 		s.start();
 		s.stop();
 
@@ -290,14 +290,14 @@ describe("Scheduler — fireAt jobs", () => {
 		});
 
 		const onJob = makeOnJob();
-		const s = new Scheduler(TEST_DIR, { timezone: "UTC", onJob });
+		const s = new Scheduler(TEST_DIR, { timeZone: "UTC", onJob });
 		s.start();
 		s.stop();
 
 		expect(onJob).toHaveBeenCalledWith("smart", "think", "opus");
 	});
 
-	it("interprets offset-less fireAt in the configured timezone", () => {
+	it("interprets offset-less fireAt in the configured time zone", () => {
 		// Create a fireAt 30 seconds ago in Europe/Prague local time (no offset)
 		const now = new Date();
 		const pragueStr = now.toLocaleString("en-US", { timeZone: "Europe/Prague" });
@@ -312,21 +312,21 @@ describe("Scheduler — fireAt jobs", () => {
 		});
 
 		const onJob = makeOnJob();
-		const s = new Scheduler(TEST_DIR, { timezone: "Europe/Prague", onJob });
+		const s = new Scheduler(TEST_DIR, { timeZone: "Europe/Prague", onJob });
 		s.start();
 		s.stop();
 
 		expect(onJob).toHaveBeenCalledWith("local", "local time", undefined);
 	});
 
-	it("preserves explicit offset in fireAt (ignores configured timezone)", () => {
+	it("preserves explicit offset in fireAt (ignores configured time zone)", () => {
 		// fireAt with explicit +00:00 offset, 30s ago — should fire regardless of configured tz
 		writeScheduleConfig({
 			jobs: [{ name: "explicit", fireAt: justNowFireAt(), prompt: "with offset" }],
 		});
 
 		const onJob = makeOnJob();
-		const s = new Scheduler(TEST_DIR, { timezone: "Asia/Tokyo", onJob });
+		const s = new Scheduler(TEST_DIR, { timeZone: "Asia/Tokyo", onJob });
 		s.start();
 		s.stop();
 
@@ -342,7 +342,7 @@ describe("Scheduler — fireAt jobs", () => {
 		chmodSync(SCHEDULE_FILE, 0o444);
 
 		const onJob = makeOnJob();
-		const s = new Scheduler(TEST_DIR, { timezone: "UTC", onJob });
+		const s = new Scheduler(TEST_DIR, { timeZone: "UTC", onJob });
 		s.start();
 		s.stop();
 
@@ -357,7 +357,7 @@ describe("Scheduler — validation and edge cases", () => {
 		rmSync(SCHEDULE_FILE, { force: true });
 
 		const onJob = makeOnJob();
-		const s = new Scheduler(TEST_DIR, { timezone: "UTC", onJob });
+		const s = new Scheduler(TEST_DIR, { timeZone: "UTC", onJob });
 		s.start();
 		s.stop();
 
@@ -368,7 +368,7 @@ describe("Scheduler — validation and edge cases", () => {
 		writeFileSync(SCHEDULE_FILE, "not json{{{");
 
 		const onJob = makeOnJob();
-		const s = new Scheduler(TEST_DIR, { timezone: "UTC", onJob });
+		const s = new Scheduler(TEST_DIR, { timeZone: "UTC", onJob });
 		s.start();
 		s.stop();
 
@@ -379,7 +379,7 @@ describe("Scheduler — validation and edge cases", () => {
 		writeScheduleConfig({ jobs: "not-array" });
 
 		const onJob = makeOnJob();
-		const s = new Scheduler(TEST_DIR, { timezone: "UTC", onJob });
+		const s = new Scheduler(TEST_DIR, { timeZone: "UTC", onJob });
 		s.start();
 		s.stop();
 
@@ -392,7 +392,7 @@ describe("Scheduler — validation and edge cases", () => {
 		});
 
 		const onJob = makeOnJob();
-		const s = new Scheduler(TEST_DIR, { timezone: "UTC", onJob });
+		const s = new Scheduler(TEST_DIR, { timeZone: "UTC", onJob });
 		s.start();
 		s.stop();
 
@@ -405,7 +405,7 @@ describe("Scheduler — validation and edge cases", () => {
 		});
 
 		const onJob = makeOnJob();
-		const s = new Scheduler(TEST_DIR, { timezone: "UTC", onJob });
+		const s = new Scheduler(TEST_DIR, { timeZone: "UTC", onJob });
 		s.start();
 		s.stop();
 
@@ -420,7 +420,7 @@ describe("Scheduler — validation and edge cases", () => {
 		writeScheduleConfig({ jobs: [] });
 
 		const onJob = makeOnJob();
-		const s = new Scheduler(TEST_DIR, { timezone: "UTC", onJob });
+		const s = new Scheduler(TEST_DIR, { timeZone: "UTC", onJob });
 		s.start();
 		s.stop(); // should not throw
 	});
@@ -431,7 +431,7 @@ describe("Scheduler — validation and edge cases", () => {
 		});
 
 		const onJob = makeOnJob();
-		const s = new Scheduler(TEST_DIR, { timezone: "UTC", onJob });
+		const s = new Scheduler(TEST_DIR, { timeZone: "UTC", onJob });
 		s.start();
 		s.stop();
 
@@ -439,7 +439,7 @@ describe("Scheduler — validation and edge cases", () => {
 
 		// Start again with a new instance — the lastMinute tracker is per-instance
 		const onJob2 = makeOnJob();
-		const s2 = new Scheduler(TEST_DIR, { timezone: "UTC", onJob: onJob2 });
+		const s2 = new Scheduler(TEST_DIR, { timeZone: "UTC", onJob: onJob2 });
 		s2.start();
 		s2.stop();
 
@@ -452,7 +452,7 @@ describe("Scheduler — validation and edge cases", () => {
 		});
 
 		const onJob = makeOnJob();
-		const s = new Scheduler(TEST_DIR, { timezone: "UTC", onJob });
+		const s = new Scheduler(TEST_DIR, { timeZone: "UTC", onJob });
 		s.start();
 		s.stop();
 

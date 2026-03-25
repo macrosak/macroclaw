@@ -43,12 +43,12 @@ Settings are stored in `~/.macroclaw/settings.json` and validated on startup.
 | `chatId`       | `AUTHORIZED_CHAT_ID`   | —                          | Yes      |
 | `model`        | `MODEL`                | `sonnet`                   | No       |
 | `workspace`    | `WORKSPACE`            | `~/.macroclaw-workspace`   | No       |
-| `timezone`     | `TIMEZONE`             | `UTC`                      | No       |
+| `timeZone`     | `TIMEZONE`             | `UTC`                      | No       |
 | `openaiApiKey` | `OPENAI_API_KEY`       | —                          | No       |
 | `logLevel`     | `LOG_LEVEL`            | `info`                     | No       |
 | `pinoramaUrl`  | `PINORAMA_URL`         | —                          | No       |
 
-**`timezone`** sets the agent's local timezone (IANA format, e.g. `Europe/Prague`, `America/New_York`). Used for the agent's clock display and scheduled event timing.
+**`timeZone`** sets the agent's local time zone (IANA format, e.g. `Europe/Prague`, `America/New_York`). Used for the agent's clock display and scheduled event timing.
 
 **`openaiApiKey`** is used for voice message transcription via [OpenAI Whisper](https://platform.openai.com/docs/guides/speech-to-text). Without it, voice messages are ignored.
 

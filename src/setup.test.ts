@@ -122,7 +122,7 @@ describe("SetupWizard", () => {
     expect(settings.chatId).toBe("12345678");
     expect(settings.model).toBe("opus");
     expect(settings.workspace).toBe("/my/ws");
-    expect(settings.timezone).toBe("Europe/Prague");
+    expect(settings.timeZone).toBe("Europe/Prague");
     expect(settings.openaiApiKey).toBe("sk-test");
     expect(settings.logLevel).toBe("info");
   });
@@ -151,7 +151,7 @@ describe("SetupWizard", () => {
     expect(settings.chatId).toBe("99887766");
     expect(settings.model).toBe("haiku");
     expect(settings.workspace).toBe("/env/ws");
-    expect(settings.timezone).toBe("America/New_York");
+    expect(settings.timeZone).toBe("America/New_York");
     expect(settings.openaiApiKey).toBe("sk-env");
   });
 

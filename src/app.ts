@@ -12,7 +12,7 @@ export interface AppConfig {
   authorizedChatId: string;
   workspace: string;
   model: string;
-  timezone: string;
+  timeZone: string;
   settingsDir?: string;
   claude?: Claude;
   stt?: SpeechToText;
@@ -30,7 +30,7 @@ export class App {
     this.#orchestrator = new Orchestrator({
       model: config.model,
       workspace: config.workspace,
-      timezone: config.timezone,
+      timeZone: config.timeZone,
       settingsDir: config.settingsDir,
       claude: config.claude,
       healthCheckInterval: config.healthCheckInterval,
@@ -51,7 +51,7 @@ export class App {
   start() {
     log.info("Starting macroclaw...");
     const scheduler = new Scheduler(this.#config.workspace, {
-      timezone: this.#config.timezone,
+      timeZone: this.#config.timeZone,
       onJob: (name, prompt, model, missed) => this.#orchestrator.handleCron(name, prompt, model, missed),
     });
     scheduler.start();

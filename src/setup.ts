@@ -88,8 +88,8 @@ export class SetupWizard {
       this.#io.write("\nLocal timezone for the agent's clock and scheduled events.\n");
       this.#io.write("Use an IANA timezone name (e.g. Europe/Prague, America/New_York, UTC).\n\n");
       const detectedTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      const defaultTimezone = this.#default("timezone", detectedTz || "UTC");
-      const timezone = await this.#askValidated("timezone", `Timezone [${defaultTimezone}]: `, defaultTimezone);
+      const defaultTimezone = this.#default("timeZone", detectedTz || "UTC");
+      const timeZone = await this.#askValidated("timeZone", `Timezone [${defaultTimezone}]: `, defaultTimezone);
 
       // OpenAI API key
       this.#io.write("\nMacroclaw uses OpenAI's Whisper API to transcribe voice messages.\n");
@@ -106,7 +106,7 @@ export class SetupWizard {
         chatId,
         model,
         workspace,
-        timezone,
+        timeZone,
         openaiApiKey,
         ...(logLevel && { logLevel }),
       });

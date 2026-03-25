@@ -51,7 +51,7 @@ describe("systemPrompt", () => {
     expect(p.systemPrompt).toContain("opus");
   });
 
-  it("includes timezone but not a fixed date", () => {
+  it("includes time zone but not a fixed date", () => {
     const prague = new PromptBuilder("Europe/Prague");
     expect(prague.systemPrompt).not.toContain("Current date:");
     expect(prague.systemPrompt).toContain("Timezone: Europe/Prague");
