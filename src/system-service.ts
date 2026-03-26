@@ -1,7 +1,7 @@
 import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { userInfo as osUserInfo } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { createLogger } from "./logger";
 
 const log = createLogger("service");
@@ -85,11 +85,6 @@ export class SystemServiceManager {
 		}
 
 		this.#exec("bun install -g macroclaw");
-		const bunPath = this.#resolvePath("bun");
-		const claudePath = this.#resolvePath("claude");
-		const macroclawPath = this.#resolveGlobalBinPath("macroclaw");
-
-		const pathDirs = [...new Set([dirname(bunPath), dirname(claudePath), dirname(macroclawPath)])];
 
 		const logDir = resolve(this.#home, ".macroclaw/logs");
 		mkdirSync(logDir, { recursive: true });
@@ -97,7 +92,7 @@ export class SystemServiceManager {
 			this.#exec(`launchctl unload ${this.serviceFilePath}`);
 		}
 
-		writeFileSync(this.serviceFilePath, this.#generateLaunchdPlist(bunPath, macroclawPath, pathDirs, oauthToken));
+		writeFileSync(this.serviceFilePath, this.#generateLaunchdPlist(oauthToken));
 		log.debug({ filePath: this.serviceFilePath }, "Wrote launchd plist");
 		this.#exec(`launchctl load ${this.serviceFilePath}`);
 	}
@@ -247,23 +242,6 @@ export class SystemServiceManager {
 		return execSync(cmd, { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).toString();
 	}
 
-	#resolvePath(binary: string): string {
-		try {
-			return this.#exec(`which ${binary}`).trim();
-		} catch {
-			throw new Error(`Could not resolve ${binary} path. Is it installed?`);
-		}
-	}
-
-	#resolveGlobalBinPath(binary: string): string {
-		const binDir = this.#exec("bun pm bin -g").trim();
-		const binPath = join(binDir, binary);
-		if (!existsSync(binPath)) {
-			throw new Error(`Could not find ${binary} in ${binDir}. Is it installed?`);
-		}
-		return binPath;
-	}
-
 
 	#getInstalledVersion(): string {
 		try {
@@ -293,9 +271,11 @@ export class SystemServiceManager {
 		this.#exec(`sudo ${cmd}`);
 	}
 
-	#generateLaunchdPlist(bunPath: string, macroclawPath: string, pathDirs: string[], oauthToken?: string): string {
+	#generateLaunchdPlist(oauthToken?: string): string {
 		const logDir = resolve(this.#home, ".macroclaw/logs");
-		const tokenEnv = oauthToken ? `\n\t\t<key>CLAUDE_CODE_OAUTH_TOKEN</key>\n\t\t<string>${oauthToken}</string>` : "";
+		const tokenEnvBlock = oauthToken
+			? `\n\t<key>EnvironmentVariables</key>\n\t<dict>\n\t\t<key>CLAUDE_CODE_OAUTH_TOKEN</key>\n\t\t<string>${oauthToken}</string>\n\t</dict>`
+			: "";
 		return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -304,23 +284,16 @@ export class SystemServiceManager {
 	<string>com.macroclaw</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>${bunPath}</string>
-		<string>${macroclawPath}</string>
-		<string>start</string>
+		<string>/bin/bash</string>
+		<string>-lc</string>
+		<string>exec bun macroclaw start</string>
 	</array>
 	<key>KeepAlive</key>
 	<true/>
 	<key>StandardOutPath</key>
 	<string>${logDir}/stdout.log</string>
 	<key>StandardErrorPath</key>
-	<string>${logDir}/stderr.log</string>
-	<key>EnvironmentVariables</key>
-	<dict>
-		<key>HOME</key>
-		<string>${this.#home}</string>
-		<key>PATH</key>
-		<string>${pathDirs.join(":")}</string>${tokenEnv}
-	</dict>
+	<string>${logDir}/stderr.log</string>${tokenEnvBlock}
 </dict>
 </plist>
 `;
