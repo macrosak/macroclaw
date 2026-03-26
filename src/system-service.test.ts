@@ -189,36 +189,36 @@ describe("install", () => {
 		expect(mockExecSync).not.toHaveBeenCalledWith("bun pm bin -g", expect.anything());
 	});
 
-	it("installs launchd service with PATH and OAuth token", () => {
+	it("installs launchd service with bash -lc and OAuth token", () => {
 		const tmpHome = `/tmp/macroclaw-test-launchd-${Date.now()}`;
 		mkdirSync(join(tmpHome, ".macroclaw"), { recursive: true });
 		writeFileSync(join(tmpHome, ".macroclaw/settings.json"), "{}");
 		const plistDir = join(tmpHome, "Library/LaunchAgents");
 		mkdirSync(plistDir, { recursive: true });
-		mkdirSync(join(tmpHome, ".bun/bin"), { recursive: true });
-		writeFileSync(join(tmpHome, ".bun/bin/macroclaw"), "");
 
-		mockExecSync.mockImplementation((cmd: string) => {
-			if (cmd === "which bun") return `${tmpHome}/.bun/bin/bun\n`;
-			if (cmd === "which claude") return `${tmpHome}/.local/bin/claude\n`;
-			if (cmd === "bun pm bin -g") return `${tmpHome}/.bun/bin\n`;
-			return "";
-		});
 		const mgr = createManager({ platform: "darwin", home: tmpHome });
 		mgr.install("sk-test-token");
 
 		const plistPath = join(plistDir, "com.macroclaw.plist");
 		expect(existsSync(plistPath)).toBe(true);
 		const writtenContent = readFileSync(plistPath, "utf-8");
-		expect(writtenContent).toContain(`<string>${tmpHome}/.bun/bin/bun</string>`);
-		expect(writtenContent).toContain(`<string>${tmpHome}/.bun/bin/macroclaw</string>`);
-		expect(writtenContent).toContain("<string>start</string>");
+		// bash -lc pattern — no hardcoded binary paths
+		expect(writtenContent).toContain("<string>/bin/bash</string>");
+		expect(writtenContent).toContain("<string>-lc</string>");
+		expect(writtenContent).toContain("<string>exec bun macroclaw start</string>");
 		expect(writtenContent).toContain("<key>KeepAlive</key>");
 		expect(writtenContent).toContain(".macroclaw/logs/stdout.log");
-		expect(writtenContent).toContain("<key>PATH</key>");
+		// No PATH/HOME env vars — login shell provides them
+		expect(writtenContent).not.toContain("<key>PATH</key>");
+		expect(writtenContent).not.toContain("<key>HOME</key>");
+		// OAuth token is preserved
 		expect(writtenContent).toContain("<key>CLAUDE_CODE_OAUTH_TOKEN</key>");
 		expect(writtenContent).toContain("<string>sk-test-token</string>");
 		expect(mockExecSync).toHaveBeenCalledWith(expect.stringContaining("launchctl load"), expect.anything());
+		// No path resolution calls
+		expect(mockExecSync).not.toHaveBeenCalledWith("which bun", expect.anything());
+		expect(mockExecSync).not.toHaveBeenCalledWith("which claude", expect.anything());
+		expect(mockExecSync).not.toHaveBeenCalledWith("bun pm bin -g", expect.anything());
 		rmSync(tmpHome, { recursive: true });
 	});
 
@@ -227,19 +227,12 @@ describe("install", () => {
 		mkdirSync(join(tmpHome, ".macroclaw"), { recursive: true });
 		writeFileSync(join(tmpHome, ".macroclaw/settings.json"), "{}");
 		mkdirSync(join(tmpHome, "Library/LaunchAgents"), { recursive: true });
-		mkdirSync(join(tmpHome, ".bun/bin"), { recursive: true });
-		writeFileSync(join(tmpHome, ".bun/bin/macroclaw"), "");
 
-		mockExecSync.mockImplementation((cmd: string) => {
-			if (cmd === "which bun") return `${tmpHome}/.bun/bin/bun\n`;
-			if (cmd === "which claude") return `${tmpHome}/.local/bin/claude\n`;
-			if (cmd === "bun pm bin -g") return `${tmpHome}/.bun/bin\n`;
-			return "";
-		});
 		const mgr = createManager({ platform: "darwin", home: tmpHome });
 		mgr.install();
 		const writtenContent = readFileSync(join(tmpHome, "Library/LaunchAgents/com.macroclaw.plist"), "utf-8");
 		expect(writtenContent).not.toContain("CLAUDE_CODE_OAUTH_TOKEN");
+		expect(writtenContent).not.toContain("<key>EnvironmentVariables</key>");
 		rmSync(tmpHome, { recursive: true });
 	});
 
@@ -248,15 +241,10 @@ describe("install", () => {
 		mkdirSync(join(tmpHome, ".macroclaw"), { recursive: true });
 		writeFileSync(join(tmpHome, ".macroclaw/settings.json"), "{}");
 		mkdirSync(join(tmpHome, "Library/LaunchAgents"), { recursive: true });
-		mkdirSync(join(tmpHome, ".bun/bin"), { recursive: true });
-		writeFileSync(join(tmpHome, ".bun/bin/macroclaw"), "");
 
 		const calls: string[] = [];
 		mockExecSync.mockImplementation((cmd: string) => {
 			calls.push(cmd);
-			if (cmd === "which bun") return `${tmpHome}/.bun/bin/bun\n`;
-			if (cmd === "which claude") return `${tmpHome}/.local/bin/claude\n`;
-			if (cmd === "bun pm bin -g") return `${tmpHome}/.bun/bin\n`;
 			if (cmd.startsWith("launchctl list ")) return LAUNCHD_RUNNING;
 			return "";
 		});
@@ -274,13 +262,8 @@ describe("install", () => {
 		mkdirSync(join(tmpHome, ".macroclaw"), { recursive: true });
 		writeFileSync(join(tmpHome, ".macroclaw/settings.json"), "{}");
 		mkdirSync(join(tmpHome, "Library/LaunchAgents"), { recursive: true });
-		mkdirSync(join(tmpHome, ".bun/bin"), { recursive: true });
-		writeFileSync(join(tmpHome, ".bun/bin/macroclaw"), "");
 
 		mockExecSync.mockImplementation((cmd: string) => {
-			if (cmd === "which bun") return `${tmpHome}/.bun/bin/bun\n`;
-			if (cmd === "which claude") return `${tmpHome}/.local/bin/claude\n`;
-			if (cmd === "bun pm bin -g") return `${tmpHome}/.bun/bin\n`;
 			if (cmd.startsWith("launchctl list ")) return LAUNCHD_STOPPED;
 			return "";
 		});
@@ -365,52 +348,12 @@ describe("install", () => {
 		rmSync(tmpHome, { recursive: true });
 	});
 
-	it("throws when bun path cannot be resolved (launchd)", () => {
-		const tmpHome = `/tmp/macroclaw-test-nobun-${Date.now()}`;
-		mkdirSync(join(tmpHome, ".macroclaw"), { recursive: true });
-		writeFileSync(join(tmpHome, ".macroclaw/settings.json"), "{}");
-
-		mockExecSync.mockImplementation((cmd: string) => {
-			if (cmd === "which bun") throw new Error("not found");
-			return "";
-		});
-		const mgr = createManager({ platform: "darwin", home: tmpHome });
-		expect(() => mgr.install()).toThrow("Could not resolve bun path. Is it installed?");
-		rmSync(tmpHome, { recursive: true });
-	});
-
-	it("throws when macroclaw not found in global bin (launchd)", () => {
-		const tmpHome = `/tmp/macroclaw-test-nomc-${Date.now()}`;
-		mkdirSync(join(tmpHome, ".macroclaw"), { recursive: true });
-		writeFileSync(join(tmpHome, ".macroclaw/settings.json"), "{}");
-		mkdirSync(join(tmpHome, ".bun/bin"), { recursive: true });
-		// Note: NOT creating macroclaw binary
-
-		mockExecSync.mockImplementation((cmd: string) => {
-			if (cmd === "which bun") return `${tmpHome}/.bun/bin/bun\n`;
-			if (cmd === "which claude") return `${tmpHome}/.local/bin/claude\n`;
-			if (cmd === "bun pm bin -g") return `${tmpHome}/.bun/bin\n`;
-			return "";
-		});
-		const mgr = createManager({ platform: "darwin", home: tmpHome });
-		expect(() => mgr.install()).toThrow(`Could not find macroclaw in ${tmpHome}/.bun/bin`);
-		rmSync(tmpHome, { recursive: true });
-	});
-
 	it("macOS install does not use sudo", () => {
 		const tmpHome = `/tmp/macroclaw-test-macos-${Date.now()}`;
 		mkdirSync(join(tmpHome, ".macroclaw"), { recursive: true });
 		writeFileSync(join(tmpHome, ".macroclaw/settings.json"), "{}");
 		mkdirSync(join(tmpHome, "Library/LaunchAgents"), { recursive: true });
-		mkdirSync(join(tmpHome, ".bun/bin"), { recursive: true });
-		writeFileSync(join(tmpHome, ".bun/bin/macroclaw"), "");
 
-		mockExecSync.mockImplementation((cmd: string) => {
-			if (cmd === "which bun") return `${tmpHome}/.bun/bin/bun\n`;
-			if (cmd === "which claude") return `${tmpHome}/.bun/bin/claude\n`;
-			if (cmd === "bun pm bin -g") return `${tmpHome}/.bun/bin\n`;
-			return "";
-		});
 		const mgr = createManager({ platform: "darwin", home: tmpHome });
 		mgr.install();
 		for (const call of mockExecSync.mock.calls) {
