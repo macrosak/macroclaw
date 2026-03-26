@@ -68,9 +68,9 @@ export class SystemServiceManager {
 		}
 	}
 
-	install(oauthToken?: string): string {
+	install(): string {
 		if (this.#platform === "launchd") {
-			this.#installLaunchd(oauthToken);
+			this.#installLaunchd();
 		} else {
 			this.#installSystemd();
 		}
@@ -78,7 +78,7 @@ export class SystemServiceManager {
 		return this.#logTailCommand();
 	}
 
-	#installLaunchd(oauthToken?: string): void {
+	#installLaunchd(): void {
 		const settingsPath = resolve(this.#home, ".macroclaw/settings.json");
 		if (!existsSync(settingsPath)) {
 			throw new Error("Settings not found. Run `macroclaw setup` first.");
@@ -92,7 +92,7 @@ export class SystemServiceManager {
 			this.#exec(`launchctl unload ${this.serviceFilePath}`);
 		}
 
-		writeFileSync(this.serviceFilePath, this.#generateLaunchdPlist(oauthToken));
+		writeFileSync(this.serviceFilePath, this.#generateLaunchdPlist());
 		log.debug({ filePath: this.serviceFilePath }, "Wrote launchd plist");
 		this.#exec(`launchctl load ${this.serviceFilePath}`);
 	}
@@ -271,11 +271,8 @@ export class SystemServiceManager {
 		this.#exec(`sudo ${cmd}`);
 	}
 
-	#generateLaunchdPlist(oauthToken?: string): string {
+	#generateLaunchdPlist(): string {
 		const logDir = resolve(this.#home, ".macroclaw/logs");
-		const tokenEnvBlock = oauthToken
-			? `\n\t<key>EnvironmentVariables</key>\n\t<dict>\n\t\t<key>CLAUDE_CODE_OAUTH_TOKEN</key>\n\t\t<string>${oauthToken}</string>\n\t</dict>`
-			: "";
 		return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -293,7 +290,7 @@ export class SystemServiceManager {
 	<key>StandardOutPath</key>
 	<string>${logDir}/stdout.log</string>
 	<key>StandardErrorPath</key>
-	<string>${logDir}/stderr.log</string>${tokenEnvBlock}
+	<string>${logDir}/stderr.log</string>
 </dict>
 </plist>
 `;

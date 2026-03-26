@@ -15,22 +15,19 @@ export interface SetupIo {
 }
 
 export interface ServiceInstaller {
-  install: (oauthToken?: string) => string;
+  install: () => string;
 }
 
 export class SetupWizard {
   readonly #io: SetupIo;
   readonly #serviceInstaller?: ServiceInstaller;
-  readonly #platform: string;
   #defaults: Record<string, unknown> = {};
 
   constructor(io: SetupIo, opts?: {
     serviceInstaller?: ServiceInstaller;
-    platform?: string;
   }) {
     this.#io = io;
     this.#serviceInstaller = opts?.serviceInstaller;
-    this.#platform = opts?.platform ?? process.platform;
   }
 
   #resolveClaudePath(): void {
@@ -140,20 +137,9 @@ export class SetupWizard {
   }
 
   async #doInstallService(): Promise<void> {
-    let oauthToken: string | undefined;
-    if (this.#platform === "darwin") {
-      this.#io.write("\nmacOS requires a long-lived OAuth token for the service.\n");
-      this.#io.write("Run `claude setup-token` in another terminal, then paste the token here.\n\n");
-      oauthToken = await this.#io.ask("OAuth token: ");
-      if (!oauthToken) {
-        this.#io.write("No token provided. Skipping service installation.\n");
-        return;
-      }
-    }
-
     try {
       const svc = this.#serviceInstaller ?? new (await import("./system-service")).SystemServiceManager();
-      const logCmd = svc.install(oauthToken);
+      const logCmd = svc.install();
       this.#io.write(`Service installed and started. Check logs:\n  ${logCmd}\n`);
     } catch (err) {
       this.#io.write(`Service installation failed: ${(err as Error).message}\n`);

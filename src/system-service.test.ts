@@ -189,7 +189,7 @@ describe("install", () => {
 		expect(mockExecSync).not.toHaveBeenCalledWith("bun pm bin -g", expect.anything());
 	});
 
-	it("installs launchd service with bash -lc and OAuth token", () => {
+	it("installs launchd service with bash -lc and no environment variables", () => {
 		const tmpHome = `/tmp/macroclaw-test-launchd-${Date.now()}`;
 		mkdirSync(join(tmpHome, ".macroclaw"), { recursive: true });
 		writeFileSync(join(tmpHome, ".macroclaw/settings.json"), "{}");
@@ -197,7 +197,7 @@ describe("install", () => {
 		mkdirSync(plistDir, { recursive: true });
 
 		const mgr = createManager({ platform: "darwin", home: tmpHome });
-		mgr.install("sk-test-token");
+		mgr.install();
 
 		const plistPath = join(plistDir, "com.macroclaw.plist");
 		expect(existsSync(plistPath)).toBe(true);
@@ -208,31 +208,16 @@ describe("install", () => {
 		expect(writtenContent).toContain("<string>exec bun macroclaw start</string>");
 		expect(writtenContent).toContain("<key>KeepAlive</key>");
 		expect(writtenContent).toContain(".macroclaw/logs/stdout.log");
-		// No PATH/HOME env vars — login shell provides them
+		// No environment variables at all — login shell provides everything
+		expect(writtenContent).not.toContain("<key>EnvironmentVariables</key>");
 		expect(writtenContent).not.toContain("<key>PATH</key>");
 		expect(writtenContent).not.toContain("<key>HOME</key>");
-		// OAuth token is preserved
-		expect(writtenContent).toContain("<key>CLAUDE_CODE_OAUTH_TOKEN</key>");
-		expect(writtenContent).toContain("<string>sk-test-token</string>");
+		expect(writtenContent).not.toContain("CLAUDE_CODE_OAUTH_TOKEN");
 		expect(mockExecSync).toHaveBeenCalledWith(expect.stringContaining("launchctl load"), expect.anything());
 		// No path resolution calls
 		expect(mockExecSync).not.toHaveBeenCalledWith("which bun", expect.anything());
 		expect(mockExecSync).not.toHaveBeenCalledWith("which claude", expect.anything());
 		expect(mockExecSync).not.toHaveBeenCalledWith("bun pm bin -g", expect.anything());
-		rmSync(tmpHome, { recursive: true });
-	});
-
-	it("installs launchd service without token when not provided", () => {
-		const tmpHome = `/tmp/macroclaw-test-notoken-${Date.now()}`;
-		mkdirSync(join(tmpHome, ".macroclaw"), { recursive: true });
-		writeFileSync(join(tmpHome, ".macroclaw/settings.json"), "{}");
-		mkdirSync(join(tmpHome, "Library/LaunchAgents"), { recursive: true });
-
-		const mgr = createManager({ platform: "darwin", home: tmpHome });
-		mgr.install();
-		const writtenContent = readFileSync(join(tmpHome, "Library/LaunchAgents/com.macroclaw.plist"), "utf-8");
-		expect(writtenContent).not.toContain("CLAUDE_CODE_OAUTH_TOKEN");
-		expect(writtenContent).not.toContain("<key>EnvironmentVariables</key>");
 		rmSync(tmpHome, { recursive: true });
 	});
 

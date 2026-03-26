@@ -217,7 +217,7 @@ describe("Cli.service", () => {
 	it("passes follow flag to logs action", () => {
 		const logs = mock(() => "journalctl -u macroclaw -f");
 		const cli = new Cli({ systemService: mockService({ logs }) });
-		cli.service("logs", undefined, true);
+		cli.service("logs", true);
 		expect(logs).toHaveBeenCalledWith(true);
 	});
 

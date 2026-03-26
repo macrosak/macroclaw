@@ -39,10 +39,10 @@ export class Cli {
 		execSync(args.join(" "), { cwd: settings.workspace, stdio: "inherit", env: { ...process.env, CLAUDECODE: "" } });
 	}
 
-	service(action: string, token?: string, follow?: boolean): void {
+	service(action: string, follow?: boolean): void {
 		switch (action) {
 			case "install": {
-				const logCmd = this.#serviceManager.install(token);
+				const logCmd = this.#serviceManager.install();
 				console.log(`Service installed and started. Check logs:\n  ${logCmd}`);
 				break;
 			}
@@ -147,10 +147,7 @@ const claudeCommand = defineCommand({
 
 const serviceInstallCommand = defineCommand({
 	meta: { name: "install", description: "Install and start macroclaw as a service" },
-	args: {
-		token: { type: "string", description: "Claude OAuth token from `claude setup-token` (required on macOS)" },
-	},
-	run: ({ args }) => { try { defaultCli.service("install", args.token); } catch (err) { handleError(err); } },
+	run: () => { try { defaultCli.service("install"); } catch (err) { handleError(err); } },
 });
 
 const serviceUninstallCommand = defineCommand({
@@ -188,7 +185,7 @@ const serviceLogsCommand = defineCommand({
 	args: {
 		follow: { type: "boolean", alias: "f", description: "Follow log output in real-time" },
 	},
-	run: ({ args }) => { try { defaultCli.service("logs", undefined, args.follow); } catch (err) { handleError(err); } },
+	run: ({ args }) => { try { defaultCli.service("logs", args.follow); } catch (err) { handleError(err); } },
 });
 
 const serviceCommand = defineCommand({

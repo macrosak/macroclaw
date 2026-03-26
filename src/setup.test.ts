@@ -334,10 +334,9 @@ it("installs service when user answers yes", async () => {
       "",  // timezone
       "",
       "y",
-      "sk-test-token",  // oauth token (macOS)
     ]);
 
-    await runSetup(io, { serviceInstaller: installer, platform: "darwin" });
+    await runSetup(io, { serviceInstaller: installer });
 
     expect(mockInstall).toHaveBeenCalled();
     expect(io.written).toContainEqual(expect.stringContaining("Service installed and started."));
@@ -361,27 +360,6 @@ it("installs service when user answers yes", async () => {
     expect(mockInstall).not.toHaveBeenCalled();
   });
 
-  it("skips service install when oauth token is empty on macOS", async () => {
-    mockInstall.mockClear();
-    const installer = createMockServiceInstaller();
-    const io = createMockIO([
-      "tok",
-      "123",
-      "",
-      "",
-      "",  // timezone
-      "",
-      "y",
-      "",  // empty oauth token
-    ]);
-
-    const settings = await runSetup(io, { serviceInstaller: installer, platform: "darwin" });
-
-    expect(mockInstall).not.toHaveBeenCalled();
-    expect(io.written).toContainEqual(expect.stringContaining("No token provided"));
-    expect(settings.botToken).toBe("tok");
-  });
-
   it("handles service install failure gracefully", async () => {
     mockInstall.mockImplementation(() => { throw new Error("Permission denied"); });
     const installer = createMockServiceInstaller();
@@ -393,10 +371,9 @@ it("installs service when user answers yes", async () => {
       "",  // timezone
       "",
       "yes",
-      "sk-test-token",  // oauth token (macOS)
     ]);
 
-    await runSetup(io, { serviceInstaller: installer, platform: "darwin" });
+    await runSetup(io, { serviceInstaller: installer });
 
     expect(io.written).toContainEqual(expect.stringContaining("Service installation failed: Permission denied"));
   });
@@ -404,26 +381,13 @@ it("installs service when user answers yes", async () => {
   it("forceInstallService installs without prompting", async () => {
     mockInstall.mockClear();
     const installer = createMockServiceInstaller();
-    const io = createMockIO([
-      "sk-test-token",  // oauth token (macOS)
-    ]);
+    const io = createMockIO([]);
 
-    const wizard = new SetupWizard(io, { serviceInstaller: installer, platform: "darwin" });
+    const wizard = new SetupWizard(io, { serviceInstaller: installer });
     await wizard.forceInstallService();
 
     expect(mockInstall).toHaveBeenCalled();
     expect(io.written).toContainEqual(expect.stringContaining("Service installed and started."));
-  });
-
-  it("forceInstallService skips on Linux without prompting", async () => {
-    mockInstall.mockClear();
-    const installer = createMockServiceInstaller();
-    const io = createMockIO([]);
-
-    const wizard = new SetupWizard(io, { serviceInstaller: installer, platform: "linux" });
-    await wizard.forceInstallService();
-
-    expect(mockInstall).toHaveBeenCalled();
   });
 
   it("fails fast when claude CLI is not found", async () => {
