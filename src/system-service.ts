@@ -113,11 +113,6 @@ export class SystemServiceManager {
 		}
 
 		this.#exec("bun install -g macroclaw");
-		const bunPath = this.#resolvePath("bun");
-		const claudePath = this.#resolvePath("claude");
-		const macroclawPath = this.#resolveGlobalBinPath("macroclaw");
-
-		const pathDirs = [...new Set([dirname(bunPath), dirname(claudePath), dirname(macroclawPath)])];
 
 		// Enable lingering so user services run without an active login session
 		const username = osUserInfo().username;
@@ -125,7 +120,7 @@ export class SystemServiceManager {
 			this.#sudo(`loginctl enable-linger ${username}`);
 		}
 
-		const unitContent = this.#generateSystemdUnit(bunPath, macroclawPath, pathDirs);
+		const unitContent = this.#generateSystemdUnit();
 		mkdirSync(dirname(this.serviceFilePath), { recursive: true });
 		writeFileSync(this.serviceFilePath, unitContent);
 		log.debug({ filePath: this.serviceFilePath }, "Wrote systemd unit");
@@ -331,17 +326,15 @@ export class SystemServiceManager {
 `;
 	}
 
-	#generateSystemdUnit(bunPath: string, macroclawPath: string, pathDirs: string[]): string {
+	#generateSystemdUnit(): string {
 		return `[Unit]
 Description=Macroclaw - Telegram-to-Claude-Code bridge
 After=network.target
 
 [Service]
 Type=simple
-Environment=HOME=${this.#home}
-Environment=PATH=${pathDirs.join(":")}
-WorkingDirectory=${this.#home}
-ExecStart=${bunPath} ${macroclawPath} start
+WorkingDirectory=%h
+ExecStart=/bin/bash -lc 'exec bun macroclaw start'
 Restart=on-failure
 RestartSec=5
 
