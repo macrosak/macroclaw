@@ -87,6 +87,7 @@ export class SystemServiceManager {
 
 		this.#exec("bun install -g macroclaw");
 		const servicePath = this.#getServicePath();
+		const executablePath = this.#getMacroclawExecutablePath();
 
 		const logDir = resolve(this.#home, ".macroclaw/logs");
 		mkdirSync(logDir, { recursive: true });
@@ -94,7 +95,7 @@ export class SystemServiceManager {
 			this.#exec(`launchctl unload ${this.serviceFilePath}`);
 		}
 
-		writeFileSync(this.serviceFilePath, this.#generateLaunchdPlist(servicePath, oauthToken));
+		writeFileSync(this.serviceFilePath, this.#generateLaunchdPlist(servicePath, executablePath, oauthToken));
 		log.debug({ filePath: this.serviceFilePath }, "Wrote launchd plist");
 		this.#exec(`launchctl load ${this.serviceFilePath}`);
 	}
@@ -111,6 +112,7 @@ export class SystemServiceManager {
 
 		this.#exec("bun install -g macroclaw");
 		const servicePath = this.#getServicePath();
+		const executablePath = this.#getMacroclawExecutablePath();
 
 		// Enable lingering so user services run without an active login session
 		const username = osUserInfo().username;
@@ -118,7 +120,7 @@ export class SystemServiceManager {
 			this.#sudo(`loginctl enable-linger ${username}`);
 		}
 
-		const unitContent = this.#generateSystemdUnit(servicePath);
+		const unitContent = this.#generateSystemdUnit(servicePath, executablePath);
 		mkdirSync(dirname(this.serviceFilePath), { recursive: true });
 		writeFileSync(this.serviceFilePath, unitContent);
 		log.debug({ filePath: this.serviceFilePath }, "Wrote systemd unit");
@@ -211,13 +213,14 @@ export class SystemServiceManager {
 	refresh(): void {
 		this.#requireInstalled();
 		const servicePath = this.#getServicePath();
+		const executablePath = this.#getMacroclawExecutablePath();
 		if (this.#platform === "systemd") {
-			writeFileSync(this.serviceFilePath, this.#generateSystemdUnit(servicePath));
+			writeFileSync(this.serviceFilePath, this.#generateSystemdUnit(servicePath, executablePath));
 			this.#exec("systemctl --user daemon-reload");
 			return;
 		}
 		const oauthToken = this.#getLaunchdOauthToken();
-		writeFileSync(this.serviceFilePath, this.#generateLaunchdPlist(servicePath, oauthToken));
+		writeFileSync(this.serviceFilePath, this.#generateLaunchdPlist(servicePath, executablePath, oauthToken));
 	}
 
 	status(): ServiceStatus {
@@ -271,9 +274,12 @@ export class SystemServiceManager {
 	#getServicePath(): string {
 		const shellPath = this.#getLoginShellPath();
 		const bunGlobalBin = this.#exec("bun pm bin -g").trim();
-		const entries = shellPath.split(":").filter(Boolean);
-		if (entries.includes(bunGlobalBin)) return shellPath;
-		return [bunGlobalBin, ...entries].join(":");
+		const entries = [bunGlobalBin, ...shellPath.split(":").filter(Boolean)];
+		return [...new Set(entries)].join(":");
+	}
+
+	#getMacroclawExecutablePath(): string {
+		return resolve(this.#exec("bun pm bin -g").trim(), "macroclaw");
 	}
 
 	#getLaunchdOauthToken(): string | undefined {
@@ -311,7 +317,7 @@ export class SystemServiceManager {
 		this.#exec(`sudo ${cmd}`);
 	}
 
-	#generateLaunchdPlist(servicePath: string, oauthToken?: string): string {
+	#generateLaunchdPlist(servicePath: string, executablePath: string, oauthToken?: string): string {
 		const logDir = resolve(this.#home, ".macroclaw/logs");
 		const envVars = [`\n\t<key>PATH</key>\n\t\t<string>${servicePath}</string>`];
 		if (oauthToken) {
@@ -326,7 +332,7 @@ export class SystemServiceManager {
 	<string>com.macroclaw</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>macroclaw</string>
+		<string>${executablePath}</string>
 		<string>start</string>
 	</array>
 	<key>KeepAlive</key>
@@ -340,7 +346,7 @@ export class SystemServiceManager {
 `;
 	}
 
-	#generateSystemdUnit(servicePath: string): string {
+	#generateSystemdUnit(servicePath: string, executablePath: string): string {
 		return `[Unit]
 Description=Macroclaw - Telegram-to-Claude-Code bridge
 After=network.target
@@ -349,7 +355,7 @@ After=network.target
 Type=simple
 WorkingDirectory=%h
 Environment=PATH=${servicePath}
-ExecStart=macroclaw start
+ExecStart=${executablePath} start
 Restart=on-failure
 RestartSec=5
 
