@@ -134,7 +134,8 @@ function mockService(overrides?: Record<string, unknown>): SystemServiceManager 
 		start: mock(() => ""),
 		stop: mock(() => {}),
 		restart: mock(() => ""),
-		update: mock(() => ({ previousVersion: "0.6.0", currentVersion: "0.7.0" })),
+		refresh: mock(() => {}),
+		update: mock(() => ({ previousVersion: "0.6.0", currentVersion: "0.7.0", logTailCommand: "tail -f /logs" })),
 		isRunning: false,
 		status: mock(() => ({ installed: false, running: false, platform: "systemd" as const })),
 		logs: mock(() => "journalctl -u macroclaw -n 50 --no-pager"),
@@ -171,6 +172,13 @@ describe("Cli.service", () => {
 		expect(stop).toHaveBeenCalled();
 	});
 
+	it("runs refresh action", () => {
+		const refresh = mock(() => {});
+		const cli = new Cli({ systemService: mockService({ refresh }) });
+		cli.service("refresh");
+		expect(refresh).toHaveBeenCalled();
+	});
+
 	it("runs restart action", () => {
 		const restart = mock(() => "tail -f /logs");
 		const cli = new Cli({ systemService: mockService({ restart }) });
@@ -178,26 +186,17 @@ describe("Cli.service", () => {
 		expect(restart).toHaveBeenCalled();
 	});
 
-	it("runs update action — stops and starts when running", () => {
+	it("runs update action", () => {
 		const stop = mock(() => {});
 		const start = mock(() => "tail -f /logs");
-		const update = mock(() => ({ previousVersion: "0.6.0", currentVersion: "0.7.0" }));
+		const update = mock(() => ({ previousVersion: "0.6.0", currentVersion: "0.7.0", logTailCommand: "tail -f /logs" }));
+		mockExecSync.mockClear();
 		const cli = new Cli({ systemService: mockService({ stop, start, update, isRunning: true }) });
 		cli.service("update");
-		expect(stop).toHaveBeenCalled();
 		expect(update).toHaveBeenCalled();
-		expect(start).toHaveBeenCalled();
-	});
-
-	it("runs update action — skips stop but still starts when not running", () => {
-		const stop = mock(() => {});
-		const start = mock(() => "tail -f /logs");
-		const update = mock(() => ({ previousVersion: "0.6.0", currentVersion: "0.7.0" }));
-		const cli = new Cli({ systemService: mockService({ stop, start, update, isRunning: false }) });
-		cli.service("update");
 		expect(stop).not.toHaveBeenCalled();
-		expect(update).toHaveBeenCalled();
-		expect(start).toHaveBeenCalled();
+		expect(start).not.toHaveBeenCalled();
+		expect(mockExecSync).not.toHaveBeenCalledWith("macroclaw service refresh", expect.anything());
 	});
 
 	it("runs status action", () => {

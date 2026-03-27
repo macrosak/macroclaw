@@ -678,27 +678,100 @@ describe("update", () => {
 		);
 	});
 
-	it("runs bun install without stop/start on launchd", () => {
+	it("stops, refreshes, and starts the service when updating launchd", () => {
 		const tmpHome = `/tmp/macroclaw-test-updateld-${Date.now()}`;
 		mkdirSync(join(tmpHome, "Library/LaunchAgents"), { recursive: true });
 		writeFileSync(join(tmpHome, "Library/LaunchAgents/com.macroclaw.plist"), "test");
 
+		const calls: string[] = [];
+		let running = true;
 		mockExecSync.mockImplementation((cmd: string) => {
+			calls.push(cmd);
+			if (cmd.startsWith("launchctl list ")) return running ? LAUNCHD_RUNNING : LAUNCHD_STOPPED;
 			if (cmd === "bun pm ls -g") return "macroclaw@0.6.0\n";
+			if (cmd.includes("launchctl unload")) {
+				running = false;
+				return "";
+			}
+			if (cmd === "macroclaw service refresh") return "";
+			if (cmd.includes("launchctl load")) {
+				running = true;
+				return "";
+			}
 			return "";
 		});
 		const mgr = createManager({ platform: "darwin", home: tmpHome });
 		const result = mgr.update();
+
 		expect(mockExecSync).toHaveBeenCalledWith("bun install -g macroclaw@latest", expect.anything());
-		expect(mockExecSync).not.toHaveBeenCalledWith(expect.stringContaining("launchctl"), expect.anything());
-		expect(mockExecSync).not.toHaveBeenCalledWith(expect.stringContaining("systemctl"), expect.anything());
+		expect(mockExecSync).toHaveBeenCalledWith("macroclaw service refresh", expect.anything());
+		const unloadIdx = calls.findIndex((call) => call.includes("launchctl unload"));
+		const installIdx = calls.indexOf("bun install -g macroclaw@latest");
+		const refreshIdx = calls.indexOf("macroclaw service refresh");
+		const loadIdx = calls.findIndex((call) => call.includes("launchctl load"));
+		expect(unloadIdx).toBeGreaterThan(-1);
+		expect(installIdx).toBeGreaterThan(unloadIdx);
+		expect(refreshIdx).toBeGreaterThan(installIdx);
+		expect(loadIdx).toBeGreaterThan(refreshIdx);
 		expect(result.previousVersion).toBe("0.6.0");
 		expect(result.currentVersion).toBe("0.6.0");
+		expect(result.logTailCommand).toBe(`tail -f ${tmpHome}/.macroclaw/logs/*.log`);
 		rmSync(tmpHome, { recursive: true });
 	});
 
-	it("refreshes launchd PATH snapshot and preserves oauth token on update", () => {
-		const tmpHome = `/tmp/macroclaw-test-update-launchd-${Date.now()}`;
+	it("returns different versions when update changes version", () => {
+		const tmpHome = `/tmp/macroclaw-test-updatever-${Date.now()}`;
+		mkdirSync(join(tmpHome, "Library/LaunchAgents"), { recursive: true });
+		writeFileSync(join(tmpHome, "Library/LaunchAgents/com.macroclaw.plist"), "test");
+
+		let installCalled = false;
+		mockExecSync.mockImplementation((cmd: string) => {
+			if (cmd.startsWith("launchctl list ")) return LAUNCHD_STOPPED;
+			if (cmd === "bun install -g macroclaw@latest") { installCalled = true; return ""; }
+			if (cmd === "macroclaw service refresh") return "";
+			if (cmd.includes("launchctl load")) return "";
+			if (cmd === "bun pm ls -g") return installCalled ? "macroclaw@0.7.0\n" : "macroclaw@0.6.0\n";
+			return "";
+		});
+		const mgr = createManager({ platform: "darwin", home: tmpHome });
+		const result = mgr.update();
+		expect(result.previousVersion).toBe("0.6.0");
+		expect(result.currentVersion).toBe("0.7.0");
+		expect(result.logTailCommand).toBe(`tail -f ${tmpHome}/.macroclaw/logs/*.log`);
+		rmSync(tmpHome, { recursive: true });
+	});
+
+	it("returns unknown when version query fails", () => {
+		const tmpHome = `/tmp/macroclaw-test-updateunk-${Date.now()}`;
+		mkdirSync(join(tmpHome, "Library/LaunchAgents"), { recursive: true });
+		writeFileSync(join(tmpHome, "Library/LaunchAgents/com.macroclaw.plist"), "test");
+
+		mockExecSync.mockImplementation((cmd: string) => {
+			if (cmd.startsWith("launchctl list ")) return LAUNCHD_STOPPED;
+			if (cmd === "macroclaw service refresh") return "";
+			if (cmd.includes("launchctl load")) return "";
+			if (cmd === "bun pm ls -g") throw new Error("command not found");
+			return "";
+		});
+		const mgr = createManager({ platform: "darwin", home: tmpHome });
+		const result = mgr.update();
+		expect(result.previousVersion).toBe("unknown");
+		expect(result.currentVersion).toBe("unknown");
+		expect(result.logTailCommand).toBe(`tail -f ${tmpHome}/.macroclaw/logs/*.log`);
+		rmSync(tmpHome, { recursive: true });
+	});
+});
+
+describe("refresh", () => {
+	it("throws when service is not installed", () => {
+		const mgr = createManager({ platform: "darwin", home: "/nonexistent" });
+		expect(() => mgr.refresh()).toThrow(
+			"Service not installed. Run `macroclaw service install` first.",
+		);
+	});
+
+	it("refreshes launchd PATH snapshot and preserves oauth token", () => {
+		const tmpHome = `/tmp/macroclaw-test-refresh-launchd-${Date.now()}`;
 		const plistDir = join(tmpHome, "Library/LaunchAgents");
 		mkdirSync(plistDir, { recursive: true });
 		writeFileSync(join(plistDir, "com.macroclaw.plist"), `<?xml version="1.0" encoding="UTF-8"?>
@@ -716,114 +789,64 @@ describe("update", () => {
 `);
 
 		mockExecSync.mockImplementation((cmd: string) => {
-			if (cmd === "bun install -g macroclaw@latest") return "";
 			if (cmd === "/bin/bash -lc 'printf %s \"$PATH\"'") return "/custom/bin:/usr/bin:/bin\n";
 			if (cmd === "bun pm bin -g") return "/home/testuser/.bun/bin\n";
-			if (cmd === "bun pm ls -g") return "macroclaw@0.7.0\n";
 			return "";
 		});
 
 		const mgr = createManager({ platform: "darwin", home: tmpHome });
-		const result = mgr.update();
+		mgr.refresh();
 		const plist = readFileSync(join(plistDir, "com.macroclaw.plist"), "utf-8");
 
-		expect(mockExecSync).toHaveBeenCalledWith("bun install -g macroclaw@latest", expect.anything());
 		expect(mockExecSync).toHaveBeenCalledWith("/bin/bash -lc 'printf %s \"$PATH\"'", expect.anything());
 		expect(mockExecSync).toHaveBeenCalledWith("bun pm bin -g", expect.anything());
 		expect(plist).toContain("<string>/home/testuser/.bun/bin:/custom/bin:/usr/bin:/bin</string>");
 		expect(plist).toContain("<key>CLAUDE_CODE_OAUTH_TOKEN</key>");
 		expect(plist).toContain("<string>sk-test-token</string>");
-		expect(result.previousVersion).toBe("0.7.0");
-		expect(result.currentVersion).toBe("0.7.0");
 		rmSync(tmpHome, { recursive: true });
 	});
 
-	it("refreshes systemd PATH snapshot and reloads daemon on update", () => {
-		const tmpHome = `/tmp/macroclaw-test-update-systemd-${Date.now()}`;
+	it("refreshes systemd PATH snapshot and reloads daemon", () => {
+		const tmpHome = `/tmp/macroclaw-test-refresh-systemd-${Date.now()}`;
 		const unitDir = join(tmpHome, ".config/systemd/user");
 		mkdirSync(unitDir, { recursive: true });
 		writeFileSync(join(unitDir, "macroclaw.service"), "test");
 
 		mockExecSync.mockImplementation((cmd: string) => {
-			if (cmd === "bun install -g macroclaw@latest") return "";
 			if (cmd === "/bin/bash -lc 'printf %s \"$PATH\"'") return "/custom/bin:/usr/bin:/bin\n";
 			if (cmd === "bun pm bin -g") return "/home/testuser/.bun/bin\n";
-			if (cmd === "bun pm ls -g") return "macroclaw@0.7.0\n";
 			return "";
 		});
 
 		const mgr = createManager({ platform: "linux", home: tmpHome });
-		const result = mgr.update();
+		mgr.refresh();
 		const unitContent = readFileSync(join(unitDir, "macroclaw.service"), "utf-8");
 
-		expect(mockExecSync).toHaveBeenCalledWith("bun install -g macroclaw@latest", expect.anything());
 		expect(mockExecSync).toHaveBeenCalledWith("/bin/bash -lc 'printf %s \"$PATH\"'", expect.anything());
 		expect(mockExecSync).toHaveBeenCalledWith("bun pm bin -g", expect.anything());
 		expect(mockExecSync).toHaveBeenCalledWith("systemctl --user daemon-reload", expect.anything());
 		expect(unitContent).toContain("Environment=PATH=/home/testuser/.bun/bin:/custom/bin:/usr/bin:/bin");
-		expect(result.previousVersion).toBe("0.7.0");
-		expect(result.currentVersion).toBe("0.7.0");
 		rmSync(tmpHome, { recursive: true });
 	});
 
 	it("does not duplicate bun global bin when it is already in login shell PATH", () => {
-		const tmpHome = `/tmp/macroclaw-test-systemd-path-present-${Date.now()}`;
-		mkdirSync(join(tmpHome, ".macroclaw"), { recursive: true });
-		writeFileSync(join(tmpHome, ".macroclaw/settings.json"), "{}");
+		const tmpHome = `/tmp/macroclaw-test-refresh-systemd-path-present-${Date.now()}`;
+		const unitDir = join(tmpHome, ".config/systemd/user");
+		mkdirSync(unitDir, { recursive: true });
+		writeFileSync(join(unitDir, "macroclaw.service"), "test");
 
-		mockUserInfo.mockImplementation(() => ({ username: "testuser", homedir: tmpHome, uid: 1000, gid: 1000, shell: "/bin/bash" }));
-		mockExistsSync.mockImplementation((path: string) => {
-			if (path === "/var/lib/systemd/linger/testuser") return true;
-			return realExistsSync(path);
-		});
 		mockExecSync.mockImplementation((cmd: string) => {
 			if (cmd === "/bin/bash -lc 'printf %s \"$PATH\"'") return "/usr/local/bin:/home/testuser/.bun/bin:/usr/bin:/bin\n";
 			if (cmd === "bun pm bin -g") return "/home/testuser/.bun/bin\n";
 			return "";
 		});
 
-		const mgr = createManager({ home: tmpHome });
-		mgr.install();
-		const unitContent = readFileSync(join(tmpHome, ".config/systemd/user/macroclaw.service"), "utf-8");
+		const mgr = createManager({ platform: "linux", home: tmpHome });
+		mgr.refresh();
+		const unitContent = readFileSync(join(unitDir, "macroclaw.service"), "utf-8");
 
 		expect(unitContent).toContain("Environment=PATH=/usr/local/bin:/home/testuser/.bun/bin:/usr/bin:/bin");
 		expect(unitContent).not.toContain("Environment=PATH=/home/testuser/.bun/bin:/usr/local/bin:/home/testuser/.bun/bin:/usr/bin:/bin");
-		rmSync(tmpHome, { recursive: true });
-	});
-
-	it("returns different versions when update changes version", () => {
-		const tmpHome = `/tmp/macroclaw-test-updatever-${Date.now()}`;
-		mkdirSync(join(tmpHome, "Library/LaunchAgents"), { recursive: true });
-		writeFileSync(join(tmpHome, "Library/LaunchAgents/com.macroclaw.plist"), "test");
-
-		let installCalled = false;
-		mockExecSync.mockImplementation((cmd: string) => {
-			if (cmd.startsWith("launchctl list ")) return LAUNCHD_STOPPED;
-			if (cmd === "bun install -g macroclaw@latest") { installCalled = true; return ""; }
-			if (cmd === "bun pm ls -g") return installCalled ? "macroclaw@0.7.0\n" : "macroclaw@0.6.0\n";
-			return "";
-		});
-		const mgr = createManager({ platform: "darwin", home: tmpHome });
-		const result = mgr.update();
-		expect(result.previousVersion).toBe("0.6.0");
-		expect(result.currentVersion).toBe("0.7.0");
-		rmSync(tmpHome, { recursive: true });
-	});
-
-	it("returns unknown when version query fails", () => {
-		const tmpHome = `/tmp/macroclaw-test-updateunk-${Date.now()}`;
-		mkdirSync(join(tmpHome, "Library/LaunchAgents"), { recursive: true });
-		writeFileSync(join(tmpHome, "Library/LaunchAgents/com.macroclaw.plist"), "test");
-
-		mockExecSync.mockImplementation((cmd: string) => {
-			if (cmd.startsWith("launchctl list ")) return LAUNCHD_STOPPED;
-			if (cmd === "bun pm ls -g") throw new Error("command not found");
-			return "";
-		});
-		const mgr = createManager({ platform: "darwin", home: tmpHome });
-		const result = mgr.update();
-		expect(result.previousVersion).toBe("unknown");
-		expect(result.currentVersion).toBe("unknown");
 		rmSync(tmpHome, { recursive: true });
 	});
 });
