@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { userInfo as osUserInfo } from "node:os";
 import { dirname, resolve } from "node:path";
 import { createLogger } from "./logger";
@@ -85,7 +85,7 @@ export class SystemServiceManager {
 		}
 
 		this.#exec("bun install -g macroclaw");
-		const bunGlobalBin = this.#getBunGlobalBinDir();
+		const servicePath = this.#getServicePath();
 
 		const logDir = resolve(this.#home, ".macroclaw/logs");
 		mkdirSync(logDir, { recursive: true });
@@ -93,7 +93,7 @@ export class SystemServiceManager {
 			this.#exec(`launchctl unload ${this.serviceFilePath}`);
 		}
 
-		writeFileSync(this.serviceFilePath, this.#generateLaunchdPlist(bunGlobalBin, oauthToken));
+		writeFileSync(this.serviceFilePath, this.#generateLaunchdPlist(servicePath, oauthToken));
 		log.debug({ filePath: this.serviceFilePath }, "Wrote launchd plist");
 		this.#exec(`launchctl load ${this.serviceFilePath}`);
 	}
@@ -109,7 +109,7 @@ export class SystemServiceManager {
 		}
 
 		this.#exec("bun install -g macroclaw");
-		const bunGlobalBin = this.#getBunGlobalBinDir();
+		const servicePath = this.#getServicePath();
 
 		// Enable lingering so user services run without an active login session
 		const username = osUserInfo().username;
@@ -117,7 +117,7 @@ export class SystemServiceManager {
 			this.#sudo(`loginctl enable-linger ${username}`);
 		}
 
-		const unitContent = this.#generateSystemdUnit(bunGlobalBin);
+		const unitContent = this.#generateSystemdUnit(servicePath);
 		mkdirSync(dirname(this.serviceFilePath), { recursive: true });
 		writeFileSync(this.serviceFilePath, unitContent);
 		log.debug({ filePath: this.serviceFilePath }, "Wrote systemd unit");
@@ -194,6 +194,15 @@ export class SystemServiceManager {
 
 		const previousVersion = this.#getInstalledVersion();
 		this.#exec("bun install -g macroclaw@latest");
+		if (this.#platform === "systemd") {
+			const servicePath = this.#getServicePath();
+			writeFileSync(this.serviceFilePath, this.#generateSystemdUnit(servicePath));
+			this.#exec("systemctl --user daemon-reload");
+		} else {
+			const servicePath = this.#getServicePath();
+			const oauthToken = this.#getLaunchdOauthToken();
+			writeFileSync(this.serviceFilePath, this.#generateLaunchdPlist(servicePath, oauthToken));
+		}
 		const currentVersion = this.#getInstalledVersion();
 
 		log.debug({ previousVersion, currentVersion }, "Service updated");
@@ -244,8 +253,23 @@ export class SystemServiceManager {
 		return execSync(cmd, { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).toString();
 	}
 
-	#getBunGlobalBinDir(): string {
-		return this.#exec("bun pm bin -g").trim();
+	#getLoginShellPath(): string {
+		return this.#exec("/bin/bash -lc 'printf %s \"$PATH\"'").trim();
+	}
+
+	#getServicePath(): string {
+		const shellPath = this.#getLoginShellPath();
+		const bunGlobalBin = this.#exec("bun pm bin -g").trim();
+		const entries = shellPath.split(":").filter(Boolean);
+		if (entries.includes(bunGlobalBin)) return shellPath;
+		return [bunGlobalBin, ...entries].join(":");
+	}
+
+	#getLaunchdOauthToken(): string | undefined {
+		if (this.#platform !== "launchd" || !existsSync(this.serviceFilePath)) return undefined;
+		const plist = readFileSync(this.serviceFilePath, "utf-8");
+		const match = /<key>CLAUDE_CODE_OAUTH_TOKEN<\/key>\s*<string>([^<]+)<\/string>/.exec(plist);
+		return match?.[1];
 	}
 
 	#getInstalledVersion(): string {
@@ -276,9 +300,9 @@ export class SystemServiceManager {
 		this.#exec(`sudo ${cmd}`);
 	}
 
-	#generateLaunchdPlist(bunGlobalBin: string, oauthToken?: string): string {
+	#generateLaunchdPlist(servicePath: string, oauthToken?: string): string {
 		const logDir = resolve(this.#home, ".macroclaw/logs");
-		const envVars = [`\n\t<key>PATH</key>\n\t\t<string>${bunGlobalBin}</string>`];
+		const envVars = [`\n\t<key>PATH</key>\n\t\t<string>${servicePath}</string>`];
 		if (oauthToken) {
 			envVars.push(`\n\t<key>CLAUDE_CODE_OAUTH_TOKEN</key>\n\t\t<string>${oauthToken}</string>`);
 		}
@@ -291,9 +315,8 @@ export class SystemServiceManager {
 	<string>com.macroclaw</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>/bin/bash</string>
-		<string>-lc</string>
-		<string>exec macroclaw start</string>
+		<string>macroclaw</string>
+		<string>start</string>
 	</array>
 	<key>KeepAlive</key>
 	<true/>
@@ -306,7 +329,7 @@ export class SystemServiceManager {
 `;
 	}
 
-	#generateSystemdUnit(bunGlobalBin: string): string {
+	#generateSystemdUnit(servicePath: string): string {
 		return `[Unit]
 Description=Macroclaw - Telegram-to-Claude-Code bridge
 After=network.target
@@ -314,8 +337,8 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=%h
-Environment=PATH=${bunGlobalBin}
-ExecStart=/bin/bash -lc 'exec macroclaw start'
+Environment=PATH=${servicePath}
+ExecStart=macroclaw start
 Restart=on-failure
 RestartSec=5
 

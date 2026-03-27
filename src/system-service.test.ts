@@ -7,7 +7,14 @@ const { existsSync: realExistsSync, mkdirSync, readFileSync, rmSync, writeFileSy
 const existsSync = realExistsSync;
 
 // Mock child_process and os — safe since no other tests depend on real execSync or userInfo
-const mockExecSync = mock((cmd: string, _opts?: object): string => cmd === "bun pm bin -g" ? "/home/testuser/.bun/bin\n" : "");
+const DEFAULT_LOGIN_PATH = "/usr/local/bin:/usr/bin:/bin";
+const DEFAULT_BUN_GLOBAL_BIN = "/home/testuser/.bun/bin";
+const DEFAULT_SERVICE_PATH = `${DEFAULT_BUN_GLOBAL_BIN}:${DEFAULT_LOGIN_PATH}`;
+const mockExecSync = mock((cmd: string, _opts?: object): string => {
+	if (cmd === "/bin/bash -lc 'printf %s \"$PATH\"'") return `${DEFAULT_LOGIN_PATH}\n`;
+	if (cmd === "bun pm bin -g") return `${DEFAULT_BUN_GLOBAL_BIN}\n`;
+	return "";
+});
 const mockUserInfo = mock(() => ({ username: "testuser", homedir: "/home/testuser", uid: 1000, gid: 1000, shell: "/bin/bash" }));
 const mockExistsSync = mock((path: string) => realExistsSync(path));
 
@@ -43,7 +50,11 @@ beforeEach(() => {
 	mockExecSync.mockClear();
 	mockUserInfo.mockClear();
 	mockExistsSync.mockClear();
-	mockExecSync.mockImplementation((cmd: string, _opts?: object): string => cmd === "bun pm bin -g" ? "/home/testuser/.bun/bin\n" : "");
+	mockExecSync.mockImplementation((cmd: string, _opts?: object): string => {
+		if (cmd === "/bin/bash -lc 'printf %s \"$PATH\"'") return `${DEFAULT_LOGIN_PATH}\n`;
+		if (cmd === "bun pm bin -g") return `${DEFAULT_BUN_GLOBAL_BIN}\n`;
+		return "";
+	});
 	mockUserInfo.mockImplementation(() => ({ username: "testuser", homedir: "/home/testuser", uid: 1000, gid: 1000, shell: "/bin/bash" }));
 	mockExistsSync.mockImplementation((path: string) => realExistsSync(path));
 });
@@ -167,7 +178,7 @@ describe("install", () => {
 		expect(() => mgr.install()).toThrow("Settings not found. Run `macroclaw setup` first.");
 	});
 
-	it("runs global install and resolves bun global bin for systemd", () => {
+	it("runs global install and resolves login shell PATH for systemd", () => {
 		const tmpHome = `/tmp/macroclaw-test-install-${Date.now()}`;
 		mkdirSync(join(tmpHome, ".macroclaw"), { recursive: true });
 		writeFileSync(join(tmpHome, ".macroclaw/settings.json"), "{}");
@@ -178,20 +189,17 @@ describe("install", () => {
 			if (path === "/var/lib/systemd/linger/testuser") return true; // already lingering
 			return realExistsSync(path);
 		});
-		mockExecSync.mockImplementation((cmd: string) => {
-			if (cmd === "bun pm bin -g") return "/home/testuser/.bun/bin\n";
-			return "";
-		});
 		const mgr = createManager({ home: tmpHome });
 		mgr.install();
 		rmSync(tmpHome, { recursive: true });
 
 		expect(mockExecSync).toHaveBeenCalledWith("bun install -g macroclaw", expect.anything());
+		expect(mockExecSync).toHaveBeenCalledWith("/bin/bash -lc 'printf %s \"$PATH\"'", expect.anything());
 		expect(mockExecSync).toHaveBeenCalledWith("bun pm bin -g", expect.anything());
 		expect(mockExecSync).not.toHaveBeenCalledWith("which macroclaw", expect.anything());
 	});
 
-	it("surfaces bun global bin resolution failures for systemd", () => {
+	it("surfaces login shell PATH resolution failures for systemd", () => {
 		const tmpHome = `/tmp/macroclaw-test-install-missing-path-${Date.now()}`;
 		mkdirSync(join(tmpHome, ".macroclaw"), { recursive: true });
 		writeFileSync(join(tmpHome, ".macroclaw/settings.json"), "{}");
@@ -202,7 +210,7 @@ describe("install", () => {
 			return realExistsSync(path);
 		});
 		mockExecSync.mockImplementation((cmd: string) => {
-			if (cmd === "bun pm bin -g") throw new Error("not found");
+			if (cmd === "/bin/bash -lc 'printf %s \"$PATH\"'") throw new Error("not found");
 			return "";
 		});
 
@@ -215,7 +223,7 @@ describe("install", () => {
 		rmSync(tmpHome, { recursive: true });
 	});
 
-	it("installs launchd service with bash -lc and OAuth token", () => {
+	it("installs launchd service with direct macroclaw invocation and OAuth token", () => {
 		const tmpHome = `/tmp/macroclaw-test-launchd-${Date.now()}`;
 		mkdirSync(join(tmpHome, ".macroclaw"), { recursive: true });
 		writeFileSync(join(tmpHome, ".macroclaw/settings.json"), "{}");
@@ -228,15 +236,13 @@ describe("install", () => {
 		const plistPath = join(plistDir, "com.macroclaw.plist");
 		expect(existsSync(plistPath)).toBe(true);
 		const writtenContent = readFileSync(plistPath, "utf-8");
-		// bash -lc pattern — no hardcoded binary paths
-		expect(writtenContent).toContain("<string>/bin/bash</string>");
-		expect(writtenContent).toContain("<string>-lc</string>");
-		expect(writtenContent).toContain("<string>exec macroclaw start</string>");
+		expect(writtenContent).toContain("<string>macroclaw</string>");
+		expect(writtenContent).toContain("<string>start</string>");
 		expect(writtenContent).toContain("<key>KeepAlive</key>");
 		expect(writtenContent).toContain(".macroclaw/logs/stdout.log");
 		expect(writtenContent).toContain("<key>EnvironmentVariables</key>");
 		expect(writtenContent).toContain("<key>PATH</key>");
-		expect(writtenContent).toContain("<string>/home/testuser/.bun/bin</string>");
+		expect(writtenContent).toContain(`<string>${DEFAULT_SERVICE_PATH}</string>`);
 		expect(writtenContent).not.toContain("<key>HOME</key>");
 		// OAuth token is preserved
 		expect(writtenContent).toContain("<key>CLAUDE_CODE_OAUTH_TOKEN</key>");
@@ -246,14 +252,14 @@ describe("install", () => {
 		rmSync(tmpHome, { recursive: true });
 	});
 
-	it("surfaces bun global bin resolution failures for launchd", () => {
+	it("surfaces login shell PATH resolution failures for launchd", () => {
 		const tmpHome = `/tmp/macroclaw-test-launchd-missing-path-${Date.now()}`;
 		mkdirSync(join(tmpHome, ".macroclaw"), { recursive: true });
 		writeFileSync(join(tmpHome, ".macroclaw/settings.json"), "{}");
 		mkdirSync(join(tmpHome, "Library/LaunchAgents"), { recursive: true });
 
 		mockExecSync.mockImplementation((cmd: string) => {
-			if (cmd === "bun pm bin -g") throw new Error("not found");
+			if (cmd === "/bin/bash -lc 'printf %s \"$PATH\"'") throw new Error("not found");
 			return "";
 		});
 
@@ -266,14 +272,14 @@ describe("install", () => {
 		rmSync(tmpHome, { recursive: true });
 	});
 
-	it("surfaces bun global bin permission failures for launchd", () => {
+	it("surfaces login shell PATH permission failures for launchd", () => {
 		const tmpHome = `/tmp/macroclaw-test-launchd-missing-bin-dir-${Date.now()}`;
 		mkdirSync(join(tmpHome, ".macroclaw"), { recursive: true });
 		writeFileSync(join(tmpHome, ".macroclaw/settings.json"), "{}");
 		mkdirSync(join(tmpHome, "Library/LaunchAgents"), { recursive: true });
 
 		mockExecSync.mockImplementation((cmd: string) => {
-			if (cmd === "bun pm bin -g") throw new Error("permission denied");
+			if (cmd === "/bin/bash -lc 'printf %s \"$PATH\"'") throw new Error("permission denied");
 			return "";
 		});
 
@@ -295,7 +301,7 @@ describe("install", () => {
 		const writtenContent = readFileSync(join(tmpHome, "Library/LaunchAgents/com.macroclaw.plist"), "utf-8");
 		expect(writtenContent).toContain("<key>EnvironmentVariables</key>");
 		expect(writtenContent).toContain("<key>PATH</key>");
-		expect(writtenContent).toContain("<string>/home/testuser/.bun/bin</string>");
+		expect(writtenContent).toContain(`<string>${DEFAULT_SERVICE_PATH}</string>`);
 		expect(writtenContent).not.toContain("CLAUDE_CODE_OAUTH_TOKEN");
 		rmSync(tmpHome, { recursive: true });
 	});
@@ -337,7 +343,7 @@ describe("install", () => {
 		rmSync(tmpHome, { recursive: true });
 	});
 
-	it("installs systemd user service with bash -lc and no hardcoded paths", () => {
+	it("installs systemd user service with direct macroclaw invocation and no hardcoded paths", () => {
 		const tmpHome = `/tmp/macroclaw-test-systemd-${Date.now()}`;
 		mkdirSync(join(tmpHome, ".macroclaw"), { recursive: true });
 		writeFileSync(join(tmpHome, ".macroclaw/settings.json"), "{}");
@@ -358,11 +364,11 @@ describe("install", () => {
 		expect(unitContent).toContain("WantedBy=default.target");
 		expect(unitContent).not.toContain("User=");
 		expect(unitContent).not.toContain("Group=");
-		// systemd seeds PATH with Bun's global bin; login shell can extend it via profile files
+		// systemd snapshots the login shell PATH and ensures Bun's global bin is included
 		expect(unitContent).not.toContain("Environment=HOME=");
-		expect(unitContent).toContain("Environment=PATH=/home/testuser/.bun/bin");
+		expect(unitContent).toContain(`Environment=PATH=${DEFAULT_SERVICE_PATH}`);
 		expect(unitContent).toContain("WorkingDirectory=%h");
-		expect(unitContent).toContain("ExecStart=/bin/bash -lc 'exec macroclaw start'");
+		expect(unitContent).toContain("ExecStart=macroclaw start");
 
 		// Lingering enabled via sudo
 		expect(mockExecSync).toHaveBeenCalledWith("sudo loginctl enable-linger testuser", expect.anything());
@@ -672,7 +678,7 @@ describe("update", () => {
 		);
 	});
 
-	it("runs bun install without stop/start", () => {
+	it("runs bun install without stop/start on launchd", () => {
 		const tmpHome = `/tmp/macroclaw-test-updateld-${Date.now()}`;
 		mkdirSync(join(tmpHome, "Library/LaunchAgents"), { recursive: true });
 		writeFileSync(join(tmpHome, "Library/LaunchAgents/com.macroclaw.plist"), "test");
@@ -688,6 +694,100 @@ describe("update", () => {
 		expect(mockExecSync).not.toHaveBeenCalledWith(expect.stringContaining("systemctl"), expect.anything());
 		expect(result.previousVersion).toBe("0.6.0");
 		expect(result.currentVersion).toBe("0.6.0");
+		rmSync(tmpHome, { recursive: true });
+	});
+
+	it("refreshes launchd PATH snapshot and preserves oauth token on update", () => {
+		const tmpHome = `/tmp/macroclaw-test-update-launchd-${Date.now()}`;
+		const plistDir = join(tmpHome, "Library/LaunchAgents");
+		mkdirSync(plistDir, { recursive: true });
+		writeFileSync(join(plistDir, "com.macroclaw.plist"), `<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>/old/path</string>
+		<key>CLAUDE_CODE_OAUTH_TOKEN</key>
+		<string>sk-test-token</string>
+	</dict>
+</dict>
+</plist>
+`);
+
+		mockExecSync.mockImplementation((cmd: string) => {
+			if (cmd === "bun install -g macroclaw@latest") return "";
+			if (cmd === "/bin/bash -lc 'printf %s \"$PATH\"'") return "/custom/bin:/usr/bin:/bin\n";
+			if (cmd === "bun pm bin -g") return "/home/testuser/.bun/bin\n";
+			if (cmd === "bun pm ls -g") return "macroclaw@0.7.0\n";
+			return "";
+		});
+
+		const mgr = createManager({ platform: "darwin", home: tmpHome });
+		const result = mgr.update();
+		const plist = readFileSync(join(plistDir, "com.macroclaw.plist"), "utf-8");
+
+		expect(mockExecSync).toHaveBeenCalledWith("bun install -g macroclaw@latest", expect.anything());
+		expect(mockExecSync).toHaveBeenCalledWith("/bin/bash -lc 'printf %s \"$PATH\"'", expect.anything());
+		expect(mockExecSync).toHaveBeenCalledWith("bun pm bin -g", expect.anything());
+		expect(plist).toContain("<string>/home/testuser/.bun/bin:/custom/bin:/usr/bin:/bin</string>");
+		expect(plist).toContain("<key>CLAUDE_CODE_OAUTH_TOKEN</key>");
+		expect(plist).toContain("<string>sk-test-token</string>");
+		expect(result.previousVersion).toBe("0.7.0");
+		expect(result.currentVersion).toBe("0.7.0");
+		rmSync(tmpHome, { recursive: true });
+	});
+
+	it("refreshes systemd PATH snapshot and reloads daemon on update", () => {
+		const tmpHome = `/tmp/macroclaw-test-update-systemd-${Date.now()}`;
+		const unitDir = join(tmpHome, ".config/systemd/user");
+		mkdirSync(unitDir, { recursive: true });
+		writeFileSync(join(unitDir, "macroclaw.service"), "test");
+
+		mockExecSync.mockImplementation((cmd: string) => {
+			if (cmd === "bun install -g macroclaw@latest") return "";
+			if (cmd === "/bin/bash -lc 'printf %s \"$PATH\"'") return "/custom/bin:/usr/bin:/bin\n";
+			if (cmd === "bun pm bin -g") return "/home/testuser/.bun/bin\n";
+			if (cmd === "bun pm ls -g") return "macroclaw@0.7.0\n";
+			return "";
+		});
+
+		const mgr = createManager({ platform: "linux", home: tmpHome });
+		const result = mgr.update();
+		const unitContent = readFileSync(join(unitDir, "macroclaw.service"), "utf-8");
+
+		expect(mockExecSync).toHaveBeenCalledWith("bun install -g macroclaw@latest", expect.anything());
+		expect(mockExecSync).toHaveBeenCalledWith("/bin/bash -lc 'printf %s \"$PATH\"'", expect.anything());
+		expect(mockExecSync).toHaveBeenCalledWith("bun pm bin -g", expect.anything());
+		expect(mockExecSync).toHaveBeenCalledWith("systemctl --user daemon-reload", expect.anything());
+		expect(unitContent).toContain("Environment=PATH=/home/testuser/.bun/bin:/custom/bin:/usr/bin:/bin");
+		expect(result.previousVersion).toBe("0.7.0");
+		expect(result.currentVersion).toBe("0.7.0");
+		rmSync(tmpHome, { recursive: true });
+	});
+
+	it("does not duplicate bun global bin when it is already in login shell PATH", () => {
+		const tmpHome = `/tmp/macroclaw-test-systemd-path-present-${Date.now()}`;
+		mkdirSync(join(tmpHome, ".macroclaw"), { recursive: true });
+		writeFileSync(join(tmpHome, ".macroclaw/settings.json"), "{}");
+
+		mockUserInfo.mockImplementation(() => ({ username: "testuser", homedir: tmpHome, uid: 1000, gid: 1000, shell: "/bin/bash" }));
+		mockExistsSync.mockImplementation((path: string) => {
+			if (path === "/var/lib/systemd/linger/testuser") return true;
+			return realExistsSync(path);
+		});
+		mockExecSync.mockImplementation((cmd: string) => {
+			if (cmd === "/bin/bash -lc 'printf %s \"$PATH\"'") return "/usr/local/bin:/home/testuser/.bun/bin:/usr/bin:/bin\n";
+			if (cmd === "bun pm bin -g") return "/home/testuser/.bun/bin\n";
+			return "";
+		});
+
+		const mgr = createManager({ home: tmpHome });
+		mgr.install();
+		const unitContent = readFileSync(join(tmpHome, ".config/systemd/user/macroclaw.service"), "utf-8");
+
+		expect(unitContent).toContain("Environment=PATH=/usr/local/bin:/home/testuser/.bun/bin:/usr/bin:/bin");
+		expect(unitContent).not.toContain("Environment=PATH=/home/testuser/.bun/bin:/usr/local/bin:/home/testuser/.bun/bin:/usr/bin:/bin");
 		rmSync(tmpHome, { recursive: true });
 	});
 
