@@ -257,7 +257,7 @@ export class Claude {
       "--input-format", "stream-json",
       "--output-format", "stream-json",
       "--verbose",
-      "--disallowedTools", "CronList,CronDelete,CronCreate,AskUserQuestion",
+      "--disallowedTools", "CronList,CronDelete,CronCreate,AskUserQuestion,RemoteTrigger",
     ];
 
     if (mode.kind === "resume") {

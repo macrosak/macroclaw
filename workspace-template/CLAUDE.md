@@ -63,6 +63,8 @@ Skills live in `.claude/skills/`.
 
 When creating new skills, always put them in `.claude/skills/` within this workspace.
 
+**Never use the built-in `/schedule` skill** — it manages cloud remote triggers which we don't use. Always use `/schedule-event` for scheduling.
+
 **Before using a skill**, check `TOOLS.md` for operational notes — custom instructions, overrides, workarounds, and tips that supplement the skill's own SKILL.md. Update `TOOLS.md` when you discover new issues or tricks.
 
 ## Workspace Structure — Keep It Clean!
@@ -79,7 +81,7 @@ When creating new skills, always put them in `.claude/skills/` within this works
 Structure:
 - `.claude/skills/` — local agent skills
 - `memory/` — daily logs (YYYY-MM-DD.md)
-- `data/schedule.json` — scheduled events and reminders (hot-reloaded, no restart needed) (use schedule skill to modify)
+- `data/schedule.json` — scheduled events and reminders (hot-reloaded, no restart needed) (use schedule-event skill to modify)
 
 ## Safety
 

@@ -479,7 +479,7 @@ describe("Claude factory", () => {
       claude.newSession(textResult);
       const args = spawnArgs();
       expect(args).toContain("--disallowedTools");
-      expect(args).toContain("CronList,CronDelete,CronCreate,AskUserQuestion");
+      expect(args).toContain("CronList,CronDelete,CronCreate,AskUserQuestion,RemoteTrigger");
     });
 
     it("spawns with stdin: pipe, stdout: pipe, stderr: pipe", () => {
