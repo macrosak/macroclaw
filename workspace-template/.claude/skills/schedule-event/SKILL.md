@@ -1,5 +1,5 @@
 ---
-name: schedule
+name: schedule-event
 description: "Schedule events, reminders, and recurring tasks. Use when the user wants to: set a reminder, schedule something for later, create a recurring task, set up a periodic check, automate a prompt on a schedule, or plan a one-time or repeating event at a specific time."
 ---
 
