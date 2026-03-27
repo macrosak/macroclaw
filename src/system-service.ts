@@ -20,6 +20,7 @@ export interface ServiceStatus {
 export interface UpdateResult {
 	previousVersion: string;
 	currentVersion: string;
+	logTailCommand: string;
 }
 
 export class SystemServiceManager {
@@ -192,21 +193,31 @@ export class SystemServiceManager {
 	update(): UpdateResult {
 		this.#requireInstalled();
 
+		const wasRunning = this.isRunning;
+		if (wasRunning) {
+			this.stop();
+		}
+
 		const previousVersion = this.#getInstalledVersion();
 		this.#exec("bun install -g macroclaw@latest");
-		if (this.#platform === "systemd") {
-			const servicePath = this.#getServicePath();
-			writeFileSync(this.serviceFilePath, this.#generateSystemdUnit(servicePath));
-			this.#exec("systemctl --user daemon-reload");
-		} else {
-			const servicePath = this.#getServicePath();
-			const oauthToken = this.#getLaunchdOauthToken();
-			writeFileSync(this.serviceFilePath, this.#generateLaunchdPlist(servicePath, oauthToken));
-		}
+		this.#exec("macroclaw service refresh");
+		const logTailCommand = this.start();
 		const currentVersion = this.#getInstalledVersion();
 
-		log.debug({ previousVersion, currentVersion }, "Service updated");
-		return { previousVersion, currentVersion };
+		log.debug({ previousVersion, currentVersion, wasRunning }, "Service updated");
+		return { previousVersion, currentVersion, logTailCommand };
+	}
+
+	refresh(): void {
+		this.#requireInstalled();
+		const servicePath = this.#getServicePath();
+		if (this.#platform === "systemd") {
+			writeFileSync(this.serviceFilePath, this.#generateSystemdUnit(servicePath));
+			this.#exec("systemctl --user daemon-reload");
+			return;
+		}
+		const oauthToken = this.#getLaunchdOauthToken();
+		writeFileSync(this.serviceFilePath, this.#generateLaunchdPlist(servicePath, oauthToken));
 	}
 
 	status(): ServiceStatus {

@@ -59,20 +59,18 @@ export class Cli {
 				this.#serviceManager.stop();
 				console.log("Service stopped.");
 				break;
+			case "refresh":
+				this.#serviceManager.refresh();
+				console.log("Service refreshed.");
+				break;
 			case "update": {
-				if (this.#serviceManager.isRunning) {
-					this.#serviceManager.stop();
-					console.log("Service stopped.");
-				}
 				const result = this.#serviceManager.update();
 				if (result.previousVersion === result.currentVersion) {
 					console.log(`macroclaw v${result.currentVersion} (already up to date)`);
 				} else {
 					console.log(`Updated macroclaw v${result.previousVersion} → v${result.currentVersion}`);
 				}
-
-				const logCmd = this.#serviceManager.start();
-				console.log(`Service started. Check logs:\n  ${logCmd}`);
+				console.log(`Service started. Check logs:\n  ${result.logTailCommand}`);
 				break;
 			}
 			case "restart": {
@@ -173,6 +171,11 @@ const serviceUpdateCommand = defineCommand({
 	run: () => { try { defaultCli.service("update"); } catch (err) { handleError(err); } },
 });
 
+const serviceRefreshCommand = defineCommand({
+	meta: { name: "refresh", description: "Regenerate service files from current configuration" },
+	run: () => { try { defaultCli.service("refresh"); } catch (err) { handleError(err); } },
+});
+
 const serviceStatusCommand = defineCommand({
 	meta: { name: "status", description: "Show service installation and running status" },
 	run: () => { try { defaultCli.service("status"); } catch (err) { handleError(err); } },
@@ -200,6 +203,7 @@ const serviceCommand = defineCommand({
 		stop: serviceStopCommand,
 		restart: serviceRestartCommand,
 		update: serviceUpdateCommand,
+		refresh: serviceRefreshCommand,
 		status: serviceStatusCommand,
 		logs: serviceLogsCommand,
 	},
