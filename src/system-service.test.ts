@@ -10,6 +10,7 @@ const existsSync = realExistsSync;
 const DEFAULT_LOGIN_PATH = "/usr/local/bin:/usr/bin:/bin";
 const DEFAULT_BUN_GLOBAL_BIN = "/home/testuser/.bun/bin";
 const DEFAULT_SERVICE_PATH = `${DEFAULT_BUN_GLOBAL_BIN}:${DEFAULT_LOGIN_PATH}`;
+const DEFAULT_EXECUTABLE_PATH = `${DEFAULT_BUN_GLOBAL_BIN}/macroclaw`;
 const mockExecSync = mock((cmd: string, _opts?: object): string => {
 	if (cmd === "/bin/bash -lc 'printf %s \"$PATH\"'") return `${DEFAULT_LOGIN_PATH}\n`;
 	if (cmd === "bun pm bin -g") return `${DEFAULT_BUN_GLOBAL_BIN}\n`;
@@ -236,7 +237,7 @@ describe("install", () => {
 		const plistPath = join(plistDir, "com.macroclaw.plist");
 		expect(existsSync(plistPath)).toBe(true);
 		const writtenContent = readFileSync(plistPath, "utf-8");
-		expect(writtenContent).toContain("<string>macroclaw</string>");
+		expect(writtenContent).toContain(`<string>${DEFAULT_EXECUTABLE_PATH}</string>`);
 		expect(writtenContent).toContain("<string>start</string>");
 		expect(writtenContent).toContain("<key>KeepAlive</key>");
 		expect(writtenContent).toContain(".macroclaw/logs/stdout.log");
@@ -368,7 +369,7 @@ describe("install", () => {
 		expect(unitContent).not.toContain("Environment=HOME=");
 		expect(unitContent).toContain(`Environment=PATH=${DEFAULT_SERVICE_PATH}`);
 		expect(unitContent).toContain("WorkingDirectory=%h");
-		expect(unitContent).toContain("ExecStart=macroclaw start");
+		expect(unitContent).toContain(`ExecStart=${DEFAULT_EXECUTABLE_PATH} start`);
 
 		// Lingering enabled via sudo
 		expect(mockExecSync).toHaveBeenCalledWith("sudo loginctl enable-linger testuser", expect.anything());
@@ -801,6 +802,7 @@ describe("refresh", () => {
 		expect(mockExecSync).toHaveBeenCalledWith("/bin/bash -lc 'printf %s \"$PATH\"'", expect.anything());
 		expect(mockExecSync).toHaveBeenCalledWith("bun pm bin -g", expect.anything());
 		expect(plist).toContain("<string>/home/testuser/.bun/bin:/custom/bin:/usr/bin:/bin</string>");
+		expect(plist).toContain("<string>/home/testuser/.bun/bin/macroclaw</string>");
 		expect(plist).toContain("<key>CLAUDE_CODE_OAUTH_TOKEN</key>");
 		expect(plist).toContain("<string>sk-test-token</string>");
 		rmSync(tmpHome, { recursive: true });
@@ -826,6 +828,7 @@ describe("refresh", () => {
 		expect(mockExecSync).toHaveBeenCalledWith("bun pm bin -g", expect.anything());
 		expect(mockExecSync).toHaveBeenCalledWith("systemctl --user daemon-reload", expect.anything());
 		expect(unitContent).toContain("Environment=PATH=/home/testuser/.bun/bin:/custom/bin:/usr/bin:/bin");
+		expect(unitContent).toContain("ExecStart=/home/testuser/.bun/bin/macroclaw start");
 		rmSync(tmpHome, { recursive: true });
 	});
 
@@ -845,8 +848,30 @@ describe("refresh", () => {
 		mgr.refresh();
 		const unitContent = readFileSync(join(unitDir, "macroclaw.service"), "utf-8");
 
-		expect(unitContent).toContain("Environment=PATH=/usr/local/bin:/home/testuser/.bun/bin:/usr/bin:/bin");
-		expect(unitContent).not.toContain("Environment=PATH=/home/testuser/.bun/bin:/usr/local/bin:/home/testuser/.bun/bin:/usr/bin:/bin");
+		expect(unitContent).toContain("Environment=PATH=/home/testuser/.bun/bin:/usr/local/bin:/usr/bin:/bin");
+		expect(unitContent).not.toContain("Environment=PATH=/usr/local/bin:/home/testuser/.bun/bin:/usr/local/bin:/usr/bin:/bin");
+		rmSync(tmpHome, { recursive: true });
+	});
+
+	it("dedupes repeated PATH entries while keeping bun global bin first", () => {
+		const tmpHome = `/tmp/macroclaw-test-refresh-systemd-path-dedup-${Date.now()}`;
+		const unitDir = join(tmpHome, ".config/systemd/user");
+		mkdirSync(unitDir, { recursive: true });
+		writeFileSync(join(unitDir, "macroclaw.service"), "test");
+
+		mockExecSync.mockImplementation((cmd: string) => {
+			if (cmd === "/bin/bash -lc 'printf %s \"$PATH\"'") {
+				return "/home/testuser/.bun/bin:/usr/local/bin:/usr/bin:/usr/local/bin:/usr/bin:/bin:/home/testuser/.bun/bin\n";
+			}
+			if (cmd === "bun pm bin -g") return "/home/testuser/.bun/bin\n";
+			return "";
+		});
+
+		const mgr = createManager({ platform: "linux", home: tmpHome });
+		mgr.refresh();
+		const unitContent = readFileSync(join(unitDir, "macroclaw.service"), "utf-8");
+
+		expect(unitContent).toContain("Environment=PATH=/home/testuser/.bun/bin:/usr/local/bin:/usr/bin:/bin");
 		rmSync(tmpHome, { recursive: true });
 	});
 });
