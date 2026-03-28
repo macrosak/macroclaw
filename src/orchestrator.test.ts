@@ -930,6 +930,32 @@ describe("Orchestrator", () => {
       expect(callCount).toBeGreaterThanOrEqual(2);
     });
 
+    it("passes action and actionReason through result XML for silent background agent", async () => {
+      saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
+      const { process: bgProc, resolve: resolveBg } = pendingProcess("bg-sid");
+
+      let callCount = 0;
+      const claude = mockClaude((): ClaudeProcess<unknown> => {
+        callCount++;
+        if (callCount === 1) return bgProc;
+        return autoProcess({ action: "silent", actionReason: "nothing to report" }, `sid-${callCount}`);
+      });
+      const { orch } = makeOrchestrator(claude);
+
+      orch.handleBackgroundCommand("check something");
+      await waitForProcessing();
+
+      resolveBg({ action: "silent", actionReason: "no new results" });
+      await waitForProcessing(100);
+
+      const prompts = sentPrompts(claude);
+      const bgResultPrompt = prompts.find((p: string) => p?.includes("background-agent-result"));
+      expect(bgResultPrompt).toBeDefined();
+      expect(bgResultPrompt).toContain('action="silent"');
+      expect(bgResultPrompt).toContain('action-reason="no new results"');
+      expect(bgResultPrompt).not.toContain("<text>");
+    });
+
     it("feeds error back to queue on spawn failure", async () => {
       saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
       const { process: bgProc, reject: rejectBg } = pendingProcess("bg-sid");
