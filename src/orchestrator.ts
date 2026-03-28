@@ -437,8 +437,12 @@ export class Orchestrator {
         return this.#prompts.backgroundAgentResult(
           name,
           request.name,
-          { text: request.response.message || "[No output]", files: request.response.files },
-          "Forward this result to the user (action=\"send\"). Summarize or add context from the conversation as appropriate.",
+          {
+            action: request.response.action,
+            actionReason: request.response.actionReason,
+            text: request.response.message,
+            files: request.response.files,
+          },
           { backgroundedEvent },
         );
       case "background-agent-progress":

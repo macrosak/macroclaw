@@ -170,12 +170,12 @@ describe("backgroundAgentResult", () => {
     const result = p.backgroundAgentResult(
       "bg-research",
       "research",
-      { text: "found 3 papers" },
-      "Forward to user.",
+      { action: "send", actionReason: "completed", text: "found 3 papers" },
     );
     expect(result).toContain('type="background-agent-result"');
     expect(result).toContain('<original-event name="research" />');
-    expect(result).toContain("<result>");
+    expect(result).toContain('action="send"');
+    expect(result).toContain('action-reason="completed"');
     expect(result).toContain("<text>found 3 papers</text>");
     expect(result).toContain("</result>");
     expect(result).not.toContain("<files>");
@@ -185,27 +185,26 @@ describe("backgroundAgentResult", () => {
     const result = p.backgroundAgentResult(
       "bg-research",
       "research",
-      { text: "here are the screenshots", files: ["/tmp/screenshot.png"] },
-      "Forward to user.",
+      { action: "send", actionReason: "done", text: "here are the screenshots", files: ["/tmp/screenshot.png"] },
     );
-    expect(result).toContain("<result>");
+    expect(result).toContain('action="send"');
     expect(result).toContain("<text>here are the screenshots</text>");
     expect(result).toContain('<file path="/tmp/screenshot.png" />');
     expect(result).toContain("</result>");
   });
 
-  it("includes instructions after result", () => {
+  it("builds self-closing result for silent action", () => {
     const result = p.backgroundAgentResult(
-      "bg-research",
-      "research",
-      { text: "done" },
-      "Forward to user.",
+      "bg-heartbeat",
+      "cron-heartbeat",
+      { action: "silent", actionReason: "no new results" },
     );
-    expect(result).toContain("<instructions>Forward to user.</instructions>");
-    const instrIdx = result.indexOf("<instructions>");
-    const closeIdx = result.indexOf("</event>");
-    expect(instrIdx).toBeLessThan(closeIdx);
-    expect(instrIdx).toBeGreaterThan(result.indexOf("</result>"));
+    expect(result).toContain('action="silent"');
+    expect(result).toContain('action-reason="no new results"');
+    expect(result).toContain("<result ");
+    expect(result).toContain("/>");
+    expect(result).not.toContain("<text>");
+    expect(result).not.toContain("</result>");
   });
 });
 

@@ -25,7 +25,7 @@ Event format: every incoming message is wrapped in an <event> XML block. Attribu
   - button-click — user tapped an inline button. Label in <button>.
   - schedule-trigger — automated scheduled task. Contains <schedule> with name and optional missed-by/scheduled-at attributes. Prefer action="silent" when nothing noteworthy.
   - background-agent-start — you are a background agent. Complete the task in <text> and return a result.
-  - background-agent-result — a background agent has finished. Contains <original-event name="..." /> linking to the agent that produced it, and a <result> block with <text> and optional <files>. Always use action="send" — the user expects to see the outcome. Summarize, relay, or add additional context from the conversation as appropriate.
+  - background-agent-result — a background agent has finished. Contains <original-event name="..." /> linking to the agent that produced it, and a <result> block with action and action-reason attributes, plus optional <text> and <files>. If action="send", forward to the user (use action="send") — summarize or add context as appropriate. If action="silent", the agent had nothing to report — use action="silent" and do not send a message, but keep the context in mind.
   - background-agent-progress — interim progress update from a still-running background agent. Contains <original-event name="..." /> and a <progress> element. This is NOT a final result. Do not report to the user unless it contains exceptionally important information (errors, blockers, urgent findings). Keep this context in mind — if the user later asks about progress of a background task, use the latest progress update to answer.
   - peek — status check on a running session. Contains <target-event name="..." /> identifying the event being peeked at. Only consider progress since that event started. Respond with a brief status update (2-3 sentences): what has been done, what's happening now, what's remaining. Return plain text, not structured output.
   - health-check — automated status check on a background agent. Contains <target-event name="..." />. Report whether the task is complete or still in progress.
@@ -46,7 +46,7 @@ Inner elements:
 - <original-event name="..." /> — in background-agent-result, links to the agent that produced the result.
 - <target-event name="..." /> — in peek, identifies the event being checked on.
 - <progress> — interim status from a still-running background agent.
-- <result> — wraps the output from a completed background agent. Contains <text> and optional <files>.
+- <result> — wraps the output from a completed background agent. Attributes: action ("send"|"silent"), action-reason. Contains optional <text> and <files>.
 - <instructions> — inline guidance for how to handle this specific event. Always follow these instructions.
 
 Background agents: spawn alongside any response via backgroundAgents array:
@@ -78,7 +78,7 @@ interface BuildXmlFields {
   targetEvent?: string;
   instructions?: string;
   progress?: string;
-  result?: { text: string; files?: string[] };
+  result?: { action: string; actionReason: string; text?: string; files?: string[] };
 }
 
 export class PromptBuilder {
@@ -130,16 +130,23 @@ export class PromptBuilder {
     }
 
     if (fields.result) {
-      lines.push("<result>");
-      lines.push(`<text>${esc(fields.result.text)}</text>`);
-      if (fields.result.files?.length) {
-        lines.push("<files>");
-        for (const f of fields.result.files) {
-          lines.push(`  <file path="${esc(f)}" />`);
+      const resultAttrs = [`action="${esc(fields.result.action)}" action-reason="${esc(fields.result.actionReason)}"`];
+      if (fields.result.text || fields.result.files?.length) {
+        lines.push(`<result ${resultAttrs.join(" ")}>`);
+        if (fields.result.text) {
+          lines.push(`<text>${esc(fields.result.text)}</text>`);
         }
-        lines.push("</files>");
+        if (fields.result.files?.length) {
+          lines.push("<files>");
+          for (const f of fields.result.files) {
+            lines.push(`  <file path="${esc(f)}" />`);
+          }
+          lines.push("</files>");
+        }
+        lines.push("</result>");
+      } else {
+        lines.push(`<result ${resultAttrs.join(" ")} />`);
       }
-      lines.push("</result>");
     }
 
     if (fields.button) {
@@ -182,8 +189,8 @@ export class PromptBuilder {
     return PromptBuilder.#buildXml(name, "background-agent-start", "background", this.#localTime(), { text });
   }
 
-  backgroundAgentResult(name: string, originalEvent: string, result: { text: string; files?: string[] }, instructions: string, opts?: { backgroundedEvent?: string }): string {
-    return PromptBuilder.#buildXml(name, "background-agent-result", "main", this.#localTime(), { originalEvent, result, instructions, backgroundedEvent: opts?.backgroundedEvent });
+  backgroundAgentResult(name: string, originalEvent: string, result: { action: string; actionReason: string; text?: string; files?: string[] }, opts?: { backgroundedEvent?: string }): string {
+    return PromptBuilder.#buildXml(name, "background-agent-result", "main", this.#localTime(), { originalEvent, result, backgroundedEvent: opts?.backgroundedEvent });
   }
 
   backgroundAgentProgress(name: string, originalEvent: string, progress: string, instructions: string, opts?: { backgroundedEvent?: string }): string {
