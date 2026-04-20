@@ -83,9 +83,11 @@ interface BuildXmlFields {
 
 export class PromptBuilder {
   readonly #timeZone: string;
+  readonly #chatName: string | undefined;
 
-  constructor(timeZone: string) {
+  constructor(timeZone: string, chatName?: string) {
     this.#timeZone = timeZone;
+    this.#chatName = chatName;
   }
 
   get systemPrompt(): string {
@@ -98,6 +100,10 @@ export class PromptBuilder {
 
   static #escapeXml(text: string): string {
     return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  #withChat(xml: string): string {
+    return this.#chatName ? `<chat>${PromptBuilder.#escapeXml(this.#chatName)}</chat>\n${xml}` : xml;
   }
 
   static #buildXml(name: string, type: string, session: string, time: string, fields: BuildXmlFields): string {
@@ -174,34 +180,34 @@ export class PromptBuilder {
   }
 
   userMessage(name: string, text: string, opts?: { files?: string[]; backgroundedEvent?: string }): string {
-    return PromptBuilder.#buildXml(name, "user-message", "main", this.#localTime(), { text, files: opts?.files, backgroundedEvent: opts?.backgroundedEvent });
+    return this.#withChat(PromptBuilder.#buildXml(name, "user-message", "main", this.#localTime(), { text, files: opts?.files, backgroundedEvent: opts?.backgroundedEvent }));
   }
 
   buttonClick(name: string, button: string, opts?: { backgroundedEvent?: string }): string {
-    return PromptBuilder.#buildXml(name, "button-click", "main", this.#localTime(), { button, backgroundedEvent: opts?.backgroundedEvent });
+    return this.#withChat(PromptBuilder.#buildXml(name, "button-click", "main", this.#localTime(), { button, backgroundedEvent: opts?.backgroundedEvent }));
   }
 
   scheduleTrigger(name: string, schedule: { name: string; missedBy?: string; scheduledAt?: string }, text: string): string {
-    return PromptBuilder.#buildXml(name, "schedule-trigger", "background", this.#localTime(), { schedule, text });
+    return this.#withChat(PromptBuilder.#buildXml(name, "schedule-trigger", "background", this.#localTime(), { schedule, text }));
   }
 
   backgroundAgentStart(name: string, text: string): string {
-    return PromptBuilder.#buildXml(name, "background-agent-start", "background", this.#localTime(), { text });
+    return this.#withChat(PromptBuilder.#buildXml(name, "background-agent-start", "background", this.#localTime(), { text }));
   }
 
   backgroundAgentResult(name: string, originalEvent: string, result: { action: string; actionReason: string; text?: string; files?: string[] }, opts?: { backgroundedEvent?: string }): string {
-    return PromptBuilder.#buildXml(name, "background-agent-result", "main", this.#localTime(), { originalEvent, result, backgroundedEvent: opts?.backgroundedEvent });
+    return this.#withChat(PromptBuilder.#buildXml(name, "background-agent-result", "main", this.#localTime(), { originalEvent, result, backgroundedEvent: opts?.backgroundedEvent }));
   }
 
   backgroundAgentProgress(name: string, originalEvent: string, progress: string, instructions: string, opts?: { backgroundedEvent?: string }): string {
-    return PromptBuilder.#buildXml(name, "background-agent-progress", "main", this.#localTime(), { originalEvent, progress, instructions, backgroundedEvent: opts?.backgroundedEvent });
+    return this.#withChat(PromptBuilder.#buildXml(name, "background-agent-progress", "main", this.#localTime(), { originalEvent, progress, instructions, backgroundedEvent: opts?.backgroundedEvent }));
   }
 
   peek(name: string, targetEvent: string, instructions: string): string {
-    return PromptBuilder.#buildXml(name, "peek", "background", this.#localTime(), { targetEvent, instructions });
+    return this.#withChat(PromptBuilder.#buildXml(name, "peek", "background", this.#localTime(), { targetEvent, instructions }));
   }
 
   healthCheck(name: string, targetEvent: string, instructions: string): string {
-    return PromptBuilder.#buildXml(name, "health-check", "background", this.#localTime(), { targetEvent, instructions });
+    return this.#withChat(PromptBuilder.#buildXml(name, "health-check", "background", this.#localTime(), { targetEvent, instructions }));
   }
 }

@@ -123,7 +123,7 @@ export class Orchestrator {
   constructor(config: OrchestratorConfig) {
     this.#config = config;
     this.#chatName = config.chatName ?? "admin";
-    this.#prompts = new PromptBuilder(config.timeZone);
+    this.#prompts = new PromptBuilder(config.timeZone, this.#chatName);
     const envVars: Record<string, string> = { TZ: config.timeZone };
     this.#claude = config.claude ?? new Claude({ workspace: config.workspace, systemPrompt: this.#prompts.systemPrompt, envVars });
     this.#waitThreshold = config.waitThreshold ?? WAIT_THRESHOLD;
