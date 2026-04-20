@@ -1,8 +1,9 @@
 import type { Bot } from "grammy";
-import { AuthorizedChats } from "./authorized-chats";
+import { AuthorizedChats, DuplicateChatError, InvalidChatNameError, UnknownChatError } from "./authorized-chats";
 import { createLogger } from "./logger";
 import { type Claude, Orchestrator, type OrchestratorResponse } from "./orchestrator";
 import { Scheduler } from "./scheduler";
+import { clearMainSession } from "./sessions";
 import type { SpeechToText } from "./speech-to-text";
 import { createBot, downloadFile, sendFile, sendResponse } from "./telegram";
 
@@ -67,6 +68,9 @@ export class App {
       { command: "bg", description: "Spawn a background agent" },
       { command: "sessions", description: "List running sessions" },
       { command: "clear", description: "Clear session and start fresh" },
+      { command: "chats", description: "List authorized chats (admin only)" },
+      { command: "chats_add", description: "Authorize a new chat (admin only)" },
+      { command: "chats_remove", description: "Remove an authorized chat (admin only)" },
     ]).catch((err) => log.error({ err }, "Failed to set commands"));
     this.#bot.start({
       onStart: (botInfo) => {
@@ -91,6 +95,10 @@ export class App {
     });
     this.#orchestrators.set(chatId, orch);
     return orch;
+  }
+
+  #isAdminChat(chatId: number | string): boolean {
+    return chatId.toString() === this.#config.adminChatId;
   }
 
   #adminOrchestrator(): Orchestrator {
@@ -143,6 +151,71 @@ export class App {
       if (!orch) return;
       log.debug("Command /clear");
       orch.handleClear();
+    });
+
+    this.#bot.command("chats", (ctx) => {
+      if (!this.#isAdminChat(ctx.chat.id)) return;
+      log.debug("Command /chats");
+      const chatIdStr = ctx.chat.id.toString();
+      const chats = this.#authorizedChats.list();
+      if (chats.length === 0) {
+        sendResponse(this.#bot, chatIdStr, "No authorized chats.");
+        return;
+      }
+      const lines = chats.map((c) => `- ${c.name} (${c.chatId})`).join("\n");
+      sendResponse(this.#bot, chatIdStr, `Authorized chats:\n${lines}`);
+    });
+
+    this.#bot.command("chats-add", (ctx) => {
+      if (!this.#isAdminChat(ctx.chat.id)) return;
+      log.debug("Command /chats-add");
+      const chatIdStr = ctx.chat.id.toString();
+      const args = ctx.match?.trim().split(/\s+/);
+      if (!args || args.length < 2 || !args[0] || !args[1]) {
+        sendResponse(this.#bot, chatIdStr, "Usage: /chats-add &lt;chatId&gt; &lt;name&gt;");
+        return;
+      }
+      const [newChatId, name] = args;
+      try {
+        const chat = this.#authorizedChats.add(newChatId, name);
+        this.#createOrchestrator(chat.name, chat.chatId);
+        log.info({ chatId: chat.chatId, name: chat.name }, "Authorized chat added");
+        sendResponse(this.#bot, chatIdStr, `Chat "${chat.name}" (${chat.chatId}) authorized.`);
+      } catch (err) {
+        if (err instanceof DuplicateChatError || err instanceof InvalidChatNameError) {
+          sendResponse(this.#bot, chatIdStr, `Error: ${err.message}`);
+        } else {
+          throw err;
+        }
+      }
+    });
+
+    this.#bot.command("chats-remove", async (ctx) => {
+      if (!this.#isAdminChat(ctx.chat.id)) return;
+      log.debug("Command /chats-remove");
+      const chatIdStr = ctx.chat.id.toString();
+      const name = ctx.match?.trim();
+      if (!name) {
+        sendResponse(this.#bot, chatIdStr, "Usage: /chats-remove &lt;name&gt;");
+        return;
+      }
+      try {
+        const chat = this.#authorizedChats.remove(name);
+        const orch = this.#orchestrators.get(chat.chatId);
+        if (orch) {
+          await orch.dispose();
+          this.#orchestrators.delete(chat.chatId);
+        }
+        clearMainSession(name, this.#config.settingsDir);
+        log.info({ chatId: chat.chatId, name }, "Authorized chat removed");
+        sendResponse(this.#bot, chatIdStr, `Chat "${name}" removed.`);
+      } catch (err) {
+        if (err instanceof UnknownChatError) {
+          sendResponse(this.#bot, chatIdStr, `Error: ${err.message}`);
+        } else {
+          throw err;
+        }
+      }
     });
 
     this.#bot.on("message:photo", async (ctx) => {
