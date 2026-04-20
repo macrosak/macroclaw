@@ -241,3 +241,34 @@ describe("healthCheck", () => {
     expect(result).toContain("<instructions>Report status.</instructions>");
   });
 });
+
+describe("chat tag injection", () => {
+  it("omits chat tag when chatName is not provided", () => {
+    const result = p.userMessage("test", "hello");
+    expect(result).not.toContain("<chat>");
+    expect(result).toMatch(/^<event /);
+  });
+
+  it("prepends chat tag when chatName is provided", () => {
+    const pb = new PromptBuilder("UTC", "family");
+    const result = pb.userMessage("test", "hello");
+    expect(result).toMatch(/^<chat>family<\/chat>\n<event /);
+  });
+
+  it("escapes XML in chat name", () => {
+    const pb = new PromptBuilder("UTC", "a<b>");
+    const result = pb.userMessage("test", "hello");
+    expect(result).toContain("<chat>a&lt;b&gt;</chat>");
+  });
+
+  it("injects chat tag in all prompt methods", () => {
+    const pb = new PromptBuilder("UTC", "admin");
+    expect(pb.buttonClick("t", "Yes")).toContain("<chat>admin</chat>");
+    expect(pb.scheduleTrigger("t", { name: "daily" }, "go")).toContain("<chat>admin</chat>");
+    expect(pb.backgroundAgentStart("t", "task")).toContain("<chat>admin</chat>");
+    expect(pb.backgroundAgentResult("t", "orig", { action: "send", actionReason: "done" })).toContain("<chat>admin</chat>");
+    expect(pb.backgroundAgentProgress("t", "orig", "50%", "keep going")).toContain("<chat>admin</chat>");
+    expect(pb.peek("t", "orig", "status?")).toContain("<chat>admin</chat>");
+    expect(pb.healthCheck("t", "orig", "status?")).toContain("<chat>admin</chat>");
+  });
+});
