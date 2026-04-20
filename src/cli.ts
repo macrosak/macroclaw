@@ -2,7 +2,7 @@ import {execSync} from "node:child_process";
 import {createInterface} from "node:readline";
 import {defineCommand} from "citty";
 import pkg from "../package.json" with {type: "json"};
-import {loadSessions} from "./sessions";
+import {getMainSession} from "./sessions";
 import {SettingsManager} from "./settings";
 import {type SetupIo, SetupWizard} from "./setup";
 import {SystemServiceManager} from "./system-service";
@@ -32,9 +32,9 @@ export class Cli {
 
 	claude(): void {
 		const settings = this.#settingsManager.load();
-		const sessions = loadSessions(this.#settingsManager.dir);
+		const adminSession = getMainSession("admin", this.#settingsManager.dir);
 		const args = ["claude"];
-		if (sessions.mainSessionId) args.push("--resume", sessions.mainSessionId);
+		if (adminSession) args.push("--resume", adminSession);
 		args.push("--model", settings.model);
 		execSync(args.join(" "), { cwd: settings.workspace, stdio: "inherit", env: { ...process.env, CLAUDECODE: "" } });
 	}
