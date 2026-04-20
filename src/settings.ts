@@ -8,7 +8,7 @@ const log = createLogger("settings");
 
 export const settingsSchema = z.object({
   botToken: z.string().trim(),
-  chatId: z.string().trim().regex(/^-?\d+$/, "Must be a numeric Telegram chat ID"),
+  adminChatId: z.string().trim().regex(/^-?\d+$/, "Must be a numeric Telegram chat ID"),
   model: z.string().trim().pipe(z.enum(["haiku", "sonnet", "opus"])).default("sonnet"),
   workspace: z.string().trim().default("~/.macroclaw-workspace"),
   timeZone: z.string().trim().refine((tz) => IANAZone.isValidZone(tz), "Must be a valid IANA timezone").default("UTC"),
@@ -29,18 +29,35 @@ export function maskValue(key: string, value: string | undefined): string {
 
 const defaultDir = resolve(process.env.HOME || "~", ".macroclaw");
 
+function migrateLegacy(raw: unknown): unknown {
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    const obj = raw as Record<string, unknown>;
+    if (typeof obj.chatId === "string" && obj.adminChatId === undefined) {
+      const { chatId, ...rest } = obj;
+      log.warn("settings.json uses legacy `chatId` field; migrating to `adminChatId`");
+      return { ...rest, adminChatId: chatId };
+    }
+  }
+  return raw;
+}
+
 export class SettingsManager {
   readonly #dir: string;
 
   static readonly envMapping: Record<keyof Settings, string> = {
     botToken: "TELEGRAM_BOT_TOKEN",
-    chatId: "AUTHORIZED_CHAT_ID",
+    adminChatId: "ADMIN_CHAT_ID",
     model: "MODEL",
     workspace: "WORKSPACE",
     timeZone: "TIMEZONE",
     openaiApiKey: "OPENAI_API_KEY",
     logLevel: "LOG_LEVEL",
     pinoramaUrl: "PINORAMA_URL",
+  };
+
+  /** Legacy env var names still honored as fallbacks for one release. */
+  static readonly envLegacy: Partial<Record<keyof Settings, string>> = {
+    adminChatId: "AUTHORIZED_CHAT_ID",
   };
 
   constructor(dir: string = defaultDir) {
@@ -60,7 +77,7 @@ export class SettingsManager {
 
     let raw: unknown;
     try {
-      raw = JSON.parse(readFileSync(path, "utf-8"));
+      raw = migrateLegacy(JSON.parse(readFileSync(path, "utf-8")));
     } catch {
       raw = null;
     }
@@ -78,8 +95,8 @@ export class SettingsManager {
     const path = join(this.#dir, "settings.json");
     if (!existsSync(path)) return null;
     try {
-      const raw = JSON.parse(readFileSync(path, "utf-8"));
-      return typeof raw === "object" && raw !== null ? raw : null;
+      const raw = migrateLegacy(JSON.parse(readFileSync(path, "utf-8")));
+      return typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : null;
     } catch {
       return null;
     }
@@ -99,6 +116,13 @@ export class SettingsManager {
       if (value !== undefined) {
         merged[key] = value;
         overrides.add(key);
+        continue;
+      }
+      const legacy = SettingsManager.envLegacy[key as keyof Settings];
+      if (legacy && process.env[legacy] !== undefined) {
+        merged[key] = process.env[legacy];
+        overrides.add(key);
+        log.warn({ legacy, preferred: envVar }, "using legacy env var; rename to the new one");
       }
     }
 

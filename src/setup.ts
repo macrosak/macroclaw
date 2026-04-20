@@ -63,12 +63,13 @@ export class SetupWizard {
       this.#io.write("  3. Copy the token it gives you (looks like 123456:ABC-DEF...)\n\n");
       const { botToken, bot } = await this.#askBotToken();
 
-      // Chat ID
-      this.#io.write("Next, we need a chat ID. Macroclaw only accepts messages from a single\n");
-      this.#io.write("authorized chat — send /chatid to the bot in Telegram to get yours.\n\n");
-      const defaultChatId = this.#default("chatId");
-      const chatIdPrompt = defaultChatId ? `Chat ID [${defaultChatId}]: ` : "Chat ID: ";
-      const chatId = await this.#askValidated("chatId", chatIdPrompt, defaultChatId);
+      // Admin chat ID
+      this.#io.write("Next, we need the admin chat ID. This is the bootstrap chat with full\n");
+      this.#io.write("control — send /chatid to the bot in Telegram to get yours. Additional\n");
+      this.#io.write("chats can be authorized at runtime via /chats-add from the admin chat.\n\n");
+      const defaultAdminChatId = this.#default("adminChatId");
+      const adminChatIdPrompt = defaultAdminChatId ? `Admin chat ID [${defaultAdminChatId}]: ` : "Admin chat ID: ";
+      const adminChatId = await this.#askValidated("adminChatId", adminChatIdPrompt, defaultAdminChatId);
 
       // Stop setup bot after chat ID is collected
       await bot.stop();
@@ -103,7 +104,7 @@ export class SetupWizard {
 
       const settings: Settings = settingsSchema.parse({
         botToken,
-        chatId,
+        adminChatId,
         model,
         workspace,
         timeZone,

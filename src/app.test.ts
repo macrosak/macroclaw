@@ -130,7 +130,7 @@ function sentPrompts(claude: { processes: ClaudeProcess<unknown>[] }): string[] 
 function makeConfig(overrides?: Partial<AppConfig>): AppConfig {
   return {
     botToken: "test-token",
-    authorizedChatId: "12345",
+    adminChatId: "12345",
     workspace: "/tmp/macroclaw-test-workspace",
     model: "sonnet",
     timeZone: "UTC",

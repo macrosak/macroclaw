@@ -9,7 +9,7 @@ const log = createLogger("app");
 
 export interface AppConfig {
   botToken: string;
-  authorizedChatId: string;
+  adminChatId: string;
   workspace: string;
   model: string;
   timeZone: string;
@@ -63,7 +63,7 @@ export class App {
     ]).catch((err) => log.error({ err }, "Failed to set commands"));
     this.#bot.start({
       onStart: (botInfo) => {
-        log.info({ username: botInfo.username, chatId: this.#config.authorizedChatId }, "Bot connected");
+        log.info({ username: botInfo.username, chatId: this.#config.adminChatId }, "Bot connected");
       },
     });
   }
@@ -71,10 +71,10 @@ export class App {
   async #deliverResponse(response: OrchestratorResponse) {
     if (response.files?.length) {
       for (const filePath of response.files) {
-        await sendFile(this.#bot, this.#config.authorizedChatId, filePath);
+        await sendFile(this.#bot, this.#config.adminChatId, filePath);
       }
     }
-    await sendResponse(this.#bot, this.#config.authorizedChatId, response.message, response.buttons);
+    await sendResponse(this.#bot, this.#config.adminChatId, response.message, response.buttons);
   }
 
   #setupHandlers() {
@@ -84,11 +84,11 @@ export class App {
     });
 
     this.#bot.command("bg", (ctx) => {
-      if (ctx.chat.id.toString() !== this.#config.authorizedChatId) return;
+      if (ctx.chat.id.toString() !== this.#config.adminChatId) return;
       const prompt = ctx.match?.trim();
       if (!prompt) {
         log.debug("Command /bg without prompt");
-        sendResponse(this.#bot, this.#config.authorizedChatId, "Usage: /bg &lt;prompt&gt;");
+        sendResponse(this.#bot, this.#config.adminChatId, "Usage: /bg &lt;prompt&gt;");
         return;
       }
       log.debug({ prompt }, "Command /bg spawn");
@@ -96,19 +96,19 @@ export class App {
     });
 
     this.#bot.command("sessions", (ctx) => {
-      if (ctx.chat.id.toString() !== this.#config.authorizedChatId) return;
+      if (ctx.chat.id.toString() !== this.#config.adminChatId) return;
       log.debug("Command /sessions");
       this.#orchestrator.handleSessions();
     });
 
     this.#bot.command("clear", (ctx) => {
-      if (ctx.chat.id.toString() !== this.#config.authorizedChatId) return;
+      if (ctx.chat.id.toString() !== this.#config.adminChatId) return;
       log.debug("Command /clear");
       this.#orchestrator.handleClear();
     });
 
     this.#bot.on("message:photo", async (ctx) => {
-      if (ctx.chat.id.toString() !== this.#config.authorizedChatId) return;
+      if (ctx.chat.id.toString() !== this.#config.adminChatId) return;
       const photos = ctx.message.photo;
       const largest = photos[photos.length - 1];
       try {
@@ -121,7 +121,7 @@ export class App {
     });
 
     this.#bot.on("message:document", async (ctx) => {
-      if (ctx.chat.id.toString() !== this.#config.authorizedChatId) return;
+      if (ctx.chat.id.toString() !== this.#config.adminChatId) return;
       const doc = ctx.message.document;
       const name = doc.file_name ?? "file";
       try {
@@ -134,23 +134,23 @@ export class App {
     });
 
     this.#bot.on("message:voice", async (ctx) => {
-      if (ctx.chat.id.toString() !== this.#config.authorizedChatId) return;
+      if (ctx.chat.id.toString() !== this.#config.adminChatId) return;
       if (!this.#config.stt) {
-        await sendResponse(this.#bot, this.#config.authorizedChatId, "[Voice messages not available — set openaiApiKey in settings to enable]");
+        await sendResponse(this.#bot, this.#config.adminChatId, "[Voice messages not available — set openaiApiKey in settings to enable]");
         return;
       }
       try {
         const path = await downloadFile(this.#bot, ctx.message.voice.file_id, this.#config.botToken, "voice.ogg");
         const text = await this.#config.stt.transcribe(path);
         if (!text.trim()) {
-          await sendResponse(this.#bot, this.#config.authorizedChatId, "[Could not understand audio]");
+          await sendResponse(this.#bot, this.#config.adminChatId, "[Could not understand audio]");
           return;
         }
-        await sendResponse(this.#bot, this.#config.authorizedChatId, `[Received audio]: ${text}`);
+        await sendResponse(this.#bot, this.#config.adminChatId, `[Received audio]: ${text}`);
         this.#orchestrator.handleMessage(text);
       } catch (err) {
         log.error({ err }, "Voice transcription failed");
-        await sendResponse(this.#bot, this.#config.authorizedChatId, "[Failed to transcribe audio]");
+        await sendResponse(this.#bot, this.#config.adminChatId, "[Failed to transcribe audio]");
       }
     });
 
@@ -158,7 +158,7 @@ export class App {
       await ctx.answerCallbackQuery();
       const data = ctx.callbackQuery.data;
       if (data === "_noop") return;
-      if (ctx.chat?.id.toString() !== this.#config.authorizedChatId) return;
+      if (ctx.chat?.id.toString() !== this.#config.adminChatId) return;
 
       if (data === "_dismiss") {
         await ctx.editMessageReplyMarkup({ reply_markup: undefined });
@@ -195,7 +195,7 @@ export class App {
     });
 
     this.#bot.on("message:text", (ctx) => {
-      if (ctx.chat.id.toString() !== this.#config.authorizedChatId) {
+      if (ctx.chat.id.toString() !== this.#config.adminChatId) {
         log.debug({ chatId: ctx.chat.id }, "Unauthorized message");
         return;
       }

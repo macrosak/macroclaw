@@ -7,7 +7,7 @@ const tmpDir = "/tmp/macroclaw-settings-test";
 
 const validSettings: Settings = {
   botToken: "123:ABC",
-  chatId: "12345678",
+  adminChatId: "12345678",
   model: "sonnet",
   workspace: "~/.macroclaw-workspace",
   timeZone: "UTC",
@@ -32,12 +32,12 @@ describe("SettingsManager.load", () => {
     mkdirSync(tmpDir, { recursive: true });
     writeFileSync(join(tmpDir, "settings.json"), JSON.stringify({
       botToken: "123:ABC",
-      chatId: "12345678",
+      adminChatId: "12345678",
     }));
     const settings = new SettingsManager(tmpDir).load();
     expect(settings).toEqual({
       botToken: "123:ABC",
-      chatId: "12345678",
+      adminChatId: "12345678",
       model: "sonnet",
       workspace: "~/.macroclaw-workspace",
       timeZone: "UTC",
@@ -49,7 +49,7 @@ describe("SettingsManager.load", () => {
     mkdirSync(tmpDir, { recursive: true });
     writeFileSync(join(tmpDir, "settings.json"), JSON.stringify({
       botToken: "  123:ABC  ",
-      chatId: " 12345678 ",
+      adminChatId: " 12345678 ",
       model: " opus ",
       workspace: "  /custom/workspace  ",
       timeZone: "  Europe/Prague  ",
@@ -60,7 +60,7 @@ describe("SettingsManager.load", () => {
     const settings = new SettingsManager(tmpDir).load();
     expect(settings).toEqual({
       botToken: "123:ABC",
-      chatId: "12345678",
+      adminChatId: "12345678",
       model: "opus",
       workspace: "/custom/workspace",
       timeZone: "Europe/Prague",
@@ -74,7 +74,7 @@ describe("SettingsManager.load", () => {
     mkdirSync(tmpDir, { recursive: true });
     writeFileSync(join(tmpDir, "settings.json"), JSON.stringify({
       botToken: "tok",
-      chatId: "123",
+      adminChatId: "123",
       model: "opus",
       workspace: "/custom",
       openaiApiKey: "sk-test",
@@ -84,7 +84,7 @@ describe("SettingsManager.load", () => {
     const settings = new SettingsManager(tmpDir).load();
     expect(settings).toEqual({
       botToken: "tok",
-      chatId: "123",
+      adminChatId: "123",
       model: "opus",
       workspace: "/custom",
       timeZone: "UTC",
@@ -114,7 +114,7 @@ describe("SettingsManager.load", () => {
 
   it("exits with code 1 when validation fails (missing required field)", () => {
     mkdirSync(tmpDir, { recursive: true });
-    writeFileSync(join(tmpDir, "settings.json"), JSON.stringify({ chatId: "123" }));
+    writeFileSync(join(tmpDir, "settings.json"), JSON.stringify({ adminChatId: "123" }));
 
     const mockExit = mock(() => { throw new Error("exit"); });
     const origExit = process.exit;
@@ -134,7 +134,7 @@ describe("SettingsManager.load", () => {
     mkdirSync(tmpDir, { recursive: true });
     writeFileSync(join(tmpDir, "settings.json"), JSON.stringify({
       botToken: "tok",
-      chatId: "123",
+      adminChatId: "123",
       logLevel: "verbose",
     }));
 
@@ -156,7 +156,7 @@ describe("SettingsManager.load", () => {
     mkdirSync(tmpDir, { recursive: true });
     writeFileSync(join(tmpDir, "settings.json"), JSON.stringify({
       botToken: "tok",
-      chatId: "123",
+      adminChatId: "123",
       timeZone: "Europe/Prgaaue",
     }));
 
@@ -199,8 +199,14 @@ describe("SettingsManager.loadRaw", () => {
 
   it("reads and parses valid settings file", () => {
     mkdirSync(tmpDir, { recursive: true });
-    writeFileSync(join(tmpDir, "settings.json"), JSON.stringify({ botToken: "tok", chatId: "123" }));
-    expect(new SettingsManager(tmpDir).loadRaw()).toEqual({ botToken: "tok", chatId: "123" });
+    writeFileSync(join(tmpDir, "settings.json"), JSON.stringify({ botToken: "tok", adminChatId: "123" }));
+    expect(new SettingsManager(tmpDir).loadRaw()).toEqual({ botToken: "tok", adminChatId: "123" });
+  });
+
+  it("migrates legacy chatId to adminChatId", () => {
+    mkdirSync(tmpDir, { recursive: true });
+    writeFileSync(join(tmpDir, "settings.json"), JSON.stringify({ botToken: "tok", chatId: "legacy-id" }));
+    expect(new SettingsManager(tmpDir).loadRaw()).toEqual({ botToken: "tok", adminChatId: "legacy-id" });
   });
 
   it("returns null for invalid JSON", () => {
@@ -218,7 +224,7 @@ describe("SettingsManager.loadRaw", () => {
 
 describe("SettingsManager.applyEnvOverrides", () => {
   const envVars = [
-    "TELEGRAM_BOT_TOKEN", "AUTHORIZED_CHAT_ID", "MODEL",
+    "TELEGRAM_BOT_TOKEN", "ADMIN_CHAT_ID", "AUTHORIZED_CHAT_ID", "MODEL",
     "WORKSPACE", "TIMEZONE", "OPENAI_API_KEY", "LOG_LEVEL", "PINORAMA_URL",
   ];
   const savedEnv: Record<string, string | undefined> = {};
@@ -252,13 +258,27 @@ describe("SettingsManager.applyEnvOverrides", () => {
 
   it("overrides multiple fields and tracks them", () => {
     process.env.TELEGRAM_BOT_TOKEN = "override-token";
-    process.env.AUTHORIZED_CHAT_ID = "99999";
+    process.env.ADMIN_CHAT_ID = "99999";
     process.env.OPENAI_API_KEY = "sk-override";
     const { settings, overrides } = new SettingsManager(tmpDir).applyEnvOverrides(validSettings);
     expect(settings.botToken).toBe("override-token");
-    expect(settings.chatId).toBe("99999");
+    expect(settings.adminChatId).toBe("99999");
     expect(settings.openaiApiKey).toBe("sk-override");
     expect(overrides.size).toBe(3);
+  });
+
+  it("falls back to legacy AUTHORIZED_CHAT_ID when ADMIN_CHAT_ID is unset", () => {
+    process.env.AUTHORIZED_CHAT_ID = "88888";
+    const { settings, overrides } = new SettingsManager(tmpDir).applyEnvOverrides(validSettings);
+    expect(settings.adminChatId).toBe("88888");
+    expect(overrides.has("adminChatId")).toBe(true);
+  });
+
+  it("prefers ADMIN_CHAT_ID over legacy AUTHORIZED_CHAT_ID when both set", () => {
+    process.env.ADMIN_CHAT_ID = "111";
+    process.env.AUTHORIZED_CHAT_ID = "222";
+    const { settings } = new SettingsManager(tmpDir).applyEnvOverrides(validSettings);
+    expect(settings.adminChatId).toBe("111");
   });
 
   it("overrides workspace and log-related fields", () => {
@@ -332,7 +352,11 @@ describe("SettingsManager.print", () => {
 describe("SettingsManager.envMapping", () => {
   it("is a static property with all settings keys", () => {
     expect(SettingsManager.envMapping.botToken).toBe("TELEGRAM_BOT_TOKEN");
-    expect(SettingsManager.envMapping.chatId).toBe("AUTHORIZED_CHAT_ID");
+    expect(SettingsManager.envMapping.adminChatId).toBe("ADMIN_CHAT_ID");
     expect(SettingsManager.envMapping.model).toBe("MODEL");
+  });
+
+  it("maps legacy AUTHORIZED_CHAT_ID to adminChatId for migration", () => {
+    expect(SettingsManager.envLegacy.adminChatId).toBe("AUTHORIZED_CHAT_ID");
   });
 });

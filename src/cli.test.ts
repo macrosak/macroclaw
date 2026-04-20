@@ -20,7 +20,7 @@ const { main } = await import("./cli");
 
 function createMockWizard(overrides?: { collectSettings?: (defaults?: Record<string, unknown>) => Promise<unknown>; installService?: () => Promise<void>; forceInstallService?: () => Promise<void> }) {
 	return {
-		collectSettings: overrides?.collectSettings ?? mock(async () => ({ botToken: "tok", chatId: "123" })),
+		collectSettings: overrides?.collectSettings ?? mock(async () => ({ botToken: "tok", adminChatId: "123" })),
 		installService: overrides?.installService ?? mock(async () => {}),
 		forceInstallService: overrides?.forceInstallService ?? mock(async () => {}),
 	} as unknown as SetupWizard;
@@ -28,7 +28,7 @@ function createMockWizard(overrides?: { collectSettings?: (defaults?: Record<str
 
 function createMockSettings(overrides?: Partial<SettingsManager>) {
 	return {
-		load: mock(() => ({ botToken: "tok", chatId: "123", model: "sonnet", workspace: "/tmp" })),
+		load: mock(() => ({ botToken: "tok", adminChatId: "123", model: "sonnet", workspace: "/tmp" })),
 		loadRaw: mock(() => null),
 		save: mock(() => {}),
 		applyEnvOverrides: mock((s: unknown) => ({ settings: s, overrides: new Set() })),
@@ -72,14 +72,14 @@ describe("Cli.setup", () => {
 		const settings = createMockSettings();
 		const cli = new Cli({ wizard, settings });
 		await cli.setup();
-		expect((settings.save as ReturnType<typeof mock>)).toHaveBeenCalledWith({ botToken: "tok", chatId: "123" });
+		expect((settings.save as ReturnType<typeof mock>)).toHaveBeenCalledWith({ botToken: "tok", adminChatId: "123" });
 	});
 
 	it("passes existing settings as defaults to wizard", async () => {
-		const existing = { botToken: "old-tok", chatId: "999" };
+		const existing = { botToken: "old-tok", adminChatId: "999" };
 		let receivedDefaults: unknown = null;
 		const wizard = createMockWizard({
-			collectSettings: async (defaults) => { receivedDefaults = defaults; return { botToken: "tok", chatId: "123" }; },
+			collectSettings: async (defaults) => { receivedDefaults = defaults; return { botToken: "tok", adminChatId: "123" }; },
 		});
 		const settings = createMockSettings({ loadRaw: () => existing } as unknown as Partial<SettingsManager>);
 		const cli = new Cli({ wizard, settings });
@@ -236,7 +236,7 @@ describe("Cli.claude", () => {
 		const fs = await import("node:fs");
 		const dir = `/tmp/macroclaw-test-claude-${Date.now()}`;
 		fs.mkdirSync(dir, { recursive: true });
-		fs.writeFileSync(`${dir}/settings.json`, JSON.stringify({ botToken: "tok", chatId: "123", model: "opus", workspace: "/tmp" }));
+		fs.writeFileSync(`${dir}/settings.json`, JSON.stringify({ botToken: "tok", adminChatId: "123", model: "opus", workspace: "/tmp" }));
 		fs.writeFileSync(`${dir}/sessions.json`, JSON.stringify({ mainSessionId: "sess-123" }));
 
 		mockExecSync.mockClear();
@@ -257,7 +257,7 @@ describe("Cli.claude", () => {
 		const fs = await import("node:fs");
 		const dir = `/tmp/macroclaw-test-claude-${Date.now()}`;
 		fs.mkdirSync(dir, { recursive: true });
-		fs.writeFileSync(`${dir}/settings.json`, JSON.stringify({ botToken: "tok", chatId: "123", model: "sonnet", workspace: "/tmp" }));
+		fs.writeFileSync(`${dir}/settings.json`, JSON.stringify({ botToken: "tok", adminChatId: "123", model: "sonnet", workspace: "/tmp" }));
 		fs.writeFileSync(`${dir}/sessions.json`, JSON.stringify({}));
 
 		mockExecSync.mockClear();
