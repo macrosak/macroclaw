@@ -90,6 +90,8 @@ interface SessionInfo {
 }
 
 export interface OrchestratorConfig {
+  /** Name of the chat this orchestrator serves. Used to scope the sessions.json slot. Defaults to "admin". */
+  chatName?: string;
   model: string;
   workspace: string;
   timeZone: string;
@@ -106,6 +108,7 @@ export interface OrchestratorConfig {
 
 export class Orchestrator {
   #config: Omit<OrchestratorConfig , 'claude'>;
+  #chatName: string;
   #claude: Claude;
   #prompts: PromptBuilder;
   #waitThreshold: number;
@@ -119,6 +122,7 @@ export class Orchestrator {
 
   constructor(config: OrchestratorConfig) {
     this.#config = config;
+    this.#chatName = config.chatName ?? "admin";
     this.#prompts = new PromptBuilder(config.timeZone);
     const envVars: Record<string, string> = { TZ: config.timeZone };
     this.#claude = config.claude ?? new Claude({ workspace: config.workspace, systemPrompt: this.#prompts.systemPrompt, envVars });
@@ -128,7 +132,7 @@ export class Orchestrator {
     this.#queue = new Queue<OrchestratorRequest>();
     this.#queue.setHandler((request) => this.#handleRequest(request));
 
-    this.#mainSessionId = getMainSession("admin", config.settingsDir);
+    this.#mainSessionId = getMainSession(this.#chatName, config.settingsDir);
   }
 
   // --- Public handle methods ---
@@ -264,7 +268,7 @@ export class Orchestrator {
       this.#mainProcess = null;
     }
     this.#mainSessionId = undefined;
-    clearMainSession("admin", this.#config.settingsDir);
+    clearMainSession(this.#chatName, this.#config.settingsDir);
     log.info("Session cleared");
     this.#callOnResponse({ message: "Session cleared." });
   }
@@ -294,7 +298,7 @@ export class Orchestrator {
 
     if (this.#mainProcess.sessionId !== this.#mainSessionId) {
       this.#mainSessionId = this.#mainProcess.sessionId;
-      setMainSession("admin", this.#mainSessionId, this.#config.settingsDir);
+      setMainSession(this.#chatName, this.#mainSessionId, this.#config.settingsDir);
     }
 
     log.info({ sessionId: this.#mainSessionId }, "Main process created");
@@ -340,7 +344,7 @@ export class Orchestrator {
         { model: this.#config.model },
       );
       this.#mainSessionId = this.#mainProcess.sessionId;
-      setMainSession("admin", this.#mainSessionId, this.#config.settingsDir);
+      setMainSession(this.#chatName, this.#mainSessionId, this.#config.settingsDir);
     }
 
     await writeHistoryPrompt(request);
