@@ -59,7 +59,7 @@ beforeEach(() => {
   mockTranscribe.mockReset();
   mockTranscribe.mockImplementation(async () => "transcribed text");
   if (existsSync(tmpSettingsDir)) rmSync(tmpSettingsDir, { recursive: true });
-  saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
+  saveSessions({ mainSessions: { admin: "test-session" } }, tmpSettingsDir);
 });
 
 afterEach(async () => {

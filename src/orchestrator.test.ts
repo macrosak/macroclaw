@@ -263,7 +263,7 @@ describe("Orchestrator", () => {
     });
 
     it("reports error when resume fails", async () => {
-      saveSessions({ mainSessionId: "old-session" }, tmpSettingsDir);
+      saveSessions({ mainSessions: { admin: "old-session" } }, tmpSettingsDir);
       const claude = mockClaude((): ClaudeProcess<unknown> => {
         const proc = autoProcess(null, "old-session");
         (proc as any).send = mock(async () => { throw new QueryProcessError(1, "session not found"); });
@@ -282,7 +282,7 @@ describe("Orchestrator", () => {
 
   describe("session management", () => {
     it("uses resumeSession for existing session", async () => {
-      saveSessions({ mainSessionId: "existing-session" }, tmpSettingsDir);
+      saveSessions({ mainSessions: { admin: "existing-session" } }, tmpSettingsDir);
       const claude = mockClaude({ action: "send", message: "ok", actionReason: "ok" });
       const { orch } = makeOrchestrator(claude);
 
@@ -320,7 +320,7 @@ describe("Orchestrator", () => {
     });
 
     it("background-agent forks from main session", async () => {
-      saveSessions({ mainSessionId: "main-session" }, tmpSettingsDir);
+      saveSessions({ mainSessions: { admin: "main-session" } }, tmpSettingsDir);
       const claude = mockClaude({ action: "send", message: "ok", actionReason: "ok" });
       const { orch } = makeOrchestrator(claude);
 
@@ -449,7 +449,7 @@ describe("Orchestrator", () => {
     });
 
     it("delivers result with error when session not in runningSessions", async () => {
-      saveSessions({ mainSessionId: "main-session" }, tmpSettingsDir);
+      saveSessions({ mainSessions: { admin: "main-session" } }, tmpSettingsDir);
       const { process: mainProc, resolve } = pendingProcess("main-session");
       const claude = mockClaude(() => mainProc);
       const { orch, responses } = makeOrchestrator(claude);
@@ -539,7 +539,7 @@ describe("Orchestrator", () => {
 
   describe("cron routing", () => {
     it("cron always forks as background, never goes through queue", async () => {
-      saveSessions({ mainSessionId: "main-session" }, tmpSettingsDir);
+      saveSessions({ mainSessions: { admin: "main-session" } }, tmpSettingsDir);
       const claude = mockClaude({ action: "send", message: "ok", actionReason: "ok" });
       const { orch } = makeOrchestrator(claude);
 
@@ -553,7 +553,7 @@ describe("Orchestrator", () => {
     });
 
     it("cron uses config model when none specified", async () => {
-      saveSessions({ mainSessionId: "main-session" }, tmpSettingsDir);
+      saveSessions({ mainSessions: { admin: "main-session" } }, tmpSettingsDir);
       const claude = mockClaude({ action: "send", message: "ok", actionReason: "ok" });
       const { orch } = makeOrchestrator(claude, { model: "sonnet" });
 
@@ -564,7 +564,7 @@ describe("Orchestrator", () => {
     });
 
     it("cron result feeds back into main session", async () => {
-      saveSessions({ mainSessionId: "main-session" }, tmpSettingsDir);
+      saveSessions({ mainSessions: { admin: "main-session" } }, tmpSettingsDir);
       let callCount = 0;
       const claude = mockClaude((): ClaudeProcess<unknown> => {
         callCount++;
@@ -591,7 +591,7 @@ describe("Orchestrator", () => {
     });
 
     it("includes detail buttons and dismiss when sessions are running", async () => {
-      saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
+      saveSessions({ mainSessions: { admin: "test-session" } }, tmpSettingsDir);
       const claude = mockClaude((): ClaudeProcess<unknown> => {
         const { process } = pendingProcess(`bg-${Date.now()}`);
         return process;
@@ -644,7 +644,7 @@ describe("Orchestrator", () => {
     });
 
     it("peeks at running agent and returns status", async () => {
-      saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
+      saveSessions({ mainSessions: { admin: "test-session" } }, tmpSettingsDir);
       let callCount = 0;
       const claude = mockClaude((): ClaudeProcess<unknown> => {
         callCount++;
@@ -674,7 +674,7 @@ describe("Orchestrator", () => {
     });
 
     it("handles Claude error during peek gracefully", async () => {
-      saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
+      saveSessions({ mainSessions: { admin: "test-session" } }, tmpSettingsDir);
       let callCount = 0;
       const claude = mockClaude((): ClaudeProcess<unknown> => {
         callCount++;
@@ -717,7 +717,7 @@ describe("Orchestrator", () => {
     });
 
     it("shows session details with peek/kill/dismiss buttons", async () => {
-      saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
+      saveSessions({ mainSessions: { admin: "test-session" } }, tmpSettingsDir);
       const claude = mockClaude((): ClaudeProcess<unknown> => {
         const { process } = pendingProcess("bg-sid");
         return process;
@@ -748,7 +748,7 @@ describe("Orchestrator", () => {
     });
 
     it("truncates prompt at 300 chars", async () => {
-      saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
+      saveSessions({ mainSessions: { admin: "test-session" } }, tmpSettingsDir);
       const longPrompt = "a".repeat(500);
       const claude = mockClaude((): ClaudeProcess<unknown> => {
         const { process } = pendingProcess("bg-sid");
@@ -775,7 +775,7 @@ describe("Orchestrator", () => {
     });
 
     it("shows model when specified", async () => {
-      saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
+      saveSessions({ mainSessions: { admin: "test-session" } }, tmpSettingsDir);
       const claude = mockClaude((): ClaudeProcess<unknown> => {
         const { process } = pendingProcess("bg-sid");
         return process;
@@ -834,7 +834,7 @@ describe("Orchestrator", () => {
     });
 
     it("kills running session and sends confirmation", async () => {
-      saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
+      saveSessions({ mainSessions: { admin: "test-session" } }, tmpSettingsDir);
       const { process: bgProc } = pendingProcess("bg-sid");
       const claude = mockClaude((): ClaudeProcess<unknown> => bgProc);
       const { orch, responses } = makeOrchestrator(claude);
@@ -862,7 +862,7 @@ describe("Orchestrator", () => {
     });
 
     it("does not feed error back to queue after kill", async () => {
-      saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
+      saveSessions({ mainSessions: { admin: "test-session" } }, tmpSettingsDir);
       const { process: bgProc, reject: rejectBg } = pendingProcess("bg-sid");
       const claude = mockClaude((): ClaudeProcess<unknown> => bgProc);
       const { orch, responses } = makeOrchestrator(claude);
@@ -890,7 +890,7 @@ describe("Orchestrator", () => {
 
   describe("handleBackgroundCommand", () => {
     it("spawns background agent and sends started message", async () => {
-      saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
+      saveSessions({ mainSessions: { admin: "test-session" } }, tmpSettingsDir);
       const claude = mockClaude((): ClaudeProcess<unknown> => {
         const { process } = pendingProcess("bg-sid");
         return process;
@@ -907,7 +907,7 @@ describe("Orchestrator", () => {
 
   describe("background management", () => {
     it("spawns background agent and feeds result back to queue", async () => {
-      saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
+      saveSessions({ mainSessions: { admin: "test-session" } }, tmpSettingsDir);
       const { process: bgProc, resolve: resolveBg } = pendingProcess("bg-sid");
 
       let callCount = 0;
@@ -931,7 +931,7 @@ describe("Orchestrator", () => {
     });
 
     it("passes action and actionReason through result XML for silent background agent", async () => {
-      saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
+      saveSessions({ mainSessions: { admin: "test-session" } }, tmpSettingsDir);
       const { process: bgProc, resolve: resolveBg } = pendingProcess("bg-sid");
 
       let callCount = 0;
@@ -957,7 +957,7 @@ describe("Orchestrator", () => {
     });
 
     it("feeds error back to queue on spawn failure", async () => {
-      saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
+      saveSessions({ mainSessions: { admin: "test-session" } }, tmpSettingsDir);
       const { process: bgProc, reject: rejectBg } = pendingProcess("bg-sid");
 
       let callCount = 0;
@@ -981,7 +981,7 @@ describe("Orchestrator", () => {
 
   describe("health checks", () => {
     it("runs health check after interval and reports finished agent", async () => {
-      saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
+      saveSessions({ mainSessions: { admin: "test-session" } }, tmpSettingsDir);
       const { process: bgProc } = pendingProcess("bg-sid");
 
       let callCount = 0;
@@ -1013,7 +1013,7 @@ describe("Orchestrator", () => {
     });
 
     it("reports progress and schedules next check when not finished", async () => {
-      saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
+      saveSessions({ mainSessions: { admin: "test-session" } }, tmpSettingsDir);
       const { process: bgProc } = pendingProcess("bg-sid");
 
       let hcCount = 0;
@@ -1045,7 +1045,7 @@ describe("Orchestrator", () => {
     });
 
     it("kills unresponsive agent on health check timeout", async () => {
-      saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
+      saveSessions({ mainSessions: { admin: "test-session" } }, tmpSettingsDir);
       const { process: bgProc } = pendingProcess("bg-sid");
 
       const claude = mockClaude((info: CallInfo): ClaudeProcess<unknown> => {
@@ -1070,7 +1070,7 @@ describe("Orchestrator", () => {
     });
 
     it("does not run health checks when interval is 0", async () => {
-      saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
+      saveSessions({ mainSessions: { admin: "test-session" } }, tmpSettingsDir);
       const { process: bgProc } = pendingProcess("bg-sid");
 
       const claude = mockClaude((): ClaudeProcess<unknown> => bgProc);
@@ -1084,7 +1084,7 @@ describe("Orchestrator", () => {
     });
 
     it("clears health check timer when session is killed", async () => {
-      saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
+      saveSessions({ mainSessions: { admin: "test-session" } }, tmpSettingsDir);
       const { process: bgProc } = pendingProcess("bg-sid");
 
       let hcCount = 0;
@@ -1106,7 +1106,7 @@ describe("Orchestrator", () => {
     });
 
     it("stops health check if session completes organically before timer", async () => {
-      saveSessions({ mainSessionId: "test-session" }, tmpSettingsDir);
+      saveSessions({ mainSessions: { admin: "test-session" } }, tmpSettingsDir);
       const { process: bgProc, resolve: resolveBg } = pendingProcess("bg-sid");
 
       let hcCount = 0;

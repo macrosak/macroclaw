@@ -12,7 +12,7 @@ import { createLogger } from "./logger";
 import { generateName } from "./naming";
 import { PromptBuilder } from "./prompt-builder";
 import { Queue } from "./queue";
-import { loadSessions, saveSessions } from "./sessions";
+import { clearMainSession, getMainSession, setMainSession } from "./sessions";
 
 type ButtonSpec = string | { text: string; data: string };
 
@@ -128,7 +128,7 @@ export class Orchestrator {
     this.#queue = new Queue<OrchestratorRequest>();
     this.#queue.setHandler((request) => this.#handleRequest(request));
 
-    this.#mainSessionId = loadSessions(config.settingsDir).mainSessionId;
+    this.#mainSessionId = getMainSession("admin", config.settingsDir);
   }
 
   // --- Public handle methods ---
@@ -264,7 +264,7 @@ export class Orchestrator {
       this.#mainProcess = null;
     }
     this.#mainSessionId = undefined;
-    saveSessions({}, this.#config.settingsDir);
+    clearMainSession("admin", this.#config.settingsDir);
     log.info("Session cleared");
     this.#callOnResponse({ message: "Session cleared." });
   }
@@ -294,7 +294,7 @@ export class Orchestrator {
 
     if (this.#mainProcess.sessionId !== this.#mainSessionId) {
       this.#mainSessionId = this.#mainProcess.sessionId;
-      saveSessions({ mainSessionId: this.#mainSessionId }, this.#config.settingsDir);
+      setMainSession("admin", this.#mainSessionId, this.#config.settingsDir);
     }
 
     log.info({ sessionId: this.#mainSessionId }, "Main process created");
@@ -340,7 +340,7 @@ export class Orchestrator {
         { model: this.#config.model },
       );
       this.#mainSessionId = this.#mainProcess.sessionId;
-      saveSessions({ mainSessionId: this.#mainSessionId }, this.#config.settingsDir);
+      setMainSession("admin", this.#mainSessionId, this.#config.settingsDir);
     }
 
     await writeHistoryPrompt(request);
