@@ -17,7 +17,7 @@ function readScheduleConfig() {
 }
 
 function makeOnJob() {
-	return mock((_name: string, _prompt: string, _model?: string, _missed?: { missedBy: string; scheduledAt: string }) => {});
+	return mock((_name: string, _prompt: string, _model?: string, _missed?: { missedBy: string; scheduledAt: string }, _chat?: string) => {});
 }
 
 // Build a cron expression that matches the current minute
@@ -77,7 +77,7 @@ describe("Scheduler — cron jobs", () => {
 		s.start();
 		s.stop();
 
-		expect(onJob).toHaveBeenCalledWith("test-job", "do something", undefined);
+		expect(onJob).toHaveBeenCalledWith("test-job", "do something", undefined, undefined, undefined);
 	});
 
 	it("does not call onJob for non-matching jobs", () => {
@@ -107,7 +107,7 @@ describe("Scheduler — cron jobs", () => {
 		s.stop();
 
 		expect(onJob).toHaveBeenCalledTimes(1);
-		expect(onJob).toHaveBeenCalledWith("good", "good", undefined);
+		expect(onJob).toHaveBeenCalledWith("good", "good", undefined, undefined, undefined);
 	});
 
 	it("handles multiple matching jobs", () => {
@@ -124,8 +124,8 @@ describe("Scheduler — cron jobs", () => {
 		s.stop();
 
 		expect(onJob).toHaveBeenCalledTimes(2);
-		expect(onJob).toHaveBeenCalledWith("first", "first", undefined);
-		expect(onJob).toHaveBeenCalledWith("second", "second", undefined);
+		expect(onJob).toHaveBeenCalledWith("first", "first", undefined, undefined, undefined);
+		expect(onJob).toHaveBeenCalledWith("second", "second", undefined, undefined, undefined);
 	});
 
 	it("passes model override to onJob", () => {
@@ -138,7 +138,20 @@ describe("Scheduler — cron jobs", () => {
 		s.start();
 		s.stop();
 
-		expect(onJob).toHaveBeenCalledWith("smart", "think hard", "opus");
+		expect(onJob).toHaveBeenCalledWith("smart", "think hard", "opus", undefined, undefined);
+	});
+
+	it("passes chat field to onJob for cron jobs", () => {
+		writeScheduleConfig({
+			jobs: [{ name: "targeted-cron", cron: currentMinuteCron(), prompt: "family update", chat: "family" }],
+		});
+
+		const onJob = makeOnJob();
+		const s = new Scheduler(TEST_DIR, { timeZone: "UTC", onJob });
+		s.start();
+		s.stop();
+
+		expect(onJob).toHaveBeenCalledWith("targeted-cron", "family update", undefined, undefined, "family");
 	});
 
 	it("never removes cron jobs after firing", () => {
@@ -168,7 +181,7 @@ describe("Scheduler — fireAt jobs", () => {
 		s.start();
 		s.stop();
 
-		expect(onJob).toHaveBeenCalledWith("now", "do it", undefined);
+		expect(onJob).toHaveBeenCalledWith("now", "do it", undefined, undefined, undefined);
 		expect(onJob.mock.calls[0][3]).toBeUndefined();
 	});
 
@@ -294,7 +307,7 @@ describe("Scheduler — fireAt jobs", () => {
 		s.start();
 		s.stop();
 
-		expect(onJob).toHaveBeenCalledWith("smart", "think", "opus");
+		expect(onJob).toHaveBeenCalledWith("smart", "think", "opus", undefined, undefined);
 	});
 
 	it("interprets offset-less fireAt in the configured time zone", () => {
@@ -316,7 +329,7 @@ describe("Scheduler — fireAt jobs", () => {
 		s.start();
 		s.stop();
 
-		expect(onJob).toHaveBeenCalledWith("local", "local time", undefined);
+		expect(onJob).toHaveBeenCalledWith("local", "local time", undefined, undefined, undefined);
 	});
 
 	it("preserves explicit offset in fireAt (ignores configured time zone)", () => {
@@ -330,7 +343,20 @@ describe("Scheduler — fireAt jobs", () => {
 		s.start();
 		s.stop();
 
-		expect(onJob).toHaveBeenCalledWith("explicit", "with offset", undefined);
+		expect(onJob).toHaveBeenCalledWith("explicit", "with offset", undefined, undefined, undefined);
+	});
+
+	it("passes chat field to onJob", () => {
+		writeScheduleConfig({
+			jobs: [{ name: "targeted", fireAt: justNowFireAt(), prompt: "hi family", chat: "family" }],
+		});
+
+		const onJob = makeOnJob();
+		const s = new Scheduler(TEST_DIR, { timeZone: "UTC", onJob });
+		s.start();
+		s.stop();
+
+		expect(onJob).toHaveBeenCalledWith("targeted", "hi family", undefined, undefined, "family");
 	});
 
 	it("still fires when write-back of schedule.json fails", () => {

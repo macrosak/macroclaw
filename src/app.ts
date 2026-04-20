@@ -2,7 +2,7 @@ import type { Bot } from "grammy";
 import { AuthorizedChats, DuplicateChatError, InvalidChatNameError, UnknownChatError } from "./authorized-chats";
 import { createLogger } from "./logger";
 import { type Claude, Orchestrator, type OrchestratorResponse } from "./orchestrator";
-import { Scheduler } from "./scheduler";
+import { type MissedInfo, Scheduler } from "./scheduler";
 import { clearMainSession } from "./sessions";
 import type { SpeechToText } from "./speech-to-text";
 import { createBot, downloadFile, sendFile, sendResponse } from "./telegram";
@@ -55,12 +55,27 @@ export class App {
     this.#orchestrators.clear();
   }
 
+  handleCron(name: string, prompt: string, model?: string, missed?: MissedInfo, chat?: string): void {
+    const chatName = chat ?? ADMIN_CHAT_NAME;
+    if (chatName === "*") {
+      for (const orch of this.#orchestrators.values()) {
+        orch.handleCron(name, prompt, model, missed);
+      }
+      return;
+    }
+    const orch = this.#orchestratorByName(chatName);
+    if (orch) {
+      orch.handleCron(name, prompt, model, missed);
+    } else {
+      log.warn({ chatName, jobName: name }, "Cron job targets unknown chat");
+    }
+  }
+
   start() {
     log.info("Starting macroclaw...");
-    const adminOrch = this.#adminOrchestrator();
     const scheduler = new Scheduler(this.#config.workspace, {
       timeZone: this.#config.timeZone,
-      onJob: (name, prompt, model, missed) => adminOrch.handleCron(name, prompt, model, missed),
+      onJob: (name, prompt, model, missed, chat) => this.handleCron(name, prompt, model, missed, chat),
     });
     scheduler.start();
     this.#bot.api.setMyCommands([
@@ -97,14 +112,15 @@ export class App {
     return orch;
   }
 
-  #isAdminChat(chatId: number | string): boolean {
-    return chatId.toString() === this.#config.adminChatId;
+  #orchestratorByName(chatName: string): Orchestrator | undefined {
+    if (chatName === ADMIN_CHAT_NAME) return this.#orchestrators.get(this.#config.adminChatId);
+    const chat = this.#authorizedChats.byName(chatName);
+    if (!chat) return undefined;
+    return this.#orchestrators.get(chat.chatId);
   }
 
-  #adminOrchestrator(): Orchestrator {
-    const orch = this.#orchestrators.get(this.#config.adminChatId);
-    if (!orch) throw new Error("Admin orchestrator missing — this should be impossible");
-    return orch;
+  #isAdminChat(chatId: number | string): boolean {
+    return chatId.toString() === this.#config.adminChatId;
   }
 
   #resolveOrchestrator(chatId: number | string): Orchestrator | undefined {
