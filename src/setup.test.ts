@@ -79,7 +79,7 @@ function createMockIO(inputs: string[]): SetupIo & { written: string[] } {
 }
 
 // Save/restore env vars
-const envVars = ["TELEGRAM_BOT_TOKEN", "AUTHORIZED_CHAT_ID", "MODEL", "WORKSPACE", "TIMEZONE", "OPENAI_API_KEY", "LOG_LEVEL"];
+const envVars = ["TELEGRAM_BOT_TOKEN", "ADMIN_CHAT_ID", "MODEL", "WORKSPACE", "TIMEZONE", "OPENAI_API_KEY", "LOG_LEVEL"];
 const savedEnv: Record<string, string | undefined> = {};
 
 beforeEach(() => {
@@ -119,7 +119,7 @@ describe("SetupWizard", () => {
     const settings = await runSetup(io);
 
     expect(settings.botToken).toBe("123:ABC");
-    expect(settings.chatId).toBe("12345678");
+    expect(settings.adminChatId).toBe("12345678");
     expect(settings.model).toBe("opus");
     expect(settings.workspace).toBe("/my/ws");
     expect(settings.timeZone).toBe("Europe/Prague");
@@ -129,7 +129,7 @@ describe("SetupWizard", () => {
 
   it("uses defaults from env vars when user presses enter", async () => {
     process.env.TELEGRAM_BOT_TOKEN = "env-token";
-    process.env.AUTHORIZED_CHAT_ID = "99887766";
+    process.env.ADMIN_CHAT_ID = "99887766";
     process.env.MODEL = "haiku";
     process.env.WORKSPACE = "/env/ws";
     process.env.TIMEZONE = "America/New_York";
@@ -148,7 +148,7 @@ describe("SetupWizard", () => {
     const settings = await runSetup(io);
 
     expect(settings.botToken).toBe("env-token");
-    expect(settings.chatId).toBe("99887766");
+    expect(settings.adminChatId).toBe("99887766");
     expect(settings.model).toBe("haiku");
     expect(settings.workspace).toBe("/env/ws");
     expect(settings.timeZone).toBe("America/New_York");
@@ -246,7 +246,7 @@ describe("SetupWizard", () => {
 
     const settings = await runSetup(io);
 
-    expect(settings.chatId).toBe("456");
+    expect(settings.adminChatId).toBe("456");
   });
 
   it("re-prompts when chat ID is not numeric", async () => {
@@ -263,7 +263,7 @@ describe("SetupWizard", () => {
 
     const settings = await runSetup(io);
 
-    expect(settings.chatId).toBe("456");
+    expect(settings.adminChatId).toBe("456");
     expect(io.written).toContainEqual(expect.stringContaining("Invalid value"));
   });
 

@@ -37,7 +37,7 @@ export async function start(): Promise<void> {
 
   const config: AppConfig = {
     botToken: resolved.botToken,
-    authorizedChatId: resolved.chatId,
+    adminChatId: resolved.adminChatId,
     workspace,
     model: resolved.model,
     timeZone: resolved.timeZone,
