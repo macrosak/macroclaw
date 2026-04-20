@@ -992,6 +992,73 @@ describe("App", () => {
     });
   });
 
+  describe("handleCron", () => {
+    it("routes cron job with no chat to admin orchestrator", async () => {
+      const config = makeConfig();
+      const app = trackApp(new App(config));
+
+      const claude = config.claude as Claude & { calls: CallInfo[] };
+      const callsBefore = claude.calls.length;
+      app.handleCron("check-in", "any news?", undefined, undefined, undefined);
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(claude.calls.length).toBeGreaterThan(callsBefore);
+    });
+
+    it("routes cron job with chat:'admin' to admin orchestrator", async () => {
+      const config = makeConfig();
+      const app = trackApp(new App(config));
+
+      const claude = config.claude as Claude & { calls: CallInfo[] };
+      const callsBefore = claude.calls.length;
+      app.handleCron("check-in", "any news?", undefined, undefined, "admin");
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(claude.calls.length).toBeGreaterThan(callsBefore);
+    });
+
+    it("routes cron job with chat name to that chat's orchestrator", async () => {
+      const authorizedChats = new AuthorizedChats(tmpSettingsDir);
+      authorizedChats.add("55555", "family");
+      const config = makeConfig({ authorizedChats });
+      const app = trackApp(new App(config));
+
+      const claude = config.claude as Claude & { calls: CallInfo[] };
+      const callsBefore = claude.calls.length;
+      app.handleCron("family-update", "hello family", undefined, undefined, "family");
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(claude.calls.length).toBeGreaterThan(callsBefore);
+    });
+
+    it("broadcasts cron job with chat:'*' to all orchestrators", async () => {
+      const authorizedChats = new AuthorizedChats(tmpSettingsDir);
+      authorizedChats.add("55555", "family");
+      const config = makeConfig({ authorizedChats });
+      const app = trackApp(new App(config));
+
+      const claude = config.claude as Claude & { calls: CallInfo[] };
+      const callsBefore = claude.calls.length;
+      app.handleCron("broadcast", "everyone", undefined, undefined, "*");
+      await new Promise((r) => setTimeout(r, 50));
+
+      // 2 orchestrators (admin + family) → at least 2 additional claude calls
+      expect(claude.calls.length).toBeGreaterThanOrEqual(callsBefore + 2);
+    });
+
+    it("warns and does nothing for unknown chat name", async () => {
+      const config = makeConfig();
+      const app = trackApp(new App(config));
+
+      const claude = config.claude as Claude & { calls: CallInfo[] };
+      const callsBefore = claude.calls.length;
+      app.handleCron("orphan", "hello?", undefined, undefined, "nobody");
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(claude.calls.length).toBe(callsBefore);
+    });
+  });
+
   describe("error handler", () => {
     it("does not throw on bot errors", () => {
       const app = makeApp();

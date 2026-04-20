@@ -13,6 +13,7 @@ const jobSchema = z.object({
 	model: z.string().optional(),
 	cron: z.string().optional(),
 	fireAt: z.string().optional(),
+	chat: z.string().optional(),
 });
 
 const scheduleConfigSchema = z.object({
@@ -29,7 +30,7 @@ export interface MissedInfo {
 
 export interface SchedulerConfig {
 	timeZone: string;
-	onJob: (name: string, prompt: string, model?: string, missed?: MissedInfo) => void;
+	onJob: (name: string, prompt: string, model?: string, missed?: MissedInfo, chat?: string) => void;
 }
 
 const TICK_INTERVAL = 10_000; // 10 seconds
@@ -118,14 +119,14 @@ export class Scheduler {
 		}
 	}
 
-	#evaluateCronJob(job: { name: string; cron: string; prompt: string; model?: string }, now: Date): void {
+	#evaluateCronJob(job: { name: string; cron: string; prompt: string; model?: string; chat?: string }, now: Date): void {
 		try {
 			const interval = CronExpressionParser.parse(job.cron, { tz: this.#timeZone });
 			const prev = interval.prev();
 			const diff = Math.abs(now.getTime() - prev.getTime());
 			if (diff < 60_000) {
 				log.debug({ name: job.name, cron: job.cron }, "Cron job triggered");
-				this.#config.onJob(job.name, job.prompt, job.model);
+				this.#config.onJob(job.name, job.prompt, job.model, undefined, job.chat);
 			}
 		} catch (err) {
 			log.warn({ cron: job.cron, err: err instanceof Error ? err.message : err }, "Invalid cron expression");
@@ -144,7 +145,7 @@ export class Scheduler {
 	}
 
 	#evaluateFireAtJob(
-		job: { name: string; fireAt: string; prompt: string; model?: string },
+		job: { name: string; fireAt: string; prompt: string; model?: string; chat?: string },
 		now: Date,
 	): "remove" | "keep" {
 		const fireAt = Scheduler.#parseFireAt(job.fireAt, this.#timeZone);
@@ -162,7 +163,7 @@ export class Scheduler {
 
 		if (diff < 60_000) {
 			log.debug({ name: job.name, fireAt: job.fireAt }, "One-shot job triggered");
-			this.#config.onJob(job.name, job.prompt, job.model);
+			this.#config.onJob(job.name, job.prompt, job.model, undefined, job.chat);
 			return "remove";
 		}
 
@@ -172,7 +173,7 @@ export class Scheduler {
 			this.#config.onJob(job.name, job.prompt, job.model, {
 				missedBy: `${missedMinutes}m`,
 				scheduledAt: job.fireAt,
-			});
+			}, job.chat);
 			return "remove";
 		}
 
