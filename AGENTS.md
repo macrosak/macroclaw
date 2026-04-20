@@ -45,8 +45,9 @@ Two layers with unidirectional dependency: App → Orchestrator. App knows nothi
 
 ```
 App (app.ts)                        — I/O layer: Telegram + Cron
+├── AuthorizedChats (authorized-chats.ts) — runtime-mutable chat authorization list
 ├── Scheduler (scheduler.ts)        — reads data/schedule.json, fires onJob callback
-└── Orchestrator (orchestrator.ts)  — processing layer: Claude, queue, sessions, background
+└── Orchestrator × N (orchestrator.ts) — one per chat; processing layer: Claude, queue, sessions, background
     ├── Queue (queue.ts)            — serial FIFO processing (internal)
     ├── PromptBuilder (prompt-builder.ts) — builds context prefix for Claude prompts
     └── Claude (claude.ts)          — persistent `claude` process, stream-json protocol
@@ -55,9 +56,11 @@ App (app.ts)                        — I/O layer: Telegram + Cron
 ### App (I/O Layer)
 
 - Receives Telegram messages, commands, buttons, file uploads
+- Maintains one `Orchestrator` per authorized chat (keyed by chatId); incoming messages are dispatched by chatId
+- Admin chat gets a permanent orchestrator; additional chats are managed at runtime via `/chats-add` / `/chats-remove`
 - Routes to `orchestrator.handleMessage/handleButton/handleCron/handleBackgroundCommand/handleSessions/handleClear`
 - Delivers `OrchestratorResponse` to Telegram via `onResponse` callback (files, text, buttons)
-- Owns Scheduler, wires its `onJob` to `orchestrator.handleCron`
+- Owns Scheduler, routes cron jobs by the job's `chat` field (`undefined` → admin, `"*"` → all chats)
 - Only module that imports Grammy/Telegram
 
 ### Orchestrator (Processing Layer)
@@ -79,8 +82,8 @@ App (app.ts)                        — I/O layer: Telegram + Cron
 
 - Keep everything lean — this is a personal project
 - No database, no containers, no agent SDK
-- Single authorized chat only
-- Messages are processed serially (FIFO queue)
+- One Orchestrator per chat; admin chat is always present, additional chats managed at runtime
+- Messages are processed serially per-chat (each Orchestrator has its own FIFO queue)
 - When adding a new environment variable, document it in `.env.example` with a one-line comment
 - Use camelCase for acronyms in identifiers: `runCli`, `parseUrl`, `httpApi` (not `runCLI`, `parseURL`, `httpAPI`)
 - Module mocks for native/3rd-party modules: Use `mock.module("node:child_process", ...)` or `mock.module("grammy", ...)` instead of injecting wrapper params. Define the mock as a `mock()` at the top of the test file so individual tests can swap behavior via `mockImplementation`. Must be called before `await import()` of the module under test. Beware that `mock.module` is global and leaks across test files — only mock modules that other tests don't depend on (e.g. `node:child_process`, `node:os`). For widely-used modules like `node:fs`, prefer real filesystem with temp dirs, or restore the original module in `afterAll` via `mock.module("node:fs", () => realFs); mock.restore()`.
