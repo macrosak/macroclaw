@@ -178,8 +178,8 @@ describe("App", () => {
     expect(bot.commandHandlers.has("sessions")).toBe(true);
     expect(bot.commandHandlers.has("clear")).toBe(true);
     expect(bot.commandHandlers.has("chats")).toBe(true);
-    expect(bot.commandHandlers.has("chats-add")).toBe(true);
-    expect(bot.commandHandlers.has("chats-remove")).toBe(true);
+    expect(bot.commandHandlers.has("chatsadd")).toBe(true);
+    expect(bot.commandHandlers.has("chatsremove")).toBe(true);
   });
 
   it("registers error handler", () => {
@@ -841,11 +841,11 @@ describe("App", () => {
       });
     });
 
-    describe("/chats-add", () => {
+    describe("/chatsadd", () => {
       it("adds chat and creates orchestrator for it", async () => {
         const app = makeApp();
         const bot = app.bot as any;
-        const handler = bot.commandHandlers.get("chats-add")!;
+        const handler = bot.commandHandlers.get("chatsadd")!;
 
         handler({ chat: { id: 12345 }, match: "55555 family" });
         await new Promise((r) => setTimeout(r, 50));
@@ -857,7 +857,7 @@ describe("App", () => {
       it("sends usage hint when args are missing", async () => {
         const app = makeApp();
         const bot = app.bot as any;
-        const handler = bot.commandHandlers.get("chats-add")!;
+        const handler = bot.commandHandlers.get("chatsadd")!;
 
         handler({ chat: { id: 12345 }, match: "55555" });
         await new Promise((r) => setTimeout(r, 50));
@@ -869,7 +869,7 @@ describe("App", () => {
       it("sends usage hint when match is empty", async () => {
         const app = makeApp();
         const bot = app.bot as any;
-        const handler = bot.commandHandlers.get("chats-add")!;
+        const handler = bot.commandHandlers.get("chatsadd")!;
 
         handler({ chat: { id: 12345 }, match: "" });
         await new Promise((r) => setTimeout(r, 50));
@@ -881,7 +881,7 @@ describe("App", () => {
       it("sends error for invalid chat name", async () => {
         const app = makeApp();
         const bot = app.bot as any;
-        const handler = bot.commandHandlers.get("chats-add")!;
+        const handler = bot.commandHandlers.get("chatsadd")!;
 
         handler({ chat: { id: 12345 }, match: "55555 InvalidName" });
         await new Promise((r) => setTimeout(r, 50));
@@ -895,7 +895,7 @@ describe("App", () => {
         authorizedChats.add("55555", "family");
         const app = makeApp({ authorizedChats });
         const bot = app.bot as any;
-        const handler = bot.commandHandlers.get("chats-add")!;
+        const handler = bot.commandHandlers.get("chatsadd")!;
 
         handler({ chat: { id: 12345 }, match: "55555 family" });
         await new Promise((r) => setTimeout(r, 50));
@@ -907,7 +907,7 @@ describe("App", () => {
       it("is ignored for non-admin chats", async () => {
         const app = makeApp();
         const bot = app.bot as any;
-        const handler = bot.commandHandlers.get("chats-add")!;
+        const handler = bot.commandHandlers.get("chatsadd")!;
 
         handler({ chat: { id: 99999 }, match: "55555 family" });
         await new Promise((r) => setTimeout(r, 50));
@@ -920,7 +920,7 @@ describe("App", () => {
         const app = trackApp(new App(config));
         const bot = app.bot as any;
 
-        const addHandler = bot.commandHandlers.get("chats-add")!;
+        const addHandler = bot.commandHandlers.get("chatsadd")!;
         addHandler({ chat: { id: 12345 }, match: "55555 family" });
         await new Promise((r) => setTimeout(r, 50));
 
@@ -935,14 +935,14 @@ describe("App", () => {
       });
     });
 
-    describe("/chats-remove", () => {
+    describe("/chatsremove", () => {
       it("removes chat and clears its session", async () => {
         saveSessions({ mainSessions: { admin: "admin-sid", family: "fam-sid" } }, tmpSettingsDir);
         const authorizedChats = new AuthorizedChats(tmpSettingsDir);
         authorizedChats.add("55555", "family");
         const app = makeApp({ authorizedChats });
         const bot = app.bot as any;
-        const handler = bot.commandHandlers.get("chats-remove")!;
+        const handler = bot.commandHandlers.get("chatsremove")!;
 
         await handler({ chat: { id: 12345 }, match: "family" });
         await new Promise((r) => setTimeout(r, 50));
@@ -955,22 +955,89 @@ describe("App", () => {
         expect(sessions.mainSessions.admin).toBe("admin-sid");
       });
 
-      it("sends usage hint when name is missing", async () => {
+      it("reports when no chats to remove and no arg given", async () => {
         const app = makeApp();
         const bot = app.bot as any;
-        const handler = bot.commandHandlers.get("chats-remove")!;
+        const handler = bot.commandHandlers.get("chatsremove")!;
 
         await handler({ chat: { id: 12345 }, match: "" });
         await new Promise((r) => setTimeout(r, 50));
 
         const calls = (bot.api.sendMessage as any).mock.calls;
-        expect(calls[calls.length - 1][1]).toContain("Usage:");
+        expect(calls[calls.length - 1][1]).toBe("No authorized chats to remove.");
+      });
+
+      it("sends chat-picker buttons when no arg and chats exist", async () => {
+        const authorizedChats = new AuthorizedChats(tmpSettingsDir);
+        authorizedChats.add("55555", "family");
+        authorizedChats.add("66666", "work");
+        const app = makeApp({ authorizedChats });
+        const bot = app.bot as any;
+        const handler = bot.commandHandlers.get("chatsremove")!;
+
+        await handler({ chat: { id: 12345 }, match: "" });
+        await new Promise((r) => setTimeout(r, 50));
+
+        const calls = (bot.api.sendMessage as any).mock.calls;
+        const lastCall = calls[calls.length - 1];
+        expect(lastCall[1]).toBe("Which chat to remove?");
+        const keyboard = lastCall[2].reply_markup.inline_keyboard.flat();
+        const labels = keyboard.map((b: any) => b.text);
+        expect(labels).toEqual(["family", "work", "Dismiss"]);
+        expect(keyboard.find((b: any) => b.text === "family").callback_data).toBe("chatsremove:family");
+      });
+
+      it("button callback removes the selected chat", async () => {
+        saveSessions({ mainSessions: { admin: "admin-sid", family: "fam-sid" } }, tmpSettingsDir);
+        const authorizedChats = new AuthorizedChats(tmpSettingsDir);
+        authorizedChats.add("55555", "family");
+        const app = makeApp({ authorizedChats });
+        const bot = app.bot as any;
+        const handler = bot.filterHandlers.get("callback_query:data")![0];
+
+        const ctx = {
+          chat: { id: 12345 },
+          callbackQuery: { data: "chatsremove:family" },
+          answerCallbackQuery: mock(async () => {}),
+          editMessageReplyMarkup: mock(async () => {}),
+        };
+
+        await handler(ctx);
+        await new Promise((r) => setTimeout(r, 50));
+
+        expect(ctx.editMessageReplyMarkup).toHaveBeenCalledWith({ reply_markup: { inline_keyboard: [[{ text: "✓ Removed family", callback_data: "_noop" }]] } });
+        const calls = (bot.api.sendMessage as any).mock.calls;
+        expect(calls[calls.length - 1][1]).toBe('Chat "family" removed.');
+
+        const sessions = loadSessions(tmpSettingsDir);
+        expect(sessions.mainSessions.family).toBeUndefined();
+      });
+
+      it("button callback is ignored for non-admin chats", async () => {
+        const authorizedChats = new AuthorizedChats(tmpSettingsDir);
+        authorizedChats.add("99999", "intruder");
+        const app = makeApp({ authorizedChats });
+        const bot = app.bot as any;
+        const handler = bot.filterHandlers.get("callback_query:data")![0];
+
+        const ctx = {
+          chat: { id: 99999 },
+          callbackQuery: { data: "chatsremove:intruder" },
+          answerCallbackQuery: mock(async () => {}),
+          editMessageReplyMarkup: mock(async () => {}),
+        };
+
+        await handler(ctx);
+        await new Promise((r) => setTimeout(r, 50));
+
+        // Intruder is still authorized
+        expect(authorizedChats.byName("intruder")).toBeDefined();
       });
 
       it("sends error for unknown chat name", async () => {
         const app = makeApp();
         const bot = app.bot as any;
-        const handler = bot.commandHandlers.get("chats-remove")!;
+        const handler = bot.commandHandlers.get("chatsremove")!;
 
         await handler({ chat: { id: 12345 }, match: "ghost" });
         await new Promise((r) => setTimeout(r, 50));
@@ -979,12 +1046,40 @@ describe("App", () => {
         expect(calls[calls.length - 1][1]).toContain("Error:");
       });
 
-      it("is ignored for non-admin chats", async () => {
+      it("ignores explicit-name removal from non-admin chats", async () => {
         const app = makeApp();
         const bot = app.bot as any;
-        const handler = bot.commandHandlers.get("chats-remove")!;
+        const handler = bot.commandHandlers.get("chatsremove")!;
 
         await handler({ chat: { id: 99999 }, match: "family" });
+        await new Promise((r) => setTimeout(r, 50));
+
+        expect((bot.api.sendMessage as any).mock.calls.length).toBe(0);
+      });
+
+      it("self-removes when called from non-admin chat with no arg", async () => {
+        const authorizedChats = new AuthorizedChats(tmpSettingsDir);
+        authorizedChats.add("55555", "family");
+        saveSessions({ mainSessions: { admin: "a", family: "f" } }, tmpSettingsDir);
+        const app = makeApp({ authorizedChats });
+        const bot = app.bot as any;
+        const handler = bot.commandHandlers.get("chatsremove")!;
+
+        await handler({ chat: { id: 55555 }, match: "" });
+        await new Promise((r) => setTimeout(r, 50));
+
+        const calls = (bot.api.sendMessage as any).mock.calls;
+        expect(calls[calls.length - 1][1]).toBe('Chat "family" removed.');
+        expect(authorizedChats.byName("family")).toBeUndefined();
+        expect(loadSessions(tmpSettingsDir).mainSessions.family).toBeUndefined();
+      });
+
+      it("ignores no-arg self-removal from unauthorized non-admin chat", async () => {
+        const app = makeApp();
+        const bot = app.bot as any;
+        const handler = bot.commandHandlers.get("chatsremove")!;
+
+        await handler({ chat: { id: 77777 }, match: "" });
         await new Promise((r) => setTimeout(r, 50));
 
         expect((bot.api.sendMessage as any).mock.calls.length).toBe(0);
@@ -1085,8 +1180,8 @@ describe("App", () => {
         { command: "sessions", description: "List running sessions" },
         { command: "clear", description: "Clear session and start fresh" },
         { command: "chats", description: "List authorized chats (admin only)" },
-        { command: "chats_add", description: "Authorize a new chat (admin only)" },
-        { command: "chats_remove", description: "Remove an authorized chat (admin only)" },
+        { command: "chatsadd", description: "Authorize a new chat (admin only)" },
+        { command: "chatsremove", description: "Remove an authorized chat (admin only)" },
       ]);
     });
   });

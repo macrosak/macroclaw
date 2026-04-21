@@ -1,7 +1,7 @@
 import type { Bot } from "grammy";
 import { AuthorizedChats, DuplicateChatError, InvalidChatNameError, UnknownChatError } from "./authorized-chats";
 import { createLogger } from "./logger";
-import { type Claude, Orchestrator, type OrchestratorResponse } from "./orchestrator";
+import { type ButtonSpec, type Claude, Orchestrator, type OrchestratorResponse } from "./orchestrator";
 import { type MissedInfo, Scheduler } from "./scheduler";
 import { clearMainSession } from "./sessions";
 import type { SpeechToText } from "./speech-to-text";
@@ -84,8 +84,8 @@ export class App {
       { command: "sessions", description: "List running sessions" },
       { command: "clear", description: "Clear session and start fresh" },
       { command: "chats", description: "List authorized chats (admin only)" },
-      { command: "chats_add", description: "Authorize a new chat (admin only)" },
-      { command: "chats_remove", description: "Remove an authorized chat (admin only)" },
+      { command: "chatsadd", description: "Authorize a new chat (admin only)" },
+      { command: "chatsremove", description: "Remove an authorized chat (admin only)" },
     ]).catch((err) => log.error({ err }, "Failed to set commands"));
     this.#bot.start({
       onStart: (botInfo) => {
@@ -121,6 +121,26 @@ export class App {
 
   #isAdminChat(chatId: number | string): boolean {
     return chatId.toString() === this.#config.adminChatId;
+  }
+
+  async #removeChatByName(name: string, replyChatId: string): Promise<void> {
+    try {
+      const chat = this.#authorizedChats.remove(name);
+      const orch = this.#orchestrators.get(chat.chatId);
+      if (orch) {
+        await orch.dispose();
+        this.#orchestrators.delete(chat.chatId);
+      }
+      clearMainSession(name, this.#config.settingsDir);
+      log.info({ chatId: chat.chatId, name }, "Authorized chat removed");
+      sendResponse(this.#bot, replyChatId, `Chat "${name}" removed.`);
+    } catch (err) {
+      if (err instanceof UnknownChatError) {
+        sendResponse(this.#bot, replyChatId, `Error: ${err.message}`);
+      } else {
+        throw err;
+      }
+    }
   }
 
   #resolveOrchestrator(chatId: number | string): Orchestrator | undefined {
@@ -182,13 +202,13 @@ export class App {
       sendResponse(this.#bot, chatIdStr, `Authorized chats:\n${lines}`);
     });
 
-    this.#bot.command("chats-add", (ctx) => {
+    this.#bot.command("chatsadd", (ctx) => {
       if (!this.#isAdminChat(ctx.chat.id)) return;
-      log.debug("Command /chats-add");
+      log.debug("Command /chatsadd");
       const chatIdStr = ctx.chat.id.toString();
       const args = ctx.match?.trim().split(/\s+/);
       if (!args || args.length < 2 || !args[0] || !args[1]) {
-        sendResponse(this.#bot, chatIdStr, "Usage: /chats-add &lt;chatId&gt; &lt;name&gt;");
+        sendResponse(this.#bot, chatIdStr, "Usage: /chatsadd &lt;chatId&gt; &lt;name&gt;");
         return;
       }
       const [newChatId, name] = args;
@@ -206,32 +226,34 @@ export class App {
       }
     });
 
-    this.#bot.command("chats-remove", async (ctx) => {
-      if (!this.#isAdminChat(ctx.chat.id)) return;
-      log.debug("Command /chats-remove");
+    this.#bot.command("chatsremove", async (ctx) => {
+      log.debug("Command /chatsremove");
       const chatIdStr = ctx.chat.id.toString();
       const name = ctx.match?.trim();
+      const isAdmin = this.#isAdminChat(ctx.chat.id);
+
       if (!name) {
-        sendResponse(this.#bot, chatIdStr, "Usage: /chats-remove &lt;name&gt;");
+        if (!isAdmin) {
+          // Non-admin chat with no arg: self-removal
+          const self = this.#authorizedChats.byChatId(chatIdStr);
+          if (!self) return;
+          await this.#removeChatByName(self.name, chatIdStr);
+          return;
+        }
+        const chats = this.#authorizedChats.list();
+        if (chats.length === 0) {
+          sendResponse(this.#bot, chatIdStr, "No authorized chats to remove.");
+          return;
+        }
+        const buttons: ButtonSpec[] = chats.map((c) => ({ text: c.name, data: `chatsremove:${c.name}` }));
+        buttons.push({ text: "Dismiss", data: "_dismiss" });
+        sendResponse(this.#bot, chatIdStr, "Which chat to remove?", buttons);
         return;
       }
-      try {
-        const chat = this.#authorizedChats.remove(name);
-        const orch = this.#orchestrators.get(chat.chatId);
-        if (orch) {
-          await orch.dispose();
-          this.#orchestrators.delete(chat.chatId);
-        }
-        clearMainSession(name, this.#config.settingsDir);
-        log.info({ chatId: chat.chatId, name }, "Authorized chat removed");
-        sendResponse(this.#bot, chatIdStr, `Chat "${name}" removed.`);
-      } catch (err) {
-        if (err instanceof UnknownChatError) {
-          sendResponse(this.#bot, chatIdStr, `Error: ${err.message}`);
-        } else {
-          throw err;
-        }
-      }
+
+      // With explicit name: admin only
+      if (!isAdmin) return;
+      await this.#removeChatByName(name, chatIdStr);
     });
 
     this.#bot.on("message:photo", async (ctx) => {
@@ -321,6 +343,15 @@ export class App {
         await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [[{ text: "✓ Killed", callback_data: "_noop" }]] } });
         log.debug({ sessionId }, "Kill requested");
         orch.handleKill(sessionId);
+        return;
+      }
+
+      if (data.startsWith("chatsremove:")) {
+        if (!this.#isAdminChat(chatId)) return;
+        const name = data.slice("chatsremove:".length);
+        await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [[{ text: `✓ Removed ${name}`, callback_data: "_noop" }]] } });
+        log.debug({ name }, "Chat removal requested via button");
+        await this.#removeChatByName(name, chatId.toString());
         return;
       }
 
