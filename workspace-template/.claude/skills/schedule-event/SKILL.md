@@ -21,10 +21,21 @@ Schedule a new event by adding it to `data/schedule.json`.
 3. Determine job type:
    - **Recurring** → convert to a cron expression in local time. See reference below.
    - **One-time** → compute an ISO 8601 timestamp with the user's timezone offset for `fireAt`
-4. **Be proactive about timing**: if the user says "next week" or "tomorrow" without a specific time, pick the best time based on what you know (their routine, calendar, context)
-5. Append the new job to the `jobs` array
-6. Write the updated file
-7. Confirm: what was scheduled, when it will fire, and offer to adjust
+4. **Route the job to a chat via the `chat` field** — see [Chat routing](#chat-routing) below. When scheduling from a conversation, target the chat the user is talking to you in (read the `<event chat="...">` attribute on the incoming event).
+5. **Be proactive about timing**: if the user says "next week" or "tomorrow" without a specific time, pick the best time based on what you know (their routine, calendar, context)
+6. Append the new job to the `jobs` array
+7. Write the updated file
+8. Confirm: what was scheduled, when it will fire, and offer to adjust
+
+## Chat routing
+
+Every incoming `<event>` has a `chat="<name>"` attribute identifying which chat it came from (e.g. `admin`, `family`). When a scheduled job fires, the bridge delivers the response to the chat named in the job's `chat` field.
+
+- **Default (no `chat` field)** — response goes to the admin chat.
+- **Explicit chat name** — e.g. `"chat": "family"`. Response goes to that chat.
+- **Broadcast** — `"chat": "*"`. The same prompt runs once per authorized chat, and each response is delivered to that chat. Use sparingly — only for genuinely universal reminders.
+
+When the user asks you to schedule something, set `chat` to the chat name from the incoming event's `chat` attribute so the reminder comes back to the same chat. Don't omit `chat` unless you know the job should reach the admin chat specifically.
 
 ## Natural language → job format
 
@@ -52,18 +63,27 @@ Two job types, discriminated by field:
     {
       "name": "morning-summary",
       "cron": "0 7 * * 1-5",
-      "prompt": "Give me a morning summary of my tasks"
+      "prompt": "Give me a morning summary of my tasks",
+      "chat": "admin"
+    },
+    {
+      "name": "family-dinner-poll",
+      "cron": "0 17 * * 5",
+      "prompt": "Ask what everyone wants for dinner",
+      "chat": "family"
     },
     {
       "name": "email-check",
       "cron": "*/30 * * * *",
       "prompt": "Check if any important emails arrived",
-      "model": "haiku"
+      "model": "haiku",
+      "chat": "admin"
     },
     {
       "name": "dentist-reminder",
       "fireAt": "2026-03-15T08:00:00",
-      "prompt": "Reminder: call the dentist to reschedule your appointment"
+      "prompt": "Reminder: call the dentist to reschedule your appointment",
+      "chat": "admin"
     }
   ]
 }
@@ -77,6 +97,7 @@ Two job types, discriminated by field:
 | `cron` | for recurring | Standard cron expression (local time). See reference below. |
 | `fireAt` | for one-time | ISO 8601 timestamp (e.g. `2026-03-15T08:00:00`). Can include a timezone offset (e.g. `2026-03-15T08:00:00+01:00`); without one, the time is interpreted in the configured timezone. |
 | `prompt` | yes | The message sent to the agent when the event fires. Write it as a natural instruction. |
+| `chat` | no | Name of the chat to deliver the response to (e.g. `admin`, `family`). Defaults to `admin`. Use `"*"` to broadcast the prompt to every authorized chat. Match the `chat` attribute from the incoming `<event>` when scheduling from a conversation. |
 | `model` | no | Override the model. Use `haiku` for cheap checks, `opus` for complex reasoning. Omit for default. |
 
 Each job must have exactly one of `cron` or `fireAt` (not both).
