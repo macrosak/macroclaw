@@ -4,12 +4,14 @@
       "name": "memory-capture",
       "cron": "0 */4 * * *",
       "model": "haiku",
+      "chat": "*",
       "prompt": "Append today's noteworthy events to memory/YYYY-MM-DD.md (create the file and directory if needed). Add a ## HH:MM heading with bullet points underneath. Capture: decisions made, facts learned, user preferences expressed, tasks completed or started, problems solved. Be factual and concise — one line per item. If the file already exists, APPEND only — never overwrite. If nothing meaningful happened since the last entry, respond silently."
     },
     {
       "name": "memory-consolidate",
       "cron": "0 3 * * *",
       "model": "opus",
+      "chat": "admin",
       "prompt": "Read daily logs in memory/ from the past 3 days. Distill durable knowledge into MEMORY.md: confirmed facts, recurring patterns, stable preferences, key decisions, and important context. Remove entries from MEMORY.md that are outdated or contradicted by recent logs. Keep MEMORY.md concise and organized by topic (not chronologically). Do not duplicate entries. If daily logs contain new personal facts about the user (preferences, routines, family, work, interests), update USER.md accordingly. Respond silently."
     }
   ]
