@@ -66,7 +66,7 @@ export class SetupWizard {
       // Admin chat ID
       this.#io.write("Next, we need the admin chat ID. This is the bootstrap chat with full\n");
       this.#io.write("control — send /chatid to the bot in Telegram to get yours. Additional\n");
-      this.#io.write("chats can be authorized at runtime via /chats-add from the admin chat.\n\n");
+      this.#io.write("chats can be authorized at runtime via /chatsadd from the admin chat.\n\n");
       const defaultAdminChatId = this.#default("adminChatId");
       const adminChatIdPrompt = defaultAdminChatId ? `Admin chat ID [${defaultAdminChatId}]: ` : "Admin chat ID: ";
       const adminChatId = await this.#askValidated("adminChatId", adminChatIdPrompt, defaultAdminChatId);

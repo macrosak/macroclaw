@@ -918,6 +918,18 @@ describe("App", () => {
         expect(calls[calls.length - 1][1]).toContain("Error:");
       });
 
+      it("rejects chatId that matches the admin chat", async () => {
+        const app = makeApp();
+        const bot = app.bot as any;
+        const handler = bot.commandHandlers.get("chatsadd")!;
+
+        handler({ chat: { id: 12345 }, match: "12345 family" });
+        await new Promise((r) => setTimeout(r, 50));
+
+        const calls = (bot.api.sendMessage as any).mock.calls;
+        expect(calls[calls.length - 1][1]).toContain("already the admin chat");
+      });
+
       it("is ignored for non-admin chats", async () => {
         const app = makeApp();
         const bot = app.bot as any;
