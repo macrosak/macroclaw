@@ -212,6 +212,10 @@ export class App {
         return;
       }
       const [newChatId, name] = args;
+      if (newChatId === this.#config.adminChatId) {
+        sendResponse(this.#bot, chatIdStr, "Error: chatId is already the admin chat");
+        return;
+      }
       try {
         const chat = this.#authorizedChats.add(newChatId, name);
         this.#createOrchestrator(chat.name, chat.chatId);
