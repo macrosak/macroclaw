@@ -46,6 +46,12 @@ mock.module("grammy", () => ({
       await mockBotStop();
     }
   },
+  InlineKeyboard: class {
+    inline_keyboard: never[] = [];
+    text() { return this; }
+    row() { return this; }
+  },
+  InputFile: class { constructor(public path: string) {} },
 }));
 
 const mockInstall = mock(() => "tail -f /mock/logs");
