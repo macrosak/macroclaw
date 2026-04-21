@@ -17,9 +17,16 @@ Use raw <b>, <i>, <code>, <pre> tags. Escape &, <, > in text content as &amp;, &
 Architecture: message bridge connecting chat interface and scheduled tasks. \
 Persistent session — conversation history carries across messages. Workspace persists across sessions.
 
+Multi-chat: the bridge serves multiple Telegram chats (e.g. "admin", "family", "work"). Each chat has its own \
+isolated conversation thread with you. The chat attribute on every <event> identifies which chat the event \
+originates from. Tailor your response to that chat — different people/contexts may expect different tone, \
+access, and information. When responding to a scheduled task with chat="*", the same prompt is being \
+broadcast to every authorized chat.
+
 Event format: every incoming message is wrapped in an <event> XML block. Attributes:
 - time — local time when the event was created (ISO 8601, minute precision).
 - name — short identifier for this event (e.g. "check-logs", "cron-daily").
+- chat — name of the Telegram chat this event belongs to (e.g. "admin", "family").
 - type — what triggered this event. One of:
   - user-message — direct user message. Content in <text>, optional <files>.
   - button-click — user tapped an inline button. Label in <button>.
@@ -83,9 +90,9 @@ interface BuildXmlFields {
 
 export class PromptBuilder {
   readonly #timeZone: string;
-  readonly #chatName: string | undefined;
+  readonly #chatName: string;
 
-  constructor(timeZone: string, chatName?: string) {
+  constructor(timeZone: string, chatName: string) {
     this.#timeZone = timeZone;
     this.#chatName = chatName;
   }
@@ -102,14 +109,10 @@ export class PromptBuilder {
     return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
 
-  #withChat(xml: string): string {
-    return this.#chatName ? `<chat>${PromptBuilder.#escapeXml(this.#chatName)}</chat>\n${xml}` : xml;
-  }
-
-  static #buildXml(name: string, type: string, session: string, time: string, fields: BuildXmlFields): string {
+  #buildXml(name: string, type: string, session: string, time: string, fields: BuildXmlFields): string {
     const esc = PromptBuilder.#escapeXml;
     const lines: string[] = [
-      `<event time="${time}" name="${esc(name)}" type="${type}" session="${session}">`,
+      `<event time="${time}" name="${esc(name)}" chat="${esc(this.#chatName)}" type="${type}" session="${session}">`,
     ];
 
     if (fields.backgroundedEvent) {
@@ -180,34 +183,34 @@ export class PromptBuilder {
   }
 
   userMessage(name: string, text: string, opts?: { files?: string[]; backgroundedEvent?: string }): string {
-    return this.#withChat(PromptBuilder.#buildXml(name, "user-message", "main", this.#localTime(), { text, files: opts?.files, backgroundedEvent: opts?.backgroundedEvent }));
+    return this.#buildXml(name, "user-message", "main", this.#localTime(), { text, files: opts?.files, backgroundedEvent: opts?.backgroundedEvent });
   }
 
   buttonClick(name: string, button: string, opts?: { backgroundedEvent?: string }): string {
-    return this.#withChat(PromptBuilder.#buildXml(name, "button-click", "main", this.#localTime(), { button, backgroundedEvent: opts?.backgroundedEvent }));
+    return this.#buildXml(name, "button-click", "main", this.#localTime(), { button, backgroundedEvent: opts?.backgroundedEvent });
   }
 
   scheduleTrigger(name: string, schedule: { name: string; missedBy?: string; scheduledAt?: string }, text: string): string {
-    return this.#withChat(PromptBuilder.#buildXml(name, "schedule-trigger", "background", this.#localTime(), { schedule, text }));
+    return this.#buildXml(name, "schedule-trigger", "background", this.#localTime(), { schedule, text });
   }
 
   backgroundAgentStart(name: string, text: string): string {
-    return this.#withChat(PromptBuilder.#buildXml(name, "background-agent-start", "background", this.#localTime(), { text }));
+    return this.#buildXml(name, "background-agent-start", "background", this.#localTime(), { text });
   }
 
   backgroundAgentResult(name: string, originalEvent: string, result: { action: string; actionReason: string; text?: string; files?: string[] }, opts?: { backgroundedEvent?: string }): string {
-    return this.#withChat(PromptBuilder.#buildXml(name, "background-agent-result", "main", this.#localTime(), { originalEvent, result, backgroundedEvent: opts?.backgroundedEvent }));
+    return this.#buildXml(name, "background-agent-result", "main", this.#localTime(), { originalEvent, result, backgroundedEvent: opts?.backgroundedEvent });
   }
 
   backgroundAgentProgress(name: string, originalEvent: string, progress: string, instructions: string, opts?: { backgroundedEvent?: string }): string {
-    return this.#withChat(PromptBuilder.#buildXml(name, "background-agent-progress", "main", this.#localTime(), { originalEvent, progress, instructions, backgroundedEvent: opts?.backgroundedEvent }));
+    return this.#buildXml(name, "background-agent-progress", "main", this.#localTime(), { originalEvent, progress, instructions, backgroundedEvent: opts?.backgroundedEvent });
   }
 
   peek(name: string, targetEvent: string, instructions: string): string {
-    return this.#withChat(PromptBuilder.#buildXml(name, "peek", "background", this.#localTime(), { targetEvent, instructions }));
+    return this.#buildXml(name, "peek", "background", this.#localTime(), { targetEvent, instructions });
   }
 
   healthCheck(name: string, targetEvent: string, instructions: string): string {
-    return this.#withChat(PromptBuilder.#buildXml(name, "health-check", "background", this.#localTime(), { targetEvent, instructions }));
+    return this.#buildXml(name, "health-check", "background", this.#localTime(), { targetEvent, instructions });
   }
 }

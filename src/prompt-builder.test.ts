@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { PromptBuilder } from "./prompt-builder";
 
-const p = new PromptBuilder("UTC");
+const p = new PromptBuilder("UTC", "admin");
 
 describe("systemPrompt", () => {
   it("contains key sections", () => {
@@ -52,17 +52,22 @@ describe("systemPrompt", () => {
   });
 
   it("includes time zone but not a fixed date", () => {
-    const prague = new PromptBuilder("Europe/Prague");
+    const prague = new PromptBuilder("Europe/Prague", "admin");
     expect(prague.systemPrompt).not.toContain("Current date:");
     expect(prague.systemPrompt).toContain("Timezone: Europe/Prague");
     expect(prague.systemPrompt).toContain("TZ env var is set");
+  });
+
+  it("documents the chat attribute on events", () => {
+    expect(p.systemPrompt).toContain("Multi-chat");
+    expect(p.systemPrompt).toContain("chat — name of the Telegram chat");
   });
 });
 
 describe("userMessage", () => {
   it("builds user message event with time attribute", () => {
     const result = p.userMessage("check-logs", "hello");
-    expect(result).toMatch(/^<event time="\d{4}-\d{2}-\d{2}T\d{2}:\d{2}" name="check-logs" type="user-message" session="main">/);
+    expect(result).toMatch(/^<event time="\d{4}-\d{2}-\d{2}T\d{2}:\d{2}" name="check-logs" chat="admin" type="user-message" session="main">/);
     expect(result).toContain("<text>hello</text>");
     expect(result).toEndWith("</event>");
   });
@@ -242,33 +247,22 @@ describe("healthCheck", () => {
   });
 });
 
-describe("chat tag injection", () => {
-  it("omits chat tag when chatName is not provided", () => {
-    const result = p.userMessage("test", "hello");
-    expect(result).not.toContain("<chat>");
-    expect(result).toMatch(/^<event /);
-  });
-
-  it("prepends chat tag when chatName is provided", () => {
+describe("chat attribute", () => {
+  it("includes chat attribute on every event type", () => {
     const pb = new PromptBuilder("UTC", "family");
-    const result = pb.userMessage("test", "hello");
-    expect(result).toMatch(/^<chat>family<\/chat>\n<event /);
+    expect(pb.userMessage("t", "hello")).toContain('chat="family"');
+    expect(pb.buttonClick("t", "Yes")).toContain('chat="family"');
+    expect(pb.scheduleTrigger("t", { name: "daily" }, "go")).toContain('chat="family"');
+    expect(pb.backgroundAgentStart("t", "task")).toContain('chat="family"');
+    expect(pb.backgroundAgentResult("t", "orig", { action: "send", actionReason: "done" })).toContain('chat="family"');
+    expect(pb.backgroundAgentProgress("t", "orig", "50%", "keep going")).toContain('chat="family"');
+    expect(pb.peek("t", "orig", "status?")).toContain('chat="family"');
+    expect(pb.healthCheck("t", "orig", "status?")).toContain('chat="family"');
   });
 
   it("escapes XML in chat name", () => {
-    const pb = new PromptBuilder("UTC", "a<b>");
+    const pb = new PromptBuilder("UTC", 'a<b>"');
     const result = pb.userMessage("test", "hello");
-    expect(result).toContain("<chat>a&lt;b&gt;</chat>");
-  });
-
-  it("injects chat tag in all prompt methods", () => {
-    const pb = new PromptBuilder("UTC", "admin");
-    expect(pb.buttonClick("t", "Yes")).toContain("<chat>admin</chat>");
-    expect(pb.scheduleTrigger("t", { name: "daily" }, "go")).toContain("<chat>admin</chat>");
-    expect(pb.backgroundAgentStart("t", "task")).toContain("<chat>admin</chat>");
-    expect(pb.backgroundAgentResult("t", "orig", { action: "send", actionReason: "done" })).toContain("<chat>admin</chat>");
-    expect(pb.backgroundAgentProgress("t", "orig", "50%", "keep going")).toContain("<chat>admin</chat>");
-    expect(pb.peek("t", "orig", "status?")).toContain("<chat>admin</chat>");
-    expect(pb.healthCheck("t", "orig", "status?")).toContain("<chat>admin</chat>");
+    expect(result).toContain('chat="a&lt;b&gt;&quot;"');
   });
 });
