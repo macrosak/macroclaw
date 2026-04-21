@@ -8,8 +8,10 @@ A lightweight bridge that turns a Telegram chat into a personal AI assistant —
 
 Macroclaw runs with `dangerouslySkipPermissions` enabled. This is intentional — the bot
 is designed to run in an isolated environment (container or VM) where the workspace is
-the entire world. The single authorized chat ID ensures only one user can interact with
-the bot. See [Docker](#docker) for the recommended containerized setup.
+the entire world. Access is gated by an allowlist of authorized chat IDs: an **admin
+chat** configured at setup, plus any additional chats the admin authorizes at runtime
+via `/chatsadd`. Every other chat is silently ignored. See [Docker](#docker) for the
+recommended containerized setup.
 
 ## Requirements
 
@@ -37,16 +39,18 @@ On subsequent runs, settings are pre-filled from the file.
 
 Settings are stored in `~/.macroclaw/settings.json` and validated on startup.
 
-| Setting        | Env var override       | Default                    | Required |
-|----------------|------------------------|----------------------------|----------|
-| `botToken`     | `TELEGRAM_BOT_TOKEN`   | —                          | Yes      |
-| `chatId`       | `AUTHORIZED_CHAT_ID`   | —                          | Yes      |
-| `model`        | `MODEL`                | `sonnet`                   | No       |
-| `workspace`    | `WORKSPACE`            | `~/.macroclaw-workspace`   | No       |
-| `timeZone`     | `TIMEZONE`             | `UTC`                      | No       |
-| `openaiApiKey` | `OPENAI_API_KEY`       | —                          | No       |
-| `logLevel`     | `LOG_LEVEL`            | `info`                     | No       |
-| `pinoramaUrl`  | `PINORAMA_URL`         | —                          | No       |
+| Setting         | Env var override       | Default                    | Required |
+|-----------------|------------------------|----------------------------|----------|
+| `botToken`      | `TELEGRAM_BOT_TOKEN`   | —                          | Yes      |
+| `adminChatId`   | `ADMIN_CHAT_ID`        | —                          | Yes      |
+| `model`         | `MODEL`                | `sonnet`                   | No       |
+| `workspace`     | `WORKSPACE`            | `~/.macroclaw-workspace`   | No       |
+| `timeZone`      | `TIMEZONE`             | `UTC`                      | No       |
+| `openaiApiKey`  | `OPENAI_API_KEY`       | —                          | No       |
+| `logLevel`      | `LOG_LEVEL`            | `info`                     | No       |
+| `pinoramaUrl`   | `PINORAMA_URL`         | —                          | No       |
+
+`AUTHORIZED_CHAT_ID` is still accepted as a legacy alias for `ADMIN_CHAT_ID`.
 
 **`timeZone`** sets the agent's local time zone (IANA format, e.g. `Europe/Prague`, `America/New_York`). Used for the agent's clock display and scheduled event timing.
 
@@ -54,7 +58,36 @@ Settings are stored in `~/.macroclaw/settings.json` and validated on startup.
 
 Env vars take precedence over settings file values. On startup, a masked settings summary is printed showing which values were overridden by env vars.
 
-Session state (Claude session IDs) is stored separately in `~/.macroclaw/sessions.json`.
+Session state (Claude session IDs) is stored separately in `~/.macroclaw/sessions.json`, keyed by chat name. Runtime-authorized chats are persisted in `~/.macroclaw/authorized-chats.json`.
+
+### Multi-chat
+
+One admin chat is configured at setup and is always authorized. To authorize additional chats at runtime, send these commands from the admin chat:
+
+| Command | Description |
+|---------|-------------|
+| `/chats` | List authorized chats |
+| `/chatsadd <chatId> <name>` | Authorize a new chat. `name` is a lowercase-kebab-case label (e.g. `family`, `work`) used in cron routing and session storage. |
+| `/chatsremove <name>` | Revoke authorization and clear the chat's session |
+| `/chatsremove` (no arg) | Admin: show a button picker. Non-admin authorized chats: self-removal. |
+
+Each authorized chat has its own independent Claude session — memory, context, and tone stay isolated per chat. The agent knows which chat it's responding to via a `chat="<name>"` attribute on every event.
+
+### Group chats and Telegram Privacy Mode
+
+By default, Telegram puts bots in **Privacy Mode** when they're added to groups, which means the bot only receives:
+
+- Messages that start with `/` (commands)
+- Messages that @mention the bot
+- Replies to the bot's own messages
+
+Plain text in the group is filtered out by Telegram before it reaches the bot, so the bot appears silent. To let the bot see every message in a group:
+
+1. Message [@BotFather](https://t.me/BotFather)
+2. `/mybots` → select your bot → **Bot Settings** → **Group Privacy** → **Turn off**
+3. Kick the bot from the group and re-add it — the privacy change only applies to fresh group memberships
+
+Private (1:1) chats are unaffected.
 
 ## Commands
 
