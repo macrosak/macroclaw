@@ -51,6 +51,20 @@ mock.module("grammy", () => ({
       opts.onStart({ username: "test_bot", id: 123 });
     }
   },
+  InlineKeyboard: class MockInlineKeyboard {
+    inline_keyboard: Array<Array<{ text: string; callback_data: string }>> = [[]];
+    text(label: string, data: string) {
+      this.inline_keyboard[this.inline_keyboard.length - 1].push({ text: label, callback_data: data });
+      return this;
+    }
+    row() {
+      this.inline_keyboard.push([]);
+      return this;
+    }
+  },
+  InputFile: class MockInputFile {
+    constructor(public path: string) {}
+  },
 }));
 
 const tmpSettingsDir = "/tmp/macroclaw-test-settings";
