@@ -22,7 +22,7 @@ const fullSchema = z.object({
   backgroundAgents: z.array(z.object({
     name: z.string(),
     prompt: z.string(),
-    model: z.enum(["haiku", "sonnet", "opus"]).optional(),
+    model: z.enum(["haiku", "sonnet", "opus", "fable"]).optional(),
   })).optional(),
 });
 
