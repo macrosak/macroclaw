@@ -9,7 +9,7 @@ const log = createLogger("settings");
 export const settingsSchema = z.object({
   botToken: z.string().trim(),
   adminChatId: z.string().trim().regex(/^-?\d+$/, "Must be a numeric Telegram chat ID"),
-  model: z.string().trim().pipe(z.enum(["haiku", "sonnet", "opus"])).default("sonnet"),
+  model: z.string().trim().pipe(z.enum(["haiku", "sonnet", "opus", "fable"])).default("sonnet"),
   workspace: z.string().trim().default("~/.macroclaw-workspace"),
   timeZone: z.string().trim().refine((tz) => IANAZone.isValidZone(tz), "Must be a valid IANA timezone").default("UTC"),
   openaiApiKey: z.string().trim().optional(),

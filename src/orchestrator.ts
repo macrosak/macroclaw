@@ -29,7 +29,7 @@ const HEALTH_CHECK_TIMEOUT_MS = 120 * 1000;
 const backgroundAgentSchema = z.object({
   name: z.string().describe("Label for the background agent"),
   prompt: z.string().describe("The prompt/task for the background agent"),
-  model: z.enum(["haiku", "sonnet", "opus"]).describe("Model to use for the background agent").optional(),
+  model: z.enum(["haiku", "sonnet", "opus", "fable"]).describe("Model to use for the background agent").optional(),
 });
 
 const agentOutputSchema = z.object({
